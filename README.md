@@ -1,3 +1,23 @@
+
+### Sowbot roadmap
+
+| Maturity | Feature | Description |
+| :--- | :--- | :--- |
+| **0.9** | **Containerised Deployment** | Full ROS 2 Jazzy/Humble stack managed via Docker and the `manage.py` orchestration script. |
+| **0.8** | **[KumarRobotics Ublox Driver](https://github.com/KumarRobotics/ublox)** | Modified driver providing high-bandwidth UBX binary data; now supports dynamic switching with Septentrio via `fixusb.py`. |
+| **0.8** | **Stable Device Addressing** | Enhanced `fixusb.py` utility with architecture detection (Jetson vs Generic) and kernel-level sanitization (`low_latency`). |
+| **0.6** | **[EasyNavigation Stack](https://github.com/EasyNavigation/EasyNavigation)** | **(New Plan)** Integration of the EasyNavigation framework for streamlined path planning and localized autonomous maneuvering. |
+| **0.6** | **[Sentor Safety & Health Monitoring](https://github.com/LCAS/sentor)** | Integrated hardware-software heartbeat and topic-based diagnostics to trigger automated recovery or emergency motor cut-off. |
+| **0.5** | **Dynamic Hardware Abstraction** | Lizard firmware integration for real-time ESP32 configuration via the basekit driver; architecture-aware fallback to `ttyTHS0`. |
+| **0.5** | **Real-time Telemetry & Teleop Dashboard** | Web-based cockpit for joystick control and GPS health monitoring; symlink-fixed for `devkit_ui` discovery. |
+| **0.0** | **[Visual Crop-Row Navigation](https://github.com/Agroecology-Lab/visual-multi-crop-row-navigation/tree/ROS2)** | Vision-based guidance system for following crop rows; currently in porting status for ROS 2. |
+| **0.0** | **[Vizanti Web Visualisation](https://github.com/MoffKalast/vizanti/tree/ros2)** | Planned integration of a web-based mission planner and 3D visualiser for remote operations. |
+| **0.0** | **[Quick hitch for AgBots](https://manaculture.ca/en/a-frame-quick-hitch/)** | Develop & Test triangular quick (qwicc?) hitch system for AgBots. |
+| **0.0** | **[Delta robot module for precision sowing or weeding](https://github.com/Agroecology-Lab/Open-Weeding-Delta/tree/master/hardware#readme)** | Develop & Test Delta module. |
+| **0.0** | **[L&ASER weeding module](https://github.com/Laudando-Associates-LLC/LASER)** | Integrate and validate Laudando laser weeding on Sowbot. |
+
+
+
 # Feldfreund DevKit ROS
 
 Feldfreund DevKit ROS is a comprehensive ROS2 package that handles the communication and configuration of various Feldfreund components:
