@@ -9,18 +9,20 @@ ENV PYTHONUNBUFFERED=1
 ENV RMW_IMPLEMENTATION=rmw_cyclonedds_cpp
 SHELL ["/bin/bash", "-c"]
 
-### SYSTEM UTILS (Crucial for later steps) ###
+### SYSTEM UTILS ###
 RUN apt-get update && apt-get install -y --no-install-recommends \
     wget \
     unzip \
     git \
     curl \
+    python3-pip \
     && rm -rf /var/lib/apt/lists/*
 
 ### SYSTEM & ROS DEPENDENCIES ###
+# We add 'apt-get update' inside the loop to recover from mirror sync mismatches
 RUN echo "Acquire::http::Pipeline-Depth 0;" > /etc/apt/apt.conf.d/99nopipeline && \
-    apt-get update && \
     for i in {1..5}; do \
+    apt-get update && \
     apt-get install -y --no-install-recommends \
     ros-jazzy-domain-bridge \
     ros-jazzy-rmw-cyclonedds-cpp \
@@ -36,10 +38,14 @@ RUN echo "Acquire::http::Pipeline-Depth 0;" > /etc/apt/apt.conf.d/99nopipeline &
     ros-jazzy-image-tools \
     ros-jazzy-compressed-image-transport \
     ros-jazzy-axis-camera \
+    ros-jazzy-ublox-dgnss \
+    ros-jazzy-ublox-nav-msgs \
     python3-pip \
     python3-serial \
     python3-requests \
     python3-yaml \
+    python3-flask \
+    python3-flask-socketio \
     nano \
     iputils-ping \
     && break || (echo "Apt failed, retrying in 10s..." && sleep 10); \
@@ -57,7 +63,7 @@ RUN mkdir -p /root/.lizard && \
     unzip -qo lizard_firmware_and_devtools_${LIZARD_VERSION}_esp32.zip -d /root/.lizard && \
     chmod +x /root/.lizard/espresso.py && \
     cd /root/.lizard && \
-    pip install --break-system-packages --ignore-installed -r requirements.txt && \
+    python3 -m pip install --break-system-packages --ignore-installed -r requirements.txt && \
     rm /root/lizard_firmware_and_devtools_${LIZARD_VERSION}_esp32.zip
 
 ### PYTHON PIP DEPENDENCIES ###
@@ -69,17 +75,23 @@ RUN --mount=type=cache,target=/root/.cache/pip \
     done
 
 # ==========================================
-# STAGE 2: builder (Compiler & Source)
+# STAGE 2: builder (Consolidated)
 # ==========================================
 FROM env-base AS builder
 # Install build-only tools
-RUN apt-get update && apt-get install -y python3-colcon-common-extensions && rm -rf /var/lib/apt/lists/*
+RUN apt-get update && apt-get install -y python3-colcon-common-extensions git && rm -rf /var/lib/apt/lists/*
 
 WORKDIR /workspace
+
+# Clone external tools first to leverage caching
+RUN mkdir -p src && git clone https://github.com/nilseuropa/ros2graph_explorer.git src/ros2graph_explorer
+
+# Copy local source code
 COPY ./devkit_driver /workspace/src/devkit_driver
 COPY ./devkit_launch /workspace/src/devkit_launch
 COPY ./devkit_ui /workspace/src/devkit_ui
 
+# Build all packages
 RUN . /opt/ros/jazzy/setup.sh && \
     colcon build --cmake-args -DCMAKE_BUILD_TYPE=Release
 
@@ -91,7 +103,7 @@ WORKDIR /workspace
 
 # Copy build artifacts from stage 2
 COPY --from=builder /workspace/install /workspace/install
-# Optional: Copy src if you need Python node source access at runtime
+# Copy src so Python nodes (like Graph Explorer) can find their source
 COPY --from=builder /workspace/src /workspace/src
 
 # Apply bashrc customizations
