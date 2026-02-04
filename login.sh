@@ -1,21 +1,28 @@
 #!/bin/bash
 
-# Updated to include 'open_ag_runtime'
-CONTAINER_NAME=$(docker ps --format '{{.Names}}' | grep -E '^open_ag_runtime$|^open_agbot$|^open_ag_debug$' | head -n 1)
+# Search for any active container matching our naming conventions
+CONTAINER_NAME=$(docker ps --format '{{.Names}}' | grep -E '^feldfreund_runtime$|^feldfreund_dev$|^open_ag_runtime$|^open_agbot$' | head -n 1)
 
 if [ -z "$CONTAINER_NAME" ]; then
     echo "------------------------------------------------------"
-    echo "❌ ERROR: No running AgBot container found."
-    echo "Container name 'open_ag_runtime' not found in 'docker ps'."
+    echo "Error: No running Feldfreund container found."
+    echo "Ensure you have started the stack using ./manage.py"
     echo "------------------------------------------------------"
     exit 1
 fi
 
 echo "------------------------------------------------------"
-echo "✅ Found AgBot Container: $CONTAINER_NAME"
-echo "🚀 Entering Bash environment..."
+echo "Found Container: $CONTAINER_NAME"
+echo "Entering shell environment..."
 echo "------------------------------------------------------"
 
-# Enter the container. 
-# Note: Changed /open_agbot_ws to /workspace to match your manage.py volumes
-docker exec -it $CONTAINER_NAME bash -c "source /opt/ros/humble/setup.bash && [ -f install/setup.bash ] && source install/setup.bash; export PYTHONPATH=\$PYTHONPATH:/workspace/src/basekit_ui && bash"
+# Enter the container and source the environment
+# Handles both Humble and Jazzy paths automatically
+docker exec -it "$CONTAINER_NAME" bash -c "
+    source /opt/ros/*/setup.bash 2>/dev/null
+    if [ -f /workspace/install/setup.bash ]; then
+        source /workspace/install/setup.bash
+    fi
+    export PYTHONPATH=\$PYTHONPATH:/workspace/src/devkit_ui
+    bash
+"
