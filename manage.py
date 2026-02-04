@@ -24,8 +24,12 @@ def prepare_workspace():
     for pkg in packages:
         pkg_path = os.path.join(workspace_root, pkg)
         link_path = os.path.join(src_dir, pkg)
+        
         if os.path.exists(pkg_path):
-            if not os.path.islink(link_path):
+            # Check if link is missing OR broken
+            if not os.path.islink(link_path) or not os.path.exists(link_path):
+                if os.path.islink(link_path):
+                    os.remove(link_path)  # Remove broken link
                 print(f"Linking {pkg} -> src/{pkg}")
                 os.symlink(os.path.join("..", pkg), link_path)
         else:
@@ -101,7 +105,7 @@ def run_runtime(extra_args):
         "--env-file", ".env" if os.path.exists('.env') else "/dev/null",
         "-v", "/dev:/dev", "-v", f"{os.getcwd()}:/workspace", "-w", "/workspace",
         IMAGE_NAME, "-c",
-        f"{setup_cmd} && ros2 launch devkit_launch main.launch.py {sim_flag} "
+	f"{setup_cmd} && ros2 launch devkit_launch devkit.launch.py {sim_flag} "
         f"gps_port:={gps_p} mcu_port:={mcu_p} {' '.join(extra_args)}"
     ]
     subprocess.run(cmd)
