@@ -3,96 +3,92 @@ import os
 import subprocess
 import platform
 import serial.tools.list_ports
+from pathlib import Path
 
 # Official Hardware IDs
 UBLOX_VID = 0x1546  # u-blox AG (F9P)
 ESP32_VID = 0x303a  # Espressif Systems (ESP32-S3 MCU)
 SEP_VID   = 0x1513  # Septentrio (Alternative GPS)
+AXIS_IP   = '192.168.42.3'
 
-def sanitize_hardware(port):
-    """The 'Sane' Reset: Kills zombies and fixes ASIO latency at the kernel level."""
-    if not port or port == "virtual":
+def check_host_tools():
+    """Verify required host utilities are installed."""
+    tools = {"setserial": "setserial", "fuser": "psmisc"}
+    missing = [p for t, p in tools.items() if subprocess.call(['which', t], stdout=subprocess.DEVNULL) != 0]
+    if missing:
+        print(f'Warning: Missing host tools. Run: sudo apt update && sudo apt install -y {" ".join(missing)}')
+    return len(missing) == 0
+
+def sanitize_hardware(port, baud):
+    """The 'Sane' Reset: Kills zombies and fixes ASIO latency."""
+    if not port or port == 'virtual' or not Path(port).exists():
         return
-    
-    print(f"🛠️  Sanitizing {port}...")
+    print(f'Sanitizing {port} at {baud}...')
     try:
-        # 1. Kill zombie processes (fuser) - helps if a previous docker container hung
-        subprocess.run(["sudo", "fuser", "-k", port], stderr=subprocess.DEVNULL)
-        
-        # 2. Set low latency mode (Crucial for high-frequency ROS 2 driver stability)
-        subprocess.run(["sudo", "setserial", port, "low_latency"], stderr=subprocess.DEVNULL)
-        
-        # 3. Force baud and raw mode (460800 is standard for F9P/MCU high-speed data)
-        subprocess.run(["sudo", "stty", "-F", port, "460800", "raw", "-echo"], stderr=subprocess.DEVNULL)
-        
-        # 4. Ensure permissions
-        subprocess.run(["sudo", "chmod", "666", port], stderr=subprocess.DEVNULL)
+        subprocess.run(['sudo', 'fuser', '-k', port], stderr=subprocess.DEVNULL)
+        subprocess.run(['sudo', 'setserial', port, 'low_latency'], stderr=subprocess.DEVNULL)
+        subprocess.run(['sudo', 'stty', '-F', port, baud, 'raw', '-echo'], stderr=subprocess.DEVNULL)
+        subprocess.run(['sudo', 'chmod', '666', port], stderr=subprocess.DEVNULL)
     except Exception as e:
-        print(f"⚠️  Warning during sanitization of {port}: {e}")
+        print(f'Warning during sanitization of {port}: {e}')
 
 def scan_and_export():
-    print("🔎 Scanning for Open Agbot Hardware...")
+    print('Scanning for Open Agbot Hardware...')
+    check_host_tools()
     
-    # Identify platform
     arch = platform.machine()
     is_jetson = (arch == 'aarch64')
-    
     ports = serial.tools.list_ports.comports()
     
-    gps_device = None
-    gps_type = "none"
+    gnss_found = []
     mcu_device = None
 
-    # Precise scanning based on Vendor ID
-    for port in ports:
-        if port.vid == UBLOX_VID:
-            gps_device = port.device
-            gps_type = "ublox"
-            print(f"✅ Found u-blox GPS: {gps_device}")
-        elif port.vid == SEP_VID:
-            gps_device = port.device
-            gps_type = "septentrio"
-            print(f"✅ Found Septentrio GPS: {gps_device}")
-        elif port.vid == ESP32_VID:
-            mcu_device = port.device
-            print(f"✅ Found ESP32 MCU:  {mcu_device}")
+    for p in ports:
+        if p.vid in [UBLOX_VID, SEP_VID]:
+            g_type = 'ublox' if p.vid == UBLOX_VID else 'septentrio'
+            gnss_found.append((p.device, g_type))
+            print(f'Found {g_type.upper()} GPS: {p.device}')
+        elif p.vid == ESP32_VID:
+            mcu_device = p.device
+            print(f'Found ESP32 MCU: {mcu_device}')
 
-    # SBC Fallback: If no USB MCU found and we are on Jetson, use the header
     if not mcu_device and is_jetson:
-        mcu_device = "/dev/ttyTHS0"
-        print(f"ℹ️  No USB MCU found. Falling back to Jetson Header: {mcu_device}")
+        mcu_device = '/dev/ttyTHS0'
+        print(f'Using Jetson Header MCU: {mcu_device}')
 
-    # ACTIVE SANITIZATION
-    if gps_device:
-        sanitize_hardware(gps_device)
-    if mcu_device and mcu_device != "/dev/ttyTHS0":
-        sanitize_hardware(mcu_device)
+    # Map roles for manage.py
+    r_port = gnss_found[0][0] if len(gnss_found) > 0 else 'virtual'
+    r_type = gnss_found[0][1] if len(gnss_found) > 0 else 'none'
+    r1_port = gnss_found[1][0] if len(gnss_found) > 1 else 'virtual'
+    r1_type = gnss_found[1][1] if len(gnss_found) > 1 else 'none'
+    mcu_p = mcu_device if mcu_device else 'virtual'
 
-    # Final logic for .env
-    env_gps_port = gps_device if gps_device else "virtual"
-    env_mcu_port = mcu_device if mcu_device else "virtual"
+    # Active Sanitization: GNSS High Speed vs MCU Standard Speed
+    sanitize_hardware(r_port, '460800')
+    sanitize_hardware(r1_port, '460800')
+    sanitize_hardware(mcu_p, '115200')
+
+    # Status Detection
+    usb_cam = 'true' if Path('/dev/video0').exists() else 'false'
+    axis_cam = 'true' if subprocess.run(['ping', '-c', '1', '-W', '1', AXIS_IP], 
+                                     stdout=subprocess.DEVNULL).returncode == 0 else 'false'
+
+    # Write to .env aligned with manage.py
+    with open('.env', 'w') as f:
+        f.write('# Auto-generated by fixusb.py\n')
+        f.write(f'GPS_PORT_ROVER={r_port}\n')
+        f.write(f'GPS_TYPE_ROVER={r_type}\n')
+        f.write(f'GPS_PORT_ROVER1={r1_port}\n')
+        f.write(f'GPS_TYPE_ROVER1={r1_type}\n')
+        f.write(f'MCU_PORT={mcu_p}\n')
+        f.write(f'USB_CAM_ENABLED={usb_cam}\n')
+        f.write(f'AXIS_CAM_ENABLED={axis_cam}\n')
+        f.write(f'USER_ID={os.getuid()}\n')
+        f.write(f'GROUP_ID={os.getgid()}\n')
+        f.write(f'IS_JETSON={"true" if is_jetson else "false"}\n')
     
-    # Determine Status Strings
-    gps_status = f"✅ {gps_type.upper()} ({env_gps_port})" if gps_device else "👻 GHOST"
-    mcu_status = f"✅ FOUND ({env_mcu_port})" if mcu_device else "👻 GHOST"
-    
-    print(f"MCU Status: {mcu_status}")
-    print(f"GPS Status: {gps_status}")
+    print(f'\nConfiguration Exported to .env')
+    print(f'MCU: {mcu_p} | Rover: {r_port} | Rover1: {r1_port}')
 
-    # Write to .env
-    env_path = os.path.join(os.getcwd(), ".env")
-    try:
-        with open(env_path, "w") as f:
-            f.write("# Auto-generated by fixusb.py\n")
-            f.write(f"GPS_PORT={env_gps_port}\n")
-            f.write(f"GPS_TYPE={gps_type}\n")
-            f.write(f"MCU_PORT={env_mcu_port}\n")
-            f.write(f"USER_ID={os.getuid()}\n")
-            f.write(f"GROUP_ID={os.getgid()}\n")
-            f.write(f"IS_JETSON={'true' if is_jetson else 'false'}\n")
-        print(f"✨ .env file updated successfully at {env_path}")
-    except Exception as e:
-        print(f"❌ Failed to write .env file: {e}")
-
-if __name__ == "__main__":
+if __name__ == '__main__':
     scan_and_export()
