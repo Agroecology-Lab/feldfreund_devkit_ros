@@ -9,8 +9,15 @@ ENV PYTHONUNBUFFERED=1
 ENV RMW_IMPLEMENTATION=rmw_cyclonedds_cpp
 SHELL ["/bin/bash", "-c"]
 
+### SYSTEM UTILS (Crucial for later steps) ###
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    wget \
+    unzip \
+    git \
+    curl \
+    && rm -rf /var/lib/apt/lists/*
+
 ### SYSTEM & ROS DEPENDENCIES ###
-# We use the specific package list from your "Truth" version
 RUN echo "Acquire::http::Pipeline-Depth 0;" > /etc/apt/apt.conf.d/99nopipeline && \
     apt-get update && \
     for i in {1..5}; do \
@@ -33,7 +40,8 @@ RUN echo "Acquire::http::Pipeline-Depth 0;" > /etc/apt/apt.conf.d/99nopipeline &
     python3-serial \
     python3-requests \
     python3-yaml \
-    git nano wget unzip iputils-ping curl \
+    nano \
+    iputils-ping \
     && break || (echo "Apt failed, retrying in 10s..." && sleep 10); \
     done && \
     rm -rf /var/lib/apt/lists/*
