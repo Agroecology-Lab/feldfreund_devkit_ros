@@ -1,154 +1,114 @@
 #!/usr/bin/env python3
-import subprocess
 import os
+import subprocess
 import sys
+from pathlib import Path
 
 # Project configuration
 IMAGE_NAME = 'feldfreund:jazzy'
 CONTAINER_NAME = 'feldfreund_runtime'
-ROS_DISTRO = 'jazzy'
 
-def prepare_workspace():
-    '''Ensures src exists and heals package structure for ROS 2 Jazzy.'''
-    workspace_root = os.getcwd()
-    src_dir = os.path.join(workspace_root, 'src')
-    packages = ['devkit_driver', 'devkit_launch', 'devkit_ui']
-
-    # Alignment of misplaced launch files
-    ui_launch_dir = os.path.join(workspace_root, 'devkit_ui', 'launch')
-    misplaced_ui = os.path.join(workspace_root, 'devkit_launch', 'launch', 'ui.launch.py')
-    correct_ui = os.path.join(ui_launch_dir, 'ui.launch.py')
-    ui_setup_py = os.path.join(workspace_root, 'devkit_ui', 'setup.py')
-
-    if not os.path.exists(ui_launch_dir):
-        print(f'Creating directory: {ui_launch_dir}')
-        os.makedirs(ui_launch_dir, exist_ok=True)
-
-    if os.path.exists(misplaced_ui) and not os.path.exists(correct_ui):
-        print('Moving ui.launch.py to devkit_ui/launch...')
-        os.rename(misplaced_ui, correct_ui)
-
-    # Patching setup.py for proper ROS 2 indexing
-    if os.path.exists(ui_setup_py):
-        with open(ui_setup_py, 'r') as f:
-            content = f.read()
-        
-        old_path = "os.path.join('share', package_name)"
-        new_path = "os.path.join('share', package_name, 'launch')"
-        
-        if old_path in content and new_path not in content:
-            print(f'Patching {ui_setup_py}...')
-            new_content = content.replace(old_path, new_path)
-            with open(ui_setup_py, 'w') as f:
-                f.write(new_content)
-
-    # Symlink management for Docker mount
-    os.makedirs(src_dir, exist_ok=True)
-    for pkg in packages:
-        pkg_path = os.path.join(workspace_root, pkg)
-        link_path = os.path.join(src_dir, pkg)
-        
-        if os.path.islink(link_path):
-            os.remove(link_path)
-        elif os.path.exists(link_path):
-            subprocess.run(['sudo', 'rm', '-rf', link_path], check=True)
-
-        if os.path.exists(pkg_path):
-            print(f'Linking {pkg} -> src/{pkg}')
-            os.symlink(os.path.join('..', pkg), link_path)
-        else:
-            print(f'Warning: {pkg} not found on host!')
+def log(msg: str):
+    print(f'[MNG] {msg}')
 
 def run_build(full=False):
-    '''Builds Docker image and extracts artifacts to the host.'''
-    prepare_workspace()
-    
+    '''Builds the image. full-build cleans only project-specific cruft.'''
     if full:
-        print('Purging build artifacts (build/install/log)...')
-        subprocess.run(['sudo', 'rm', '-rf', 'build/', 'install/', 'log/'], check=False)
-    
+        log("PERFORMING DEEP CLEAN: Purging project images and build cache...")
+        # 1. Kill the specific project container if it exists
+        subprocess.run(['docker', 'rm', '-f', CONTAINER_NAME], capture_output=True)
+        
+        # 2. Remove the project image (breaks the cache link)
+        subprocess.run(['docker', 'rmi', '-f', IMAGE_NAME], capture_output=True)
+        
+        # 3. Targeted Cache Purge (Safe for Portainer)
+        # Reclaims the GBs of BuildKit layers from previous failed attempts
+        subprocess.run(['docker', 'builder', 'prune', '-a', '-f', '--filter', f'label=shared.image={IMAGE_NAME}'], capture_output=False)
+        
+        # 4. Clean dangling images
+        subprocess.run(['docker', 'image', 'prune', '-f'], capture_output=True)
+        
+    log(f"Building {IMAGE_NAME}...")
     build_cmd = ['docker', 'build', '-t', IMAGE_NAME, '-f', 'docker/Dockerfile', '.']
+    
     if full:
-        build_cmd.insert(2, '--no-cache')
+        # Force a totally fresh pull and ignore all cache
+        build_cmd.extend(['--no-cache', '--pull'])
     
     try:
         subprocess.run(build_cmd, check=True)
-        print('Extracting internal build to host...')
-        subprocess.run(['docker', 'rm', '-f', 'temp_extract'], capture_output=True)
-        subprocess.run(['docker', 'create', '--name', 'temp_extract', IMAGE_NAME], check=True)
-        subprocess.run(['docker', 'cp', 'temp_extract:/workspace/install', '.'], check=True)
-        subprocess.run(['docker', 'rm', 'temp_extract'], check=True)
-        
-        user_info = f'{os.getuid()}:{os.getgid()}'
-        subprocess.run(['sudo', 'chown', '-R', user_info, 'install/'], check=True)
-        print('Build and Extraction Complete.')
-        
+        log("Build successful.")
     except subprocess.CalledProcessError:
-        print('Build failed.')
+        log("Build failed.")
         sys.exit(1)
 
 def run_runtime(extra_args):
-    '''Prepares hardware and executes the ROS 2 runtime environment.'''
-    if os.path.exists('fixusb.py'):
+    '''Hardware prep then launch with explicit environment sourcing.'''
+    
+    # 1. Hardware Prep
+    if Path('fixusb.py').exists():
+        log("Running fixusb.py...")
         subprocess.run(['python3', 'fixusb.py'], check=True)
 
+    # 2. Environment/Port Loading
+    env_file = Path('.env')
     ports = {}
-    if os.path.exists('.env'):
-        with open('.env', 'r') as f:
-            for line in f:
-                if '=' in line and not line.startswith('#'):
-                    k, v = line.strip().split('=', 1)
-                    ports[k.strip()] = v.strip()
-    
-    # Port retrieval from environment
+    if env_file.exists():
+        for line in env_file.read_text().splitlines():
+            if '=' in line and not line.startswith('#'):
+                k, v = line.strip().split('=', 1)
+                ports[k.strip()] = v.strip()
+
     r_port  = ports.get('GPS_PORT_ROVER', 'virtual')
-    r1_port = ports.get('GPS_PORT_ROVER1', 'virtual')
     mcu_p   = ports.get('MCU_PORT', 'virtual')
-    r_type  = ports.get('GPS_TYPE_ROVER', 'none')
-    r1_type = ports.get('GPS_TYPE_ROVER1', 'none')
-
     is_virtual = (r_port == 'virtual' and mcu_p == 'virtual')
-    sowbot_enabled = 'true' if any('sowbot:=true' in arg for arg in extra_args) else 'false'
-
-    # Hardware sanitisation
-    if not is_virtual:
-        for p in [r_port, r1_port, mcu_p]:
-            if p and p.startswith('/dev/'):
-                subprocess.run(['sudo', 'chmod', '666', p], check=False)
-        
-        if mcu_p.startswith('/dev/'):
-            stty_cmd = f"stty -F {mcu_p} 115200 && (echo 's' > {mcu_p} &)"
-            os.system(stty_cmd)
-
-    if not os.path.exists('install/setup.bash'):
-        print('Error: install/setup.bash not found. Run ./manage.py build first.')
-        return
-
     sim_flag = 'sim:=true' if is_virtual else 'sim:=false'
-    setup_cmd = f'source /opt/ros/{ROS_DISTRO}/setup.bash && source install/setup.bash'
+
+    # 3. Wake up hardware
+    if not is_virtual and Path(mcu_p).exists():
+        log(f"Waking up Lizard on {mcu_p}...")
+        os.system(f"stty -F {mcu_p} 115200 && (echo 's' > {mcu_p} &)")
+
+    # 4. The Execution Wrapper
+    # Sourcing ensures ROS knows where the packages and libraries live
+    ros_command = (
+        "source /opt/ros/jazzy/setup.bash && "
+        "if [ -f /workspace/install/setup.bash ]; then source /workspace/install/setup.bash; fi && "
+        f"ros2 launch devkit_launch devkit.launch.py {sim_flag} rover_port:={r_port} mcu_port:={mcu_p} " + 
+        " ".join(extra_args)
     
-    # Docker execution with hardware passthrough
-    cmd = [
+    )
+
+    docker_cmd = [
         'docker', 'run', '-it', '--rm', '--name', CONTAINER_NAME,
         '--net=host', '--privileged',
-        '--env-file', '.env' if os.path.exists('.env') else '/dev/null',
-        '-v', '/dev:/dev', '-v', f'{os.getcwd()}:/workspace', '-w', '/workspace',
-        IMAGE_NAME, '/bin/bash', '-c',
-        f'{setup_cmd} && ros2 launch devkit_launch devkit.launch.py '
-        f'{sim_flag} '
-        f'rover_port:={r_port} rover_type:={r_type} '
-        f'rover1_port:={r1_port} rover1_type:={r1_type} '
-        f'mcu_port:={mcu_p} sowbot:={sowbot_enabled} {" ".join(extra_args)}'
+        '--env', 'RMW_IMPLEMENTATION=rmw_cyclonedds_cpp',
+        # Ensure Python can see both Lizard and your built ROS packages
+        '--env', 'PYTHONPATH=/root/.lizard:/workspace/install/lib/python3.12/site-packages',
+        '--env-file', '.env' if env_file.exists() else '/dev/null',
+        '-v', '/dev:/dev',
+        # MOUNT POINT FIX: 
+        # We mount to /workspace/src so it doesn't overlap the /workspace/install folder 
+        # created inside the image during the build.
+        '-v', f'{os.path.abspath("src")}:/workspace/src:ro',
+        IMAGE_NAME, 
+        'bash', '-c', ros_command
     ]
-    subprocess.run(cmd)
+    
+    log("Launching container...")
+    # We do NOT scrub the environment here; we let Docker handle it via --env flags
+    subprocess.run(docker_cmd)
 
 if __name__ == '__main__':
-    build_triggers = ['build', 'full-build']
-    needs_build = not os.path.exists('install/setup.bash') or any(arg in sys.argv for arg in build_triggers)
-    
-    if needs_build:
-        run_build('full-build' in sys.argv)
-    
-    if not any(arg in build_triggers for arg in sys.argv) or 'up' in sys.argv:
-        launch_args = [arg for arg in sys.argv[1:] if arg not in build_triggers and arg != 'up']
-        run_runtime(launch_args)
+    if len(sys.argv) > 1:
+        cmd = sys.argv[1]
+        if cmd == 'build':
+            run_build(full=False)
+        elif cmd == 'full-build':
+            run_build(full=True)
+        elif cmd == 'up':
+            run_runtime(sys.argv[2:])
+        else:
+            run_runtime(sys.argv[1:])
+    else:
+        run_runtime([])
