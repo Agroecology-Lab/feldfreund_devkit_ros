@@ -18,7 +18,8 @@ This `sowbot` branch is under heavy development and may be broken at any given m
 | **0.6** | **Stable Device Addressing** | Enhanced `fixusb.py` utility with architecture detection (Jetson vs Generic) and kernel-level sanitization (`low_latency`). |
 | **0.5** | **Real-time Telemetry & Teleop Dashboard** | Web-based cockpit for joystick control and GPS health monitoring; symlink-fixed for `devkit_ui` discovery. |
 | **0.4** | **[Ublox DGNSS Driver](https://github.com/aussierobots/ublox_dgnss)** | Modified driver providing high-bandwidth UBX binary data; now supports dynamic switching with Septentrio via `fixusb.py`. |
-| **0.1** | **[EasyNavigation Stack](https://github.com/EasyNavigation/EasyNavigation)** | **(New Plan)** Integration of the EasyNavigation framework for streamlined path planning and localized autonomous maneuvering. |
+| **0.3** | **[Topological Navigation](https://github.com/LCAS/topological_navigation)** | Integration of the LCAS topological framework for graph-based semantic waypoint navigation. (Or  **[EasyNavigation](https://github.com/EasyNavigation/EasyNavigation)**)|
+
 | **0.0** | **[Sentor Safety & Health Monitoring](https://github.com/LCAS/sentor)** | Integrated hardware-software heartbeat and topic-based diagnostics to trigger automated recovery or emergency motor cut-off. |
 | **0.0** | **[Visual Crop-Row Navigation](https://github.com/Agroecology-Lab/visual-multi-crop-row-navigation/tree/ROS2)** | Vision-based guidance system for following crop rows; currently in porting status for ROS 2. |
 | **0.0** | **[Vizanti Web Visualisation](https://github.com/MoffKalast/vizanti/tree/ros2)** | Planned integration of a web-based mission planner and 3D visualiser for remote operations. || **0.0** | **[Quick hitch for AgBots](https://manaculture.ca/en/a-frame-quick-hitch/)** | Develop & Test triangular quick (qwicc?) hitch system for AgBots. |
