@@ -30,7 +30,7 @@ This `sowbot` branch is under heavy development and may be broken at any given m
 ### 1. Clone the Repository
 Open a terminal on your host machine and download the workspace:
 ```bash
-git clone -b sowbot [https://github.com/Agroecology-Lab/feldfreund_devkit_ros.git](https://github.com/Agroecology-Lab/feldfreund_devkit_ros.git)
+git clone -b sowbot https://github.com/Agroecology-Lab/feldfreund_devkit_ros.git
 cd feldfreund_devkit_ros
 ```
 
