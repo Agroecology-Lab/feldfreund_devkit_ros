@@ -10,10 +10,10 @@ from feldfreund_devkit.config import config_from_file
 from nicegui import app, ui, ui_run
 from rclpy.executors import ExternalShutdownException
 from rclpy.node import Node
+from ament_index_python.packages import get_package_share_directory
 
 from devkit_driver.modules import (BMSHandler, BumperHandler, EStopHandler, 
-                                 OdomHandler, RobotBrainHandler, TwistHandler)
-
+                                   OdomHandler, RobotBrainHandler, TwistHandler)
 
 class DevkitDriver(Node):
     """Devkit node handler with defensive attribute checks for simulation support."""
@@ -26,7 +26,6 @@ class DevkitDriver(Node):
         assert isinstance(self.system.feldfreund, (FeldfreundHardware, FeldfreundSimulation))
         
         # Defensive initialization: Only load handlers if attributes exist.
-        # This prevents the AttributeError: 'FeldfreundSimulation' object has no attribute 'robot_brain'
         if hasattr(self.system.feldfreund, 'robot_brain'):
             self._robot_brain_handler = RobotBrainHandler(self, self.system.feldfreund.robot_brain)
         else:
@@ -49,26 +48,44 @@ class DevkitDriver(Node):
 
 
 def main() -> None:
-    # NOTE: This function is the ROS entry point in setup.py, but remains empty
-    # to allow NiceGUI to handle the main execution loop and auto-reloading.
+    """ROS entry point for colcon; execution is deferred to NiceGUI startup."""
     pass
 
 
 def on_startup() -> None:
-    # Resolve configuration path dynamically for container vs host environments
-    config_path = Path('/workspace/src/devkit_launch/config/feldfreund.py')
+    """Configures the hardware system and launches the ROS spin thread."""
+    # Priority 1: Standard ROS 2 share directory (post-build)
+    try:
+        pkg_share = get_package_share_directory('devkit_launch')
+        config_path = Path(pkg_share) / 'config' / 'feldfreund.py'
+    except Exception:
+        config_path = Path('/workspace/src/devkit_launch/config/feldfreund.py')
+
+    # Priority 2: Direct workspace source path (for development/hot-reloading)
     if not config_path.exists():
-        # Fallback to local host development path
+        config_path = Path('/workspace/src/devkit_launch/config/feldfreund.py')
+
+    # Priority 3: Relative path from script (host-side execution fallback)
+    if not config_path.exists():
         config_path = Path(__file__).parents[3] / 'devkit_launch/config/feldfreund.py'
 
+    if not config_path.exists():
+        # Node cannot safely initialize without a hardware definition
+        print(f"FATAL: Configuration file not found at {config_path}")
+        os._exit(1)
+
+    print(f"SYSTEM: Loading hardware configuration from {config_path}")
+    
     config = config_from_file(str(config_path))
     system = System(config)
     api.Online()
-    # Daemon thread ensures the background ROS thread exits when the main process stops
+    
+    # Background thread handles ROS middleware events without blocking NiceGUI
     threading.Thread(target=ros_main, args=(system,), daemon=True).start()
 
 
 def ros_main(system: System) -> None:
+    """Primary ROS 2 executor loop."""
     rclpy.init()
     devkit_driver = DevkitDriver(system)
     try:
@@ -82,12 +99,12 @@ def ros_main(system: System) -> None:
 
 app.on_startup(on_startup)
 
-# Critical for Jazzy: Map the application import string for NiceGUI auto-reload
+# NiceGUI-specific configuration for Jazzy compatibility
 ui_run.APP_IMPORT_STRING = f'{__name__}:app'
 
-# Professional UI configuration: Removed emoji, set title for Agroecology Lab standards
 ui.run(
     uvicorn_reload_dirs=str(Path(__file__).parent.resolve()),
     title='Agroecology Lab Sowbot UI',
-    favicon='assets/favicon.ico'
+    favicon='assets/favicon.ico',
+    dark=True
 )

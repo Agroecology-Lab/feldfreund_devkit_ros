@@ -1,4 +1,4 @@
-version: "3.8"
+version: "4.0"
 
 services:
   devkit:
@@ -6,22 +6,20 @@ services:
       context: ..
       dockerfile: docker/Dockerfile
     image: devkit_ros:latest
-    network_mode: host # Required for ROS2 communication
-    privileged: true # Required for hardware access
+    container_name: feldfreund_runtime
+    network_mode: host
+    privileged: true
+    # This is the "Golden Link" - it reads the file on every 'up'
+    env_file:
+      - ../.env 
     devices:
-      - /dev/ttyTHS0:/dev/ttyTHS0 # devkit serial port
-      - /dev/ttyACM0:/dev/ttyACM0 # GNSS receiver (USB ACM)
-      - /dev/video0:/dev/video0 # Camera main video stream
-      - /dev/video1:/dev/video1 # Camera metadata stream
-      - /dev/media1:/dev/media1 # Camera media controller
+      - /dev:/dev
     volumes:
-      - /dev:/dev # Access to all devices (alternative to individual mappings)
-      - ~/.ros:/root/.ros # For ROS logs
-      - ../:/workspace/src
+      - /dev:/dev
+      - ~/.ros:/root/.ros
+      - ../:/workspace  # Mounts utilities AND code
     environment:
-      - ROS_DOMAIN_ID=0 # Default ROS domain
-      - RMW_IMPLEMENTATION=rmw_cyclonedds_cpp # Using CycloneDDS
-
-    # Source and launch the devkit system
-    command: bash -c "source /opt/ros/jazzy/setup.bash && source /workspace/install/setup.bash && ros2 launch devkit_launch devkit_nocams.launch.py & tail -f /dev/null"
+      - ROS_DOMAIN_ID=0
+      - RMW_IMPLEMENTATION=rmw_cyclonedds_cpp
+    command: bash -c "source /opt/ros/jazzy/setup.bash && [ -f /workspace/install/setup.bash ] && source /workspace/install/setup.bash; ros2 launch devkit_launch devkit_nocams.launch.py"
     restart: unless-stopped

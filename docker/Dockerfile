@@ -1,10 +1,14 @@
 FROM ros:jazzy
 
-# 1. APT HARDENING: Core utilities + ROS packages in one cached layer
-# Using cache mounts prevents re-downloading 1GB of data if a later step fails.
+# 1. APT HARDENING: Added aggressive retries and timeouts
 RUN --mount=type=cache,target=/var/cache/apt,sharing=locked \
     --mount=type=cache,target=/var/lib/apt,sharing=locked \
-    apt-get update && apt-get install -y --no-install-recommends \
+    apt-get update && \
+    # Tell APT to retry up to 10 times and wait longer
+    apt-get install -y -o Acquire::Retries=10 \
+                       -o Acquire::http::Timeout="300" \
+                       -o Acquire::ftp::Timeout="300" \
+                       --no-install-recommends \
     wget ca-certificates unzip git nano iputils-ping python3-pip \
     ros-jazzy-domain-bridge \
     ros-jazzy-rmw-cyclonedds-cpp \
@@ -20,6 +24,7 @@ RUN --mount=type=cache,target=/var/cache/apt,sharing=locked \
     ros-jazzy-image-tools \
     ros-jazzy-compressed-image-transport \
     ros-jazzy-axis-camera \
+#    libasio-dev \
     python3-serial python3-requests python3-yaml && \
     apt-get clean && rm -rf /var/lib/apt/lists/*
 
@@ -52,6 +57,12 @@ COPY ./devkit_driver ./src/devkit_driver
 COPY ./devkit_launch ./src/devkit_launch
 COPY ./devkit_ui ./src/devkit_ui
 
+# We use GIT_TERMINAL_PROMPT=0 to prevent the 'Username' hang
+#RUN GIT_TERMINAL_PROMPT=0 git clone --depth 1 https://github.com/nilseuropa/ros2graph_explorer.git src/ros2graph_explorer && \
+RUN GIT_TERMINAL_PROMPT=0 git clone --depth 1 -b main https://github.com/aussierobots/ublox_dgnss src/ublox_dgnss
+
+
+    
 RUN . /opt/ros/jazzy/setup.sh && \
     colcon build --packages-select devkit_driver devkit_launch devkit_ui && \
     rm -rf build/ log/
