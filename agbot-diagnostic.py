@@ -5,7 +5,7 @@ import re
 import sys
 import curses
 
-VERSION = "6.1-SOWBOT"
+VERSION = "6.2-SOWBOT"
 
 def get_env_config():
     """Reads hardware ports and mode dynamically from .env on the host."""
@@ -22,11 +22,10 @@ def get_env_config():
             if jetson: config["IS_JETSON"] = jetson.group(1).strip()
     return config
 
-# --- CONFIGURATION (Aligned with your actual launch files) ---
 EXPECTED_NODES = [
-    "/controller",       # Matches src/devkit_launch/launch/devkit_driver.launch.py
-    "/usb_cam",          # Active in your diagnostic
-    "/UI_NODE",          # Active in your diagnostic
+    "/controller", 
+    "/usb_cam", 
+    "/UI_NODE", 
     "/foxglove_bridge", 
     "/septentrio_gnss"
 ]
@@ -63,38 +62,71 @@ def draw(stdscr):
         nodes_list = run_cmd("ros2 node list")
         topics_list = run_cmd("ros2 topic list")
         
-        stdscr.addstr(0, 0, f"🚀 AGROLOGY LAB MISSION CONTROL - {VERSION}", curses.color_pair(3) | curses.A_BOLD)
-        stdscr.addstr(1, 0, f"Host Device: {'Jetson' if cfg['IS_JETSON'] == 'true' else 'PC/ThinkPad'}", curses.color_pair(4))
+        stdscr.addstr(0, 0, f"🚀 MISSION CONTROL - {VERSION}", curses.color_pair(3) | curses.A_BOLD)
+        stdscr.addstr(1, 0, f"Host: {'Jetson' if cfg['IS_JETSON'] == 'true' else 'PC'}", curses.color_pair(4))
         stdscr.addstr(2, 0, "="*65, curses.color_pair(3))
 
-        # Hardware Section
-        stdscr.addstr(4, 0, "HARDWARE MAPPING (.env)", curses.A_UNDERLINE)
+        stdscr.addstr(4, 0, "HARDWARE MAPPING", curses.A_UNDERLINE)
         hw_labels = [("GPS", cfg["GPS"]), ("MCU", cfg["MCU"])]
         for i, (label, port) in enumerate(hw_labels):
             status = "[VIRTUAL]" if "virtual" in port.lower() else "[PHYSICAL]"
             col = curses.color_pair(4) if "virtual" in port.lower() else curses.color_pair(1)
             stdscr.addstr(5+i, 2, f"{label:<4} {port:<18}: {status}", col)
 
-        # Nodes Section
-        stdscr.addstr(8, 0, "ACTIVE ROS 2 NODES", curses.A_UNDERLINE)
+        stdscr.addstr(8, 0, "ACTIVE NODES", curses.A_UNDERLINE)
         for i, node in enumerate(EXPECTED_NODES):
             exists = node in nodes_list
             status = "[ACTIVE]" if exists else "[OFFLINE]"
             col = curses.color_pair(1) if exists else curses.color_pair(2)
             stdscr.addstr(9+i, 2, f"{node:<28}: {status}", col)
 
-        # Topic Stream Section
-        stdscr.addstr(15, 0, "DATA STREAM VERIFICATION", curses.A_UNDERLINE)
+        stdscr.addstr(15, 0, "DATA STREAMS", curses.A_UNDERLINE)
         for i, (label, topic) in enumerate(TARGET_TOPICS.items()):
             exists = topic in topics_list
             status = "[FLOWING]" if exists else "[NO DATA]"
             col = curses.color_pair(1) if exists else curses.color_pair(2)
             stdscr.addstr(16+i, 2, f"{label:<14}: {status}", col)
 
-        stdscr.addstr(22, 0, "Press 'q' to EXIT", curses.color_pair(4))
+        stdscr.addstr(22, 0, "Press 'q' for POST-FLIGHT AUDIT", curses.color_pair(4))
         stdscr.refresh()
         if stdscr.getch() == ord('q'):
             break
 
 if __name__ == "__main__":
-    curses.wrapper(draw)
+    do_full_sweep = len(sys.argv) > 1 and sys.argv[1].lower() == "full"
+
+    try:
+        curses.wrapper(draw)
+    except KeyboardInterrupt:
+        pass
+    
+    # --- THIS SECTION WAS MISSING IN YOUR PREVIOUS RUN ---
+    print("\n" + "═"*75)
+    print(f"🔎 VERBOSE ROS 2 GRAPH AUDIT ({VERSION})")
+    print("═"*75)
+
+    nodes_raw = run_cmd("ros2 node list")
+    found_nodes = [n for n in nodes_raw.split('\n') if n]
+    
+    for node in found_nodes:
+        print(f"\n● {node.upper()}")
+        node_info = run_cmd(f"ros2 node info {node}")
+        
+        pubs_match = re.search(r'Publishers:(.*?)Service Servers:', node_info, re.S)
+        if pubs_match:
+            clean_pubs = [p.strip() for p in pubs_match.group(1).split('\n') if '/' in p]
+            print(f"  └─ Publishers  : {', '.join(clean_pubs[:5])}")
+
+    if do_full_sweep:
+        print("\n" + "═"*75)
+        print("📡 DATA FLOW CHECK (1.5s Samples)")
+        print("═"*75)
+        
+        all_topics = run_cmd("ros2 topic list").split('\n')
+        for t in all_topics:
+            if not t or "parameter" in t: continue
+            data = run_cmd(f"timeout 1.5s ros2 topic echo {t} --once --no-arr")
+            status = "✅ [ACTIVE]" if data else "❌ [SILENT]"
+            print(f"{status} {t:<35}")
+    else:
+        print(f"\n💡 Tip: Run './agbot-diagnostic.py full' to see data flow.")
