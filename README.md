@@ -1,20 +1,80 @@
 
-### Sowbot roadmap
+# Sowbot (ROS 2 stack)
+
+An open-source, containerised ROS2 Jazzy stack for autonomous agricultural robotics. This repository provides the drivers and orchestration for the Sowbot platform, featuring RTK-GNSS localisation and ESP32-based hardware control.
+
+Development is led by the <a href="https://agroecologylab.org.uk" target="_blank">Agroecology Lab</a> building on the core developed by <a href="https://github.com/zauberzeug/" target="_blank">Zauberzeug</a>.
 
 Reference open hardware stack(s) under development at [Sowbot.co.uk](https://sowbot.co.uk) in addition to orginal [Zauberzeug Field Friend](https://github.com/zauberzeug/)
 
+This `sowbot` branch is under heavy development and may be broken at any given moment. For a stable version, check out the upstream Zauberzeug project
+
+
+### Sowbot roadmap
+
 | Maturity | Feature | Description |
 | :--- | :--- | :--- |
-| **0.9** | **Containerised Deployment** | Full ROS 2 Jazzy/Humble stack managed via Docker and the `manage.py` orchestration script. |
-| **0.8** | **[KumarRobotics Ublox Driver](https://github.com/KumarRobotics/ublox)** | Modified driver providing high-bandwidth UBX binary data; now supports dynamic switching with Septentrio via `fixusb.py`. |
-| **0.8** | **Stable Device Addressing** | Enhanced `fixusb.py` utility with architecture detection (Jetson vs Generic) and kernel-level sanitization (`low_latency`). |
-| **0.1** | **[EasyNavigation Stack](https://github.com/EasyNavigation/EasyNavigation)** | **(New Plan)** Integration of the EasyNavigation framework for streamlined path planning and localized autonomous maneuvering. |
-| **0.6** | **[Sentor Safety & Health Monitoring](https://github.com/LCAS/sentor)** | Integrated hardware-software heartbeat and topic-based diagnostics to trigger automated recovery or emergency motor cut-off. |
+| **0.8** | **Containerised Deployment** | Full ROS 2 Jazzy/Humble stack managed via Docker and the `manage.py` orchestration script. |
+| **0.6** | **Stable Device Addressing** | Enhanced `fixusb.py` utility with architecture detection (Jetson vs Generic) and kernel-level sanitization (`low_latency`). |
 | **0.5** | **Real-time Telemetry & Teleop Dashboard** | Web-based cockpit for joystick control and GPS health monitoring; symlink-fixed for `devkit_ui` discovery. |
+| **0.4** | **[Ublox DGNSS Driver](https://github.com/aussierobots/ublox_dgnss)** | Modified driver providing high-bandwidth UBX binary data; now supports dynamic switching with Septentrio via `fixusb.py`. |
+| **0.1** | **[EasyNavigation Stack](https://github.com/EasyNavigation/EasyNavigation)** | **(New Plan)** Integration of the EasyNavigation framework for streamlined path planning and localized autonomous maneuvering. |
+| **0.0** | **[Sentor Safety & Health Monitoring](https://github.com/LCAS/sentor)** | Integrated hardware-software heartbeat and topic-based diagnostics to trigger automated recovery or emergency motor cut-off. |
 | **0.0** | **[Visual Crop-Row Navigation](https://github.com/Agroecology-Lab/visual-multi-crop-row-navigation/tree/ROS2)** | Vision-based guidance system for following crop rows; currently in porting status for ROS 2. |
 | **0.0** | **[Vizanti Web Visualisation](https://github.com/MoffKalast/vizanti/tree/ros2)** | Planned integration of a web-based mission planner and 3D visualiser for remote operations. || **0.0** | **[Quick hitch for AgBots](https://manaculture.ca/en/a-frame-quick-hitch/)** | Develop & Test triangular quick (qwicc?) hitch system for AgBots. |
 | **0.0** | **[Delta robot module for precision sowing or weeding](https://github.com/Agroecology-Lab/Open-Weeding-Delta/tree/master/hardware#readme)** | Develop & Test Delta module. |
 | **0.0** | **[L&ASER weeding module](https://github.com/Laudando-Associates-LLC/LASER)** | Integrate and validate Laudando laser weeding on Sowbot. |
+
+## Quick Start
+
+### 1. Clone the Repository
+Open a terminal on your host machine and download the workspace:
+```bash
+git clone -b sowbot [https://github.com/Agroecology-Lab/feldfreund_devkit_ros.git](https://github.com/Agroecology-Lab/feldfreund_devkit_ros.git)
+cd feldfreund_devkit_ros
+```
+
+### 2. Build & Launch
+Use the management script to build the ROS 2 workspace and launch the robot stack. This script automatically handles hardware discovery and port permissions:
+```bash
+./manage.py full-build
+./manage.py
+```
+*Note: manage.py automatically detects hardware ports (ESP32 & u-blox), updates your .env configuration, and launches the container with live volume mapping to /workspace.*
+
+
+## Management & Tools
+
+### manage.py
+The primary entry point for the system. While it runs the full stack by default, it supports several optional arguments for development:
+
+| Command | Logic / Argument | Resulting Action |
+|:---|:---|:---|
+| `./manage.py` | (No arguments) | Runs `run_runtime()` immediately using live volumes. |
+| `./manage.py build` | `build` | Runs `run_build(full=False)`. Re-compiles ROS code. |
+| `./manage.py full-build` | `full-build` | Runs `run_build(full=True)`. Cleans system & Re-installs all system dependencies. |
+
+
+### Interactive Shell
+To enter the running container for debugging or manual ROS 2 commands:
+```bash
+./login.sh
+```
+
+### Diagnostics
+If hardware is connected but topics are not flowing, run the diagnostic tool from inside the container:
+
+#### After running ./login.sh
+```bash
+python3 agbot-diagnostic.py
+```
+
+![TUI Status.](https://raw.githubusercontent.com/Agroecology-Lab/Open_agbot_devkit_ros/refs/heads/main/assets/Screenshot%20From%202026-01-21%2018-07-45.png)
+
+You can also make it verbose with:
+```bash
+python3 agbot-diagnostic.py full
+```
 
 
 
