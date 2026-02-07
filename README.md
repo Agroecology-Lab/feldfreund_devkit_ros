@@ -25,6 +25,24 @@ This `sowbot` branch is under heavy development and may be broken at any given m
 | **0.0** | **[Delta robot module for precision sowing or weeding](https://github.com/Agroecology-Lab/Open-Weeding-Delta/tree/master/hardware#readme)** | Develop & Test Delta module. |
 | **0.0** | **[L&ASER weeding module](https://github.com/Laudando-Associates-LLC/LASER)** | Integrate and validate Laudando laser weeding on Sowbot. |
 
+# ⚠️ CRITICAL SAFETY WARNING: 
+
+**THIS SOFTWARE COULD CONTROL PHYSICAL HARDWARE CAPABLE OF PRODUCING SIGNIFICANT KINETIC FORCE.**
+
+1. **EXPERIMENTAL STATUS**: This branch ('sowbot') contains experimental code generated and 
+   refined with AI assistance. It has NOT undergone full-scale field validation.
+2. **STATUTORY NOTICE (UK)**: Usage of this software is at the user's sole risk. While 
+   standard open-source licenses apply, users are reminded that operating agricultural 
+   robotics requires a professional duty of care.
+3. **MANDATORY HARDWARE SAFETY**: Under no circumstances should this software be used 
+   to control a robot of any size without a independent, hard-wired, physical Emergency Stop (E-Stop) 
+   system. Software-based stops (such as /estop/soft) are NOT a substitute for 
+   Category 0 or 1 hardware safety stops.
+4. **NO LIABILITY**: To the extent permitted by the laws of England and Wales, the 
+   contributors exclude all liability for property damage, crop loss, or indirect 
+   consequential damages.
+
+
 ## Quick Start
 
 ### 1. Clone the Repository
