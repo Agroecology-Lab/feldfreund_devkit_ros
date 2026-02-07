@@ -42,6 +42,10 @@ This `sowbot` branch is under heavy development and may be broken at any given m
    contributors exclude all liability for property damage, crop loss, or indirect 
    consequential damages.
 
+### Health Warning
+
+This repo may contain traces of LLM slop, We've done our best to mitigate this. If you are allergic to slop, please help us refactor.
+
 
 ## Quick Start
 
@@ -93,10 +97,6 @@ You can also make it verbose with:
 ```bash
 python3 agbot-diagnostic.py full
 ```
-
-### Health Warning
-
-This repo may contain traces of LLM slop, We've done our best to mitigate this. If you are allergic to slop, please help us refactor.
 
 ### Proposed GNSS Topic Mapping: Septentrio vs. Dual u-blox F9P (Moving Base)
 
