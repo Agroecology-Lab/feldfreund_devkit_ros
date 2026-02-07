@@ -76,6 +76,10 @@ You can also make it verbose with:
 python3 agbot-diagnostic.py full
 ```
 
+### Health Warning
+
+This repo may contain traces of LLM slop, We've done our best to mitigate this. If you are allergic to slop, please help us refactor.
+
 
 
 # Feldfreund DevKit ROS (Below from original Zauberzeug forked repo)
