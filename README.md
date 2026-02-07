@@ -80,9 +80,20 @@ python3 agbot-diagnostic.py full
 
 This repo may contain traces of LLM slop, We've done our best to mitigate this. If you are allergic to slop, please help us refactor.
 
+### Proposed GNSS Topic Mapping: Septentrio vs. Dual u-blox F9P (Moving Base)
+
+| Septentrio Topic | `ublox_dgnss` Topic (Rover-Rover) | Source UBX Message | Functional Description |
+| :--- | :--- | :--- | :--- |
+| `/pvtgeodetic` | `/ubx_nav_pvt` | **NAV-PVT** | Geodetic position, velocity, and time. |
+| `/gpsfix` | `/ublox_nav_sat_fix_hp` | **NAV-PVT + NAV-HPPOSLLH** | High-precision global position fix. |
+| `/poscovgeodetic` | `/ubx_nav_cov` | **NAV-COV** | Position and velocity covariance matrix. |
+| `/atteuler` | `/ubx_nav_rel_pos_ned` | **NAV-RELPOSNED** | **Heading/Yaw** derived from the relative vector. |
+| `/attcoveuler` | `/ubx_nav_rel_pos_ned` | **NAV-RELPOSNED** | Accuracy/Variance of the heading calculation. |
+| `/aimplusstatus` | `/ubx_mon_rf` | **MON-RF** | Jamming/Interference monitoring indicators. |
 
 
-# Feldfreund DevKit ROS (Below from original Zauberzeug forked repo)
+## Feldfreund DevKit ROS 
+(Below from original Zauberzeug forked repo)
 
 Feldfreund DevKit ROS is a comprehensive ROS2 package that handles the communication and configuration of various Feldfreund components:
 
