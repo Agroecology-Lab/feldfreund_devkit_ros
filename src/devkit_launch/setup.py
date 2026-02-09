@@ -1,10 +1,10 @@
 from setuptools import find_packages, setup
 import os
 from glob import glob
-package_name = 'devkit_driver'
+package_name = 'devkit_launch'
 setup(
     name=package_name,
-    version='0.1.0',
+    version='0.0.0',
     packages=find_packages(exclude=['test']),
     data_files=[
         ('share/ament_index/resource_index/packages', ['resource/' + package_name]),
@@ -17,5 +17,5 @@ setup(
     maintainer='sam',
     description='Agroecology Lab Devkit Package',
     license='Apache-2.0',
-    entry_points={'console_scripts': ['devkit_driver_node = devkit_driver.devkit_driver_node:main']},
+    entry_points={'console_scripts': []},
 )

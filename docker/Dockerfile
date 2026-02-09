@@ -1,34 +1,25 @@
 FROM ros:jazzy
 
-# 1. APT HARDENING: Added aggressive retries and timeouts
-RUN --mount=type=cache,target=/var/cache/apt,sharing=locked \
-    --mount=type=cache,target=/var/lib/apt,sharing=locked \
-    apt-get update && \
-    # Tell APT to retry up to 10 times and wait longer
-    apt-get install -y -o Acquire::Retries=10 \
-                       -o Acquire::http::Timeout="300" \
-                       -o Acquire::ftp::Timeout="300" \
-                       --no-install-recommends \
-    wget ca-certificates unzip git nano iputils-ping python3-pip \
-    ros-jazzy-domain-bridge \
-    ros-jazzy-rmw-cyclonedds-cpp \
-    ros-jazzy-foxglove-bridge \
-    ros-jazzy-xacro \
-    ros-jazzy-rosbag2-storage-mcap \
-    ros-jazzy-foxglove-msgs \
-    ros-jazzy-tf-transformations \
+# 0. MIRROR swap (UK Specific)
+RUN sed -i 's|http://gb.archive.ubuntu.com/ubuntu/|http://mirror.ox.ac.uk/ubuntu/|g' /etc/apt/sources.list.d/ubuntu.sources || true
+
+# 1. Core tools & Essential ROS Binaries
+# We combine these to reduce image layers and avoid the double-repo conflict
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    wget ca-certificates unzip git python3-pip python3-rosdep \
+    libusb-1.0-0-dev libopencv-dev \
     ros-jazzy-septentrio-gnss-driver \
+    ros-jazzy-rmw-cyclonedds-cpp \
+    ros-jazzy-rosbag2-storage-mcap \
+    ros-jazzy-rtcm-msgs \
     ros-jazzy-usb-cam \
     ros-jazzy-image-transport \
-    ros-jazzy-image-transport-plugins \
-    ros-jazzy-image-tools \
-    ros-jazzy-compressed-image-transport \
-    ros-jazzy-axis-camera \
-#    libasio-dev \
-    python3-serial python3-requests python3-yaml && \
-    apt-get clean && rm -rf /var/lib/apt/lists/*
+    ros-jazzy-foxglove-bridge \
+    ros-jazzy-tf2-geometry-msgs \
+    python3-serial python3-requests python3-yaml \
+    && apt-get clean && rm -rf /var/lib/apt/lists/*
 
-# 2. LIZARD HARDENING: Survives GitHub timeouts
+# 2. LIZARD HARDENING
 RUN mkdir -p /root/.lizard && cd /root && \
     LIZARD_VERSION=v0.9.0 && \
     wget --tries=10 --waitretry=5 --retry-connrefused \
@@ -37,40 +28,57 @@ RUN mkdir -p /root/.lizard && cd /root && \
     chmod +x /root/.lizard/espresso.py && \
     pip install --break-system-packages --ignore-installed --retries 10 -r /root/.lizard/requirements.txt
 
-# 3. PIP HARDENING: General requirements
+# 3. PIP HARDENING
 COPY requirements.txt /tmp/requirements.txt
 RUN --mount=type=cache,target=/root/.cache/pip \
-    pip install --break-system-packages --ignore-installed --retries 10 -r /tmp/requirements.txt
+    pip install --break-system-packages --ignore-installed --retries 10 \
+    --timeout 1000 --default-timeout=1000 -r /tmp/requirements.txt
 
-# 4. ENVIRONMENT & PERSISTENCE
+# 4. ENVIRONMENT
 COPY ./docker/bashrc /tmp/bashrc
 RUN cat /tmp/bashrc >> /root/.bashrc && rm -f /tmp/bashrc
-
-# Set critical ENVs so they are visible to non-interactive shells (like manage.py)
 ENV PYTHONPATH="/root/.lizard:/workspace/install/lib/python3.12/site-packages:${PYTHONPATH:+:${PYTHONPATH}}"
 ENV RMW_IMPLEMENTATION=rmw_cyclonedds_cpp
 ENV DEBIAN_FRONTEND=noninteractive
 
-# 5. WORKSPACE BUILD: Static build (No symlinks to break)
+# 5. WORKSPACE SETUP
 WORKDIR /workspace
 COPY ./devkit_driver ./src/devkit_driver
 COPY ./devkit_launch ./src/devkit_launch
 COPY ./devkit_ui ./src/devkit_ui
 
-# We use GIT_TERMINAL_PROMPT=0 to prevent the 'Username' hang
-#RUN GIT_TERMINAL_PROMPT=0 git clone --depth 1 https://github.com/nilseuropa/ros2graph_explorer.git src/ros2graph_explorer && \
 RUN GIT_TERMINAL_PROMPT=0 git clone --depth 1 -b main https://github.com/aussierobots/ublox_dgnss src/ublox_dgnss
 
+# 5.1: Automated Dependency Resolution (Clean Syntax)
+RUN if [ ! -d /etc/ros/rosdep/sources.list.d ]; then rosdep init; fi && \
+    rosdep update && \
+    rosdep install --from-paths src --ignore-src -y \
+    --rosdistro jazzy \
+    --skip-keys "\
+    nicegui \
+    lizard \
+    transforms3d \
+    pyserial \
+    septentrio_gnss_driver \
+    ublox_dgnss \
+    rtcm_msgs \
+    usb_cam \
+    image_transport \
+    foxglove_bridge \
+    tf-transformations \
+    ros-jazzy-tf-transformations \
+    tf_transformations \
+    ros-jazzy-tf-transformations" && \
+    rm -rf /var/lib/apt/lists/*
 
-    
+# 6. Manual PIP Overrides
+RUN pip install --break-system-packages --no-cache-dir \
+    nicegui pyserial transforms3d lizard pymongo networkx
+
+# 7. BUILD
 RUN . /opt/ros/jazzy/setup.sh && \
-    colcon build --packages-select devkit_driver devkit_launch devkit_ui && \
-    rm -rf build/ log/
+    colcon build --symlink-install --cmake-args -DCMAKE_BUILD_TYPE=Release
 
-# 6. SMOKE TEST: Verification
-RUN ls /opt/ros/jazzy/lib/librmw_cyclonedds_cpp.so || (echo "FATAL: CycloneDDS missing!" && exit 1)
-RUN ls /workspace/install/devkit_launch/share/devkit_launch/launch/devkit.launch.py || (echo "FATAL: Launch files not found!" && exit 1)
-
-# 7. ENTRYPOINT: The "Manage.py" Insurance Policy
+# 8. ENTRYPOINT
 ENTRYPOINT ["/bin/bash", "-c", "source /opt/ros/jazzy/setup.bash && [ -f /workspace/install/setup.bash ] && source /workspace/install/setup.bash && exec \"$@\"", "--"]
 CMD ["bash"]

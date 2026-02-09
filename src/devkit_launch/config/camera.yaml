@@ -1,0 +1,22 @@
+/**:
+  ros__parameters:
+    video_device: "/dev/video0"
+    pixel_format: "yuyv" # Based on v4l2-ctl output
+    image_width: 1280
+    image_height: 720
+    framerate: 10.0
+    io_method: "mmap"
+    frame_id: "camera"
+    camera_name: "devkit_camera"
+    camera_info_url: ""
+    brightness: 128
+    contrast: 32
+    saturation: 64
+    sharpness: 50
+    gain: 0
+    auto_white_balance: true
+    white_balance: 4000
+    auto_exposure: true
+    exposure: 100
+    auto_focus: false
+    focus: 0

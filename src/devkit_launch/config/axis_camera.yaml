@@ -1,0 +1,11 @@
+/**:
+  ros__parameters:
+    # Fixed AXIS camera parameters
+    min_pan: 0.0
+    max_pan: 0.0
+    min_tilt: 0.0
+    max_tilt: 0.0
+    min_zoom: 1
+    max_zoom: 1
+    max_pan_speed: 0.0
+    max_tilt_speed: 0.0

@@ -1,0 +1,103 @@
+/**:
+  ros__parameters:
+    ## Sensor standard deviation [x,y,z] (optional)
+    ## This value is used to override the covariance matrix in nav_msgs/Odometry
+    ## Important: Make sure the values provided are in decimal points, or else might give error in execution
+    pose_stddev: [0.1, 0.1, 0.0, 0.0, 0.0, 0.1] # [m]
+    twist_stddev: [0.01, 0.0, 0.0, 0.0, 0.0, 0.01] # [m/s]
+    publish_tf: True
+    expander_name: "p0" # Name of the expander in the lizard configuration
+    flash_parameters: "-j orin --nand" # Parameters for espresso.py (e.g., "-j orin --nand" for "flash.py orin nand v05")
+    serial_port: "/dev/ttyTHS0" # This needs to be in the docker-compose.yml file as well
+    enable_esp_on_startup: True # Set to false to prevent ESP from being enabled at startup
+
+    ## This section maps Lizard's core output to ROS parameters.
+    ## Each entry in the list corresponds to a value that can be read from the Lizard core module.
+    ## Types and default values are specified for each data point below.
+    read_data:
+      list:
+        - time
+        - linear_speed
+        - angular_speed
+        - l0_error_flag
+        - r0_error_flag
+        - l1_error_flag
+        - r1_error_flag
+        - estop1_active # this name is to be used in the UI
+        - estop2_active # this name is to be used in the UI
+        - battery_status_level
+        - bumper_front_top_active # this name is to be used in the UI
+        - bumper_front_bottom_active # this name is to be used in the UI
+        - bumper_back_active # this name is to be used in the UI
+        - imu_cal_gyr
+        - imu_quat_w
+        - imu_quat_x
+        - imu_quat_y
+        - imu_quat_z
+        - rdyp_level
+        - vdp_level
+        - heap
+
+      time:
+        type: int
+        default: 0
+      linear_speed:
+        type: double
+        default: 0.0
+      angular_speed:
+        type: double
+        default: 0.0
+      l0_error_flag:
+        type: int
+        default: 0
+      r0_error_flag:
+        type: int
+        default: 0
+      l1_error_flag:
+        type: int
+        default: 0
+      r1_error_flag:
+        type: int
+        default: 0
+      estop1_active:
+        type: bool
+        default: False
+      estop2_active:
+        type: bool
+        default: False
+      battery_status_level:
+        type: int
+        default: 0
+      bumper_front_top_active:
+        type: bool
+        default: False
+      bumper_front_bottom_active:
+        type: bool
+        default: False
+      bumper_back_active:
+        type: bool
+        default: False
+      imu_cal_gyr:
+        type: int
+        default: 0
+      imu_quat_w:
+        type: double
+        default: 0.0
+      imu_quat_x:
+        type: double
+        default: 0.0
+      imu_quat_y:
+        type: double
+        default: 0.0
+      imu_quat_z:
+        type: double
+        default: 0.0
+      rdyp_level:
+        type: int
+        default: 0
+      vdp_level:
+        type: int
+        default: 0
+      heap:
+        type: int
+        default: 0
