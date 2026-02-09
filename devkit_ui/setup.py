@@ -1,10 +1,12 @@
 from setuptools import find_packages, setup
 import os
 from glob import glob
+
 package_name = 'devkit_ui'
+
 setup(
     name=package_name,
-    version='0.1.0',
+    version='0.0.0',
     packages=find_packages(exclude=['test']),
     data_files=[
         ('share/ament_index/resource_index/packages', ['resource/' + package_name]),
@@ -15,7 +17,13 @@ setup(
     install_requires=['setuptools'],
     zip_safe=True,
     maintainer='sam',
-    description='Agroecology Lab Devkit Package',
+    description='Sowbot Devkit Package',
     license='Apache-2.0',
-    entry_points={'console_scripts': ['ui_node = devkit_ui.ui_node:main']},
+    entry_points={
+        'console_scripts': [
+            # The launch file looks for 'ui_node'
+            # It points to: folder.file:main_function
+            'ui_node = devkit_ui.ui_node:main',
+        ],
+    },
 )

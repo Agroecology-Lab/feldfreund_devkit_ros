@@ -34,7 +34,7 @@ def generate_launch_description():
             ),
             launch_arguments={
                 'device': rover_port,
-                'baudrate': '460800',
+                'baudrate': '468000',
                 'frame_id': 'gps_link'
             }.items(),
             condition=IfCondition(EqualsSubstitution(gps_type, 'ublox'))

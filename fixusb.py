@@ -108,8 +108,8 @@ def scan_and_export():
     r1_type = gnss_found[1][1] if len(gnss_found) > 1 else 'none'
     mcu_p = mcu_device if mcu_device else 'virtual'
 
-    sanitize_hardware(r_port, '460800')
-    sanitize_hardware(r1_port, '460800')
+    sanitize_hardware(r_port, '46800')
+    sanitize_hardware(r1_port, '46800')
     sanitize_hardware(mcu_p, '115200')
 
     usb_cam = 'true' if Path('/dev/video0').exists() else 'false'
