@@ -37,7 +37,6 @@ class DevkitManager:
         if name == 'devkit_driver':
             entry_points_dict['console_scripts'].append('devkit_driver_node = devkit_driver.devkit_driver_node:main')
         elif name == 'devkit_ui':
-            # Updated to match grep result: devkit_ui/ui_node.py
             entry_points_dict['console_scripts'].append('ui_node = devkit_ui.ui_node:main')
 
         content = f"""from setuptools import find_packages, setup
@@ -64,6 +63,7 @@ setup(
         setup_py.write_text(content)
         
         setup_cfg = path / 'setup.cfg'
+        # Escaping the $ sign for python f-string
         cfg_content = f"[develop]\nscript_dir=$base/lib/{name}\n[install]\ninstall_scripts=$base/lib/{name}\n"
         setup_cfg.write_text(cfg_content)
         
@@ -95,13 +95,19 @@ setup(
 
         self.sync_workspace()
         
+        # Base build command
+        build_cmd = ['docker', 'build', '-t', self.image_name, '-f', 'docker/Dockerfile', '.']
+        
         if full_clean:
-            self._log("Cleaning Docker artifacts...", "WARN")
-            subprocess.run(['docker', 'rm', '-f', self.container_name], capture_output=True, timeout=10)
-            subprocess.run(['docker', 'rmi', '-f', self.image_name], capture_output=True, timeout=20)
+            self._log("Cleaning Docker artifacts and bypassing cache...", "WARN")
+            # Insert --no-cache to force Docker to re-read edited source files
+            build_cmd.insert(2, '--no-cache')
+            subprocess.run(['docker', 'rm', '-f', self.container_name], capture_output=True)
+            # Optional: rmi here if you truly want a scorched-earth rebuild
+            # subprocess.run(['docker', 'rmi', '-f', self.image_name], capture_output=True)
 
         self._log(f"Building {self.image_name}...")
-        result = subprocess.run(['docker', 'build', '-t', self.image_name, '-f', 'docker/Dockerfile', '.'])
+        result = subprocess.run(build_cmd)
         if result.returncode != 0:
             self._log("Build failed.", "ERROR")
             sys.exit(1)

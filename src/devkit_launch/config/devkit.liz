@@ -1,0 +1,19 @@
+# Feldfreund Sowbot Hardware Definition
+p0 = expander()
+l0 = p0.output(22) # Left Motor 0
+r0 = p0.output(23) # Right Motor 0
+estop1 = p0.input(34)
+estop2 = p0.input(35)
+
+# Odometer/Speed Calculation
+core.wheels = drive(l0, r0)
+
+# Monitoring
+core.on_every_20ms = line(
+    'time', core.time,
+    'linear_speed', core.wheels.linear_speed,
+    'angular_speed', core.wheels.angular_speed,
+    'estop1_active', estop1.level,
+    'estop2_active', estop2.level,
+    'battery_status_level', core.vdp
+)
