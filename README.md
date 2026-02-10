@@ -110,6 +110,37 @@ python3 agbot-diagnostic.py full
 | `/aimplusstatus` | `/ubx_mon_rf` | **MON-RF** | Jamming/Interference monitoring indicators. |
 
 
+### Sketch of possible architecture
+
+## 1. The Muscle: ESP32 + Lizard (Reflexes)
+* **Role:** Real-time motor timing and hardware safety.
+* **Software:** **Lizard Firmware** (Domain-specific language for hardware).
+* **Execution:**
+    * **1 kHz Loop:** Manages time-critical pulse generation for **ODrive (CAN)** and **Brushed (PWM)** motors using the ESP32's hardware timers (MCPWM).
+    * **Safety Heartbeat:** Monitors the UART RX buffer. If the `timeout` (e.g., 100ms) expires without a valid **Liza** packet from SBC A, the firmware triggers a `hard_stop()` on all actuators.
+    * **Feedback:** Asynchronously streams `Lizard` binary packets containing encoder deltas and battery bus voltage back to SBC A.
+
+## 2. SBC A: The Pilot (Avaota A1 #1)
+* **Role:** Navigation, deterministic control, and GPS fusion.
+* **Software Stack:**
+    * **ROS 2 Jazzy:** Operates the `ublox_dgnss` node and [**EasyNav**](https://github.com/EasyNavigation/EasyNavigation) for global trajectory planning.
+    * **Zenoh Router:** Using `rmw_zenoh_cpp` as the RMW implementation to unify high-level ROS 2 data with low-latency vision packets from SBC B.
+    * **Copper (Rust):** The high-performance, zero-alloc control engine.
+        * **Task:** Subscribes to the `nav_msgs/Path` (EasyNav) and `lateral_error` (SBC B Vision) via the Zenoh bridge.
+        * **The Action Line:** Directly writes the calculated velocity to the high-speed UART (`/dev/ttyS2`) at **921,600 baud** using a dedicated Copper `UartSink`.
+    * **System Detail:** Utilises `cpuset` to isolate **Core 7** exclusively for the Copper task graph, preventing ROS 2 scheduling jitter from impacting motor loop consistency.
+
+## 3. SBC B: The Sight (Avaota A1 #2)
+* **Role:** AI-powered environment sensing.
+* **Software Stack:**
+    * **NPU Acceleration:** Leverages the **Allwinner A527 NPU (2 TOPS)** via the dedicated hardware abstraction layer.
+    * **Vision Pipeline:**
+        1. **Capture:** Ingests frames from the MIPI-CSI interface.
+        2. **Inference:** Executes a quantized **YOLOv8-Nano** model on the NPU to segment crop rows.
+        3. **Calculation:** Computes a high-frequency `lateral_error` (mm) relative to the vehicle center.
+    * **Zenoh Client:** Publishes the `lateral_error` directly to the Zenoh router on SBC A via the Gigabit Ethernet link, bypassing the local CPU for maximum throughput.
+
+
 ## Feldfreund DevKit ROS 
 (Below from original Zauberzeug forked repo)
 

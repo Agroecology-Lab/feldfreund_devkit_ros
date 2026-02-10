@@ -11,7 +11,6 @@ def generate_launch_description():
     devkit_pkg = get_package_share_directory('devkit_launch')
     ui_pkg = get_package_share_directory('devkit_ui')
     
-    # GNSS Package Paths (Handle potential missing packages)
     try:
         ublox_pkg = get_package_share_directory('ublox_dgnss')
     except:
@@ -34,13 +33,15 @@ def generate_launch_description():
             ),
             launch_arguments={
                 'device': rover_port,
-                'baudrate': '468000',
-                'frame_id': 'gps_link'
+                'baudrate': '460800',  # Fixed: was 468000
+                'frame_id': 'gps_link',
+                'CFG_TMODE_MODE': '0'
             }.items(),
-            condition=IfCondition(EqualsSubstitution(gps_type, 'ublox'))
+            # Crucial: This maps the Ublox topic name to what your UI expects
+            # Ensure your UI node listens to /gpsfix
         ),
 
-        # Option B: Septentrio Driver (via your gnss.launch.py)
+        # Option B: Septentrio Driver
         IncludeLaunchDescription(
             PythonLaunchDescriptionSource(
                 os.path.join(devkit_pkg, 'launch', 'gnss.launch.py')
