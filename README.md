@@ -110,35 +110,54 @@ python3 agbot-diagnostic.py full
 | `/aimplusstatus` | `/ubx_mon_rf` | **MON-RF** | Jamming/Interference monitoring indicators. |
 
 
-## Sketch of possible architecture
+## Sketch of MVP 2026 architecture
 
-### 1. The Muscle: ESP32 + Lizard (Reflexes)
-* **Role:** Real-time motor timing and hardware safety.
-* **Software:** **Lizard Firmware** (Domain-specific language for hardware).
-* **Execution:**
-    * **1 kHz Loop:** Manages time-critical pulse generation for **ODrive (CAN)** and **Brushed (PWM)** motors using the ESP32's hardware timers (MCPWM).
-    * **Safety Heartbeat:** Monitors the UART RX buffer. If the `timeout` (e.g., 100ms) expires without a valid **Liza** packet from SBC A, the firmware triggers a `hard_stop()` on all actuators.
-    * **Feedback:** Asynchronously streams `Lizard` binary packets containing encoder deltas and battery bus voltage back to SBC A.
+### 1. The Lizard Brain (Hardware Abstraction)
+* **Hardware:** ESP32 MCU.
+* **Software:** Lizard DSL.
+* **Role:** Hard Real-Time Execution.
+* **Function:** Motor PID control and physical safety (bumpers/cliffs).
+* **I/O:** 3.3V UART receiving $v, \omega$ via the `teleop_lizard` ROS 2 bridge.
 
-### 2. SBC A: The Pilot (Avaota A1 #1)
-* **Role:** Navigation, deterministic control, and GPS fusion.
-* **Software Stack:**
-    * **ROS 2 Jazzy:** Operates the `ublox_dgnss` node and [**EasyNav**](https://github.com/EasyNavigation/EasyNavigation) for global trajectory planning.
-    * **Zenoh Router:** Using `rmw_zenoh_cpp` as the RMW implementation to unify high-level ROS 2 data with low-latency vision packets from SBC B.
-    * **Copper (Rust):** The high-performance, zero-alloc control engine.
-        * **Task:** Subscribes to the `nav_msgs/Path` (EasyNav) and `lateral_error` (SBC B Vision) via the Zenoh bridge.
-        * **The Action Line:** Directly writes the calculated velocity to the high-speed UART (`/dev/ttyS2`) at **921,600 baud** using a dedicated Copper `UartSink`.
-    * **System Detail:** Utilises `cpuset` to isolate **Core 7** exclusively for the Copper task graph, preventing ROS 2 scheduling jitter from impacting motor loop consistency.
+### 2. The Limbic System (Executive)
+* **Hardware:** Avaota A1 #1 (Allwinner T527).
+* **Software:** ROS 2 Jazzy + `topological_navigation` (AOC branch).
+* **Role:** Navigation Executive.
+* **Function:** Runs the Topological Navigation stack. Manages the move_base sequence and Action on Condition (AOC) logic.
+* **I/O:** Connects to u-blox via USB/UART using `ublox_dgnss` node. Translates graph goals into velocity commands for the Lizard Brain.
 
-### 3. SBC B: The Sight (Avaota A1 #2)
-* **Role:** AI-powered environment sensing.
-* **Software Stack:**
-    * **NPU Acceleration:** Leverages the **Allwinner A527 NPU (2 TOPS)** via the dedicated hardware abstraction layer.
-    * **Vision Pipeline:**
-        1. **Capture:** Ingests frames from the MIPI-CSI interface.
-        2. **Inference:** Executes a quantized **YOLOv8-Nano** model on the NPU to segment crop rows.
-        3. **Calculation:** Computes a high-frequency `lateral_error` (mm) relative to the vehicle center.
-    * **Zenoh Client:** Publishes the `lateral_error` directly to the Zenoh router on SBC A via the Gigabit Ethernet link, bypassing the local CPU for maximum throughput.
+### 3. The Neo (Perception)
+* **Hardware:** Avaota A1 #2 (Allwinner T527 + NPU).
+* **Software:** ROS 2 Jazzy + EasyNav (Vision/LiDAR).
+* **Role:** Sensory Processor.
+* **Function:** Ingests raw LiDAR and camera data. Processes local costmaps and obstacle detection.
+* **Connectivity:** Publishes `/scan` and perceived "Conditions" to the Limbic board via ROS 2 (using Jazzy's native Zenoh RMW for inter-board stability).
+
+
+
+## Sketch of possible eventual ~2027 architecture
+
+### 1. The Lizard Brain (Hardware Abstraction)
+* **Hardware:** [STM32 H7 MCU](https://oshwhub.com/6676a/stm32h745zit6_core).
+* **Software:** copper-rs.
+* **Role:** Hard Real-Time Execution.
+* **Function:** Manages motor PID loops and hardware-level safety interlocks.
+* **I/O:** Canbus
+
+### 2. The Limbic System (Executive)
+* **Hardware:** Avaota A1 #1 (Allwinner T527).
+* **Software:** RT kernel `copper-rs` + `openrr`.
+* **Role:** Deterministic Executive.
+* **Function:** Statically scheduled Rust task graph. Executes Action on Condition (AOC) logic for topological navigation.
+* **Data Entry:** Directly consumes Zenoh keys from the Neo board to trigger mission state transitions and motion planning.
+
+### 3. The Neo (Perception)
+* **Hardware:** Avaota A1 #2 (Allwinner T527 + NPU).
+* **Software:** Dockerised ROS 2 Jazzy.
+* **Role:** Asynchronous Perception.
+* **Function:** NPU-accelerated inference (YOLO/Object tracking) and sensor fusion.
+* **Connectivity:** Native Zenoh integration via `rmw_zenoh_cpp`. Publishes environment states and "Conditions" to the Zenoh network.
+
 
 
 ## Feldfreund DevKit ROS 
