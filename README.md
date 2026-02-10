@@ -126,6 +126,8 @@ python3 agbot-diagnostic.py full
 * **Function:** Runs the Topological Navigation stack. UBLOX sensors Manages the move_base sequence and Action on Condition (AOC) logic.
 * **I/O:** Connects to u-blox via USB/UART using `ublox_dgnss` node. Translates graph goals into velocity commands for the Lizard Brain.
 
+<1GbE interconnect between these two>
+
 ### 3. The Neo (Perception)
 * **Hardware:** Avaota A1 #2 (Allwinner T527 + NPU).
 * **Software:** Dockerised ROS 2 Jazzy.
@@ -152,6 +154,8 @@ python3 agbot-diagnostic.py full
 * **Role:** Deterministic Executive.
 * **Function:** Statically scheduled Rust task graph. UBLOX sensors, Executes Action on Condition (AOC) logic for topological navigation.
 * **Data Entry:** Directly consumes Zenoh keys from the Neo board to trigger mission state transitions and motion planning.
+
+<1GbE interconnect between these two>
 
 ### 3. The Neo (Perception)
 * **Hardware:** Avaota A1 #2 (Allwinner T527 + NPU).
