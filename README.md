@@ -123,15 +123,17 @@ python3 agbot-diagnostic.py full
 * **Hardware:** Avaota A1 #1 (Allwinner T527).
 * **Software:** ROS 2 Jazzy + `topological_navigation` (AOC branch).
 * **Role:** Navigation Executive.
-* **Function:** Runs the Topological Navigation stack. Manages the move_base sequence and Action on Condition (AOC) logic.
+* **Function:** Runs the Topological Navigation stack. UBLOX sensors Manages the move_base sequence and Action on Condition (AOC) logic.
 * **I/O:** Connects to u-blox via USB/UART using `ublox_dgnss` node. Translates graph goals into velocity commands for the Lizard Brain.
 
 ### 3. The Neo (Perception)
 * **Hardware:** Avaota A1 #2 (Allwinner T527 + NPU).
-* **Software:** ROS 2 Jazzy + EasyNav (Vision/LiDAR).
-* **Role:** Sensory Processor.
-* **Function:** Ingests raw LiDAR and camera data. Processes local costmaps and obstacle detection.
-* **Connectivity:** Publishes `/scan` and perceived "Conditions" to the Limbic board via ROS 2 (using Jazzy's native Zenoh RMW for inter-board stability).
+* **Software:** Dockerised ROS 2 Jazzy.
+* **Role:** Asynchronous Perception.
+* **Function:** NPU-accelerated inference (YOLO/Object tracking) and sensor fusion.
+* **Connectivity:** Native Zenoh integration via `rmw_zenoh_cpp`. Publishes environment states and "Conditions" to the Zenoh network.
+
+
 
 
 
@@ -148,7 +150,7 @@ python3 agbot-diagnostic.py full
 * **Hardware:** Avaota A1 #1 (Allwinner T527).
 * **Software:** RT kernel `copper-rs` + `openrr`.
 * **Role:** Deterministic Executive.
-* **Function:** Statically scheduled Rust task graph. Executes Action on Condition (AOC) logic for topological navigation.
+* **Function:** Statically scheduled Rust task graph. UBLOX sensors, Executes Action on Condition (AOC) logic for topological navigation.
 * **Data Entry:** Directly consumes Zenoh keys from the Neo board to trigger mission state transitions and motion planning.
 
 ### 3. The Neo (Perception)
