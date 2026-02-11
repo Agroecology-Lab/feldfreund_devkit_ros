@@ -126,7 +126,7 @@ python3 agbot-diagnostic.py full
 * **Function:** Runs the Topological Navigation stack. UBLOX sensors Manages the move_base sequence and Action on Condition (AOC) logic.
 * **I/O:** Connects to u-blox via USB/UART using `ublox_dgnss` node. Translates graph goals into velocity commands for the Lizard Brain.
 
-<1GbE interconnect between these two>
+**<1GbE interconnect between 2&3>**
 
 ### 3. The Neo (Perception)
 * **Hardware:** Avaota A1 #2 (Allwinner T527 + NPU).
@@ -150,16 +150,24 @@ python3 agbot-diagnostic.py full
 
 ### 2. The Limbic System (Executive)
 * **Hardware:** Avaota A1 #1 (Allwinner T527).
-* **Software:** RT kernel `copper-rs` + `openrr`.
+* **Software:** RT kernel, Buildroot `copper-rs`
 * **Role:** Deterministic Executive.
 * **Function:** Statically scheduled Rust task graph. UBLOX sensors, Executes Action on Condition (AOC) logic for topological navigation.
 * **Data Entry:** Directly consumes Zenoh keys from the Neo board to trigger mission state transitions and motion planning.
 
-<1GbE interconnect between these two>
+| Core(s)   | Role                | Allocation Strategy                                                                 |
+| :-------- | :------------------ | :---------------------------------------------------------------------------------- |
+| Core 0    | OS / I/O            | Handles kernel house-keeping, SSH, and the 1GbE driver interrupts.                  |
+| Core 1    | Zenoh / Neo-link    | Dedicated to the Zenoh router and serializing incoming "Nice-to-Have" data.         |
+| Cores 2-6 | The Pilot (Nav)     | This is where the RTK EKF, Path Planner, and Task Graph live.                       |
+| Core 7    | The Bridge (Lizard) | Dedicated to SocketCAN and the high-frequency heartbeat to the STM32 (Lizard).      |
+
+
+**<1GbE interconnect between 2&3>**
 
 ### 3. The Neo (Perception)
 * **Hardware:** Avaota A1 #2 (Allwinner T527 + NPU).
-* **Software:** Dockerised ROS 2 Jazzy.
+* **Software:** Dockerised ROS 2 Jazzy & Dockerised CV packages
 * **Role:** Asynchronous Perception.
 * **Function:** NPU-accelerated inference (YOLO/Object tracking) and sensor fusion.
 * **Connectivity:** Native Zenoh integration via `rmw_zenoh_cpp`. Publishes environment states and "Conditions" to the Zenoh network.
