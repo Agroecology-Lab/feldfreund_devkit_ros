@@ -1,58 +1,35 @@
 import os
 from ament_index_python.packages import get_package_share_directory
 from launch import LaunchDescription
-from launch.actions import IncludeLaunchDescription, DeclareLaunchArgument
+from launch.actions import DeclareLaunchArgument, IncludeLaunchDescription, SetEnvironmentVariable
 from launch.launch_description_sources import PythonLaunchDescriptionSource
-from launch.substitutions import LaunchConfiguration, EnvironmentVariable, EqualsSubstitution
+from launch.substitutions import LaunchConfiguration, PythonExpression
 from launch.conditions import IfCondition
 
 def generate_launch_description():
-    # Package Paths
-    devkit_pkg = get_package_share_directory('devkit_launch')
-    ui_pkg = get_package_share_directory('devkit_ui')
+    ublox_pkg = get_package_share_directory('ublox_dgnss_node')
+    devkit_launch_pkg = get_package_share_directory('devkit_launch')
     
-    # GNSS Package Paths (Handle potential missing packages)
-    try:
-        ublox_pkg = get_package_share_directory('ublox_dgnss')
-    except:
-        ublox_pkg = ''
-        
-    # Launch Configurations
-    gps_type = LaunchConfiguration('gps_type', 
-        default=EnvironmentVariable('GPS_TYPE_ROVER', default_value='ublox'))
-    rover_port = LaunchConfiguration('rover_port', 
-        default=EnvironmentVariable('GPS_PORT_ROVER', default_value='/dev/ttyACM0'))
+    rover_port = os.getenv('GPS_PORT_ROVER', 'virtual')
+    gps_type = os.getenv('GPS_TYPE_ROVER', 'ublox')
+    mcu_port = os.getenv('MCU_PORT', 'virtual')
+
+    # SAFETY CHECK: Only launch Ublox if the port is NOT virtual
+    gps_enabled = PythonExpression(["'", rover_port, "' != 'virtual' and '", gps_type, "' == 'ublox'"])
 
     return LaunchDescription([
-        DeclareLaunchArgument('gps_type', default_value=gps_type),
-        DeclareLaunchArgument('rover_port', default_value=rover_port),
-
-        # Option A: Ublox Driver
+        SetEnvironmentVariable('RCUTILS_CONSOLE_OUTPUT_FORMAT', '[{severity}] [{name}]: {message}'),
+        
+        # Ublox Rover (Only starts if physical hardware is requested)
         IncludeLaunchDescription(
-            PythonLaunchDescriptionSource(
-                os.path.join(ublox_pkg, 'launch', 'ublox_rover_hpposllh.launch.py')
-            ),
-            launch_arguments={
-                'device': rover_port,
-                'baudrate': '460800',
-                'frame_id': 'gps_link'
-            }.items(),
-            condition=IfCondition(EqualsSubstitution(gps_type, 'ublox'))
+            PythonLaunchDescriptionSource(os.path.join(ublox_pkg, 'launch', 'ublox_rover_hpposllh.launch.py')),
+            condition=IfCondition(gps_enabled),
+            launch_arguments={'device': rover_port, 'baudrate': '460800'}.items(),
         ),
 
-        # Option B: Septentrio Driver (via your gnss.launch.py)
+        # Devkit Driver (The Bridge)
         IncludeLaunchDescription(
-            PythonLaunchDescriptionSource(
-                os.path.join(devkit_pkg, 'launch', 'gnss.launch.py')
-            ),
-            condition=IfCondition(EqualsSubstitution(gps_type, 'septentrio'))
-        ),
-
-        # Devkit Driver & UI
-        IncludeLaunchDescription(
-            PythonLaunchDescriptionSource(os.path.join(devkit_pkg, 'launch', 'devkit_driver.launch.py'))
-        ),
-        IncludeLaunchDescription(
-            PythonLaunchDescriptionSource(os.path.join(ui_pkg, 'launch', 'ui.launch.py'))
+            PythonLaunchDescriptionSource(os.path.join(devkit_launch_pkg, 'launch', 'devkit_driver.launch.py')),
+            launch_arguments={'port': mcu_port}.items(),
         ),
     ])

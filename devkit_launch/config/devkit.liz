@@ -1,19 +1,32 @@
-# Feldfreund Sowbot Hardware Definition
+# ODrive v6 CAN Hardware Definition
 p0 = expander()
-l0 = p0.output(22) # Left Motor 0
-r0 = p0.output(23) # Right Motor 0
-estop1 = p0.input(34)
-estop2 = p0.input(35)
 
-# Odometer/Speed Calculation
-core.wheels = drive(l0, r0)
+# CAN Bus at 1MBaud
+# Pins 4 and 5 are typical for ESP32 CAN TX/RX
+can_bus = can(4, 5, 1_000_000) 
 
-# Monitoring
+# Motor Definitions (Matching feldfreund.py CAN IDs)
+m_lb = can_bus.odrive_can(0x000) # Left Back
+m_lf = can_bus.odrive_can(0x100) # Left Front
+m_rb = can_bus.odrive_can(0x200) # Right Back
+m_rf = can_bus.odrive_can(0x300) # Right Front
+
+# Grouping into Tracks
+left_track = drive(m_lb, m_lf)
+right_track = drive(m_rb, m_rf)
+core.wheels = drive(left_track, right_track)
+
+# Safety Sensors (Using pins from your feldfreund.py)
+b_front_top = p0.input(21)
+b_front_bottom = p0.input(35)
+b_back = p0.input(18)
+
+# Telemetry
 core.on_every_20ms = line(
     'time', core.time,
     'linear_speed', core.wheels.linear_speed,
     'angular_speed', core.wheels.angular_speed,
-    'estop1_active', estop1.level,
-    'estop2_active', estop2.level,
-    'battery_status_level', core.vdp
+    'v_battery', core.vdp,
+    'm_lb_err', m_lb.error,
+    'm_rb_err', m_rb.error
 )
