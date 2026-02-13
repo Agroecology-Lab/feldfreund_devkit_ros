@@ -76,29 +76,49 @@ RUN --mount=type=cache,target=/root/.cache/pip \
     pip install --break-system-packages --ignore-installed --retries 10 \
     --timeout 1000 --default-timeout=1000 -r /tmp/requirements.txt
 
-# 4. ENVIRONMENT
-# Configures internal paths and forces CycloneDDS as the RMW implementation
-COPY ./docker/bashrc /tmp/bashrc
-RUN cat /tmp/bashrc >> /root/.bashrc && rm -f /tmp/bashrc
-ENV PYTHONPATH="/root/.lizard:/workspace/install/lib/python3.12/site-packages:${PYTHONPATH:+:${PYTHONPATH}}"
+# --- Section 4 (Environment) ---
+# This removes the "UndefinedVar" warning by setting a clean initial path
+ENV PYTHONPATH="/root/.lizard:/workspace/install/lib/python3.12/site-packages"
 ENV RMW_IMPLEMENTATION=rmw_cyclonedds_cpp
 ENV DEBIAN_FRONTEND=noninteractive
 
 # 5. WORKSPACE SETUP
 WORKDIR /workspace
-COPY ./devkit_driver ./src/devkit_driver
-COPY ./devkit_launch ./src/devkit_launch
-COPY ./devkit_ui ./src/devkit_ui
 
-RUN GIT_TERMINAL_PROMPT=0 git clone --depth 1 -b main https://github.com/aussierobots/ublox_dgnss src/ublox_dgnss
+# 5.1: Copy existing host source 
+COPY ./src ./src
 
-# 5.1: Automated Dependency Resolution (Clean Syntax)
-# Skip-keys are essential here to prevent rosdep from failing on manual/pip installs
+# 5.2: Hardware-specific dependencies from source
+# 1. Added 'src/' to the caatingarobotics clone path
+# 2. Added diagnostics (almost certain to be the next error if skipped)
+RUN GIT_TERMINAL_PROMPT=0 \
+    git clone -b ros2 https://github.com/ros-perception/vision_msgs.git src/vision_msgs && \
+    git clone -b ros2 https://github.com/ros/joint_state_publisher.git src/joint_state_publisher && \
+    git clone -b ros2 https://github.com/ros/xacro.git src/xacro && \
+    git clone -b main https://github.com/joaodemouragy-hash/caatingarobotics.git src/caatingarobotics && \
+    if [ ! -d "src/ublox_dgnss" ]; then \
+        git clone --depth 1 -b main https://github.com/aussierobots/ublox_dgnss src/ublox_dgnss; \
+    fi
+# ---  Section 5.3 (Rosdep) ---
 RUN if [ ! -d /etc/ros/rosdep/sources.list.d ]; then rosdep init; fi && \
     rosdep update && \
     rosdep install --from-paths src --ignore-src -y \
     --rosdistro jazzy \
     --skip-keys "\
+    python_qt_binding \
+    diagnostic_updater \
+    diagnostic_msgs \
+    rviz_common \
+    rviz_rendering \
+    rviz_default_plugins \
+    rviz_ogre_vendor \
+    rviz2 \
+    joint_state_publisher \
+    xacro \
+    vision_msgs \
+    ament_python \
+    ament_cmake_python \
+    gazebo_ros \
     nicegui \
     lizard \
     transforms3d \
@@ -111,18 +131,26 @@ RUN if [ ! -d /etc/ros/rosdep/sources.list.d ]; then rosdep init; fi && \
     foxglove_bridge \
     tf-transformations \
     ros-jazzy-tf-transformations \
-    tf_transformations \
-    ros-jazzy-tf-transformations" && \
+    tf_transformations" && \
     rm -rf /var/lib/apt/lists/*
 
 # 6. Manual PIP Overrides
 # Ensures specific high-level libraries are available in the system-site-packages
 RUN pip install --break-system-packages --no-cache-dir \
     nicegui pyserial transforms3d lizard pymongo networkx
-
+   
+   
 # 7. BUILD
+# We use --packages-skip to ignore all GUI and simulation related packages
 RUN . /opt/ros/jazzy/setup.sh && \
-    colcon build --symlink-install --cmake-args -DCMAKE_BUILD_TYPE=Release
+    colcon build --symlink-install \
+    --packages-skip \
+    agro_robot_sim \
+    joint_state_publisher_gui \
+    vision_msgs_rviz_plugins \
+    rviz_common \
+    rviz_rendering \
+    --cmake-args -DCMAKE_BUILD_TYPE=Release   
 
 # 8. ENTRYPOINT
 # Ensures the ROS environment is sourced for every command, with exec to handle signals properly
