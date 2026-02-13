@@ -29,8 +29,6 @@ RUN mkdir -p /usr/share/keyrings && \
     echo "deb [arch=$(dpkg --print-architecture) signed-by=/usr/share/keyrings/lcas-keyring.gpg] https://lcas.lincoln.ac.uk/apt/lcas noble lcas" > /etc/apt/sources.list.d/lcas.list
 
 # 4. ROS Jazzy System & Build Dependencies
-# We only install the "binaries" we aren't building from source 
-# plus the headers needed to COMPILE the source in 5.2
 RUN apt-get update && \
     apt-get install -y -o Acquire::Retries=10 --fix-missing --no-install-recommends \
     ros-jazzy-rmw-cyclonedds-cpp \
@@ -39,6 +37,7 @@ RUN apt-get update && \
     libqt6svg6-dev \
     libogre-1.12-dev \
     libusb-1.0-0-dev \
+    libcurl4-openssl-dev \
     python3-serial \
     python3-requests \
     python3-yaml \
@@ -73,42 +72,55 @@ WORKDIR /workspace
 # 9: Copy existing host source 
 COPY ./src ./src
 
-
 # 10: Hardware & Infrastructure dependencies from source
-RUN git config --global url."https://github.com/".insteadOf "git@github.com:" && \
+RUN git config --global core.askPass /bin/echo && \
     export GIT_TERMINAL_PROMPT=0 && \
     git clone --depth 1 -b ros2 https://github.com/ros-perception/vision_msgs.git src/vision_msgs && \
     git clone --depth 1 -b ros2 https://github.com/ros/joint_state_publisher.git src/joint_state_publisher && \
     git clone --depth 1 -b ros2 https://github.com/ros/xacro.git src/xacro && \
-    git clone --depth 1 -b ros2 https://github.com/ros-perception/diagnostics.git src/diagnostics && \
-    git clone --depth 1 -b ros2 https://github.com/ros-visualization/python_qt_binding.git src/python_qt_binding && \
-    git clone --depth 1 -b ros2 https://github.com/ros-visualization/rviz.git src/rviz && \
+    git clone --depth 1 -b ros2 https://github.com/ros/diagnostics.git src/diagnostics && \
+    git clone --depth 1 -b main https://github.com/ros-visualization/python_qt_binding.git src/python_qt_binding && \
     git clone --depth 1 -b main https://github.com/joaodemouragy-hash/caatingarobotics.git src/caatingarobotics && \
-    git clone --depth 1 -b ros2 https://github.com/ros-drivers/transport_drivers.git src/transport_drivers && \
-    git clone --depth 1 -b ros2 https://github.com/ros-drivers/usb_cam.git src/usb_cam && \
-    git clone --depth 1 -b ros2 https://github.com/ros-perception/image_transport_plugins.git src/image_transport_plugins && \
-    git clone --depth 1 -b ros2 https://github.com/septentrio-gnss/septentrio_gnss_driver.git src/septentrio_gnss_driver && \
-    git clone --depth 1 -b main https://github.com/aussierobots/ublox_dgnss src/ublox_dgnss && \
-    git clone --depth 1 -b ros2 https://github.com/ros-navigation/ntrip_client.git src/ntrip_client && \
-    git clone --depth 1 -b main https://github.com/foxglove/ros-foxglove-bridge.git src/foxglove_bridge && \
-    git clone --depth 1 -b ros2 https://github.com/ros/geometry2.git src/geometry2
-
+    git clone --depth 1 -b main https://github.com/ros-drivers/transport_drivers.git src/transport_drivers && \
+    git clone --depth 1 -b main https://github.com/ros-drivers/usb_cam.git src/usb_cam && \
+        git clone --depth 1  https://github.com/ros2/rviz src/rviz && \
+    git clone --depth 1 https://github.com/ros-perception/image_transport_plugins.git src/image_transport_plugins && \
+    git clone --depth 1 https://github.com/septentrio-gnss/septentrio_gnss_driver.git src/septentrio_gnss_driver && \
+    git clone --depth 1 https://github.com/aussierobots/ublox_dgnss src/ublox_dgnss && \
+    git clone --depth 1 https://github.com/foxglove/ros-foxglove-bridge.git src/foxglove_bridge && \
+    git clone --depth 1 -b ros2 https://github.com/ros2/geometry2.git src/geometry2
+#issues with this, fix later   git clone --depth 1 https://github.com/ros-agriculture/ntrip_client_ros.git src/ntrip_client && \
 
 # 11. (Rosdep)
 RUN if [ ! -d /etc/ros/rosdep/sources.list.d ]; then rosdep init; fi && \
     rosdep update && \
+    apt-get update && \
     rosdep install --from-paths src --ignore-src -y \
     --rosdistro jazzy \
     --skip-keys "\
+    catkin \
+    google-benchmark \
+    cmake_modules \
+    message_generation \
+    message_runtime \
+    roscpp \
+    roslib \
+    rospy \
+    rosconsole \
+    rosgraph_msgs \
+    geometry_msgs \
+    resource_retriever \
+    ament_python \
     gazebo_ros \
     nicegui \
     lizard \
     transforms3d \
     pyserial \
+    rosunit \
+    media_export \
     tf-transformations \
     tf_transformations" && \
     rm -rf /var/lib/apt/lists/*
-
 
 
 # 12. Manual PIP Overrides
@@ -118,16 +130,16 @@ RUN pip install --break-system-packages --no-cache-dir \
    
    
 # 13. BUILD
-# We use --packages-skip to ignore all GUI and simulation related packages
 RUN . /opt/ros/jazzy/setup.sh && \
     colcon build --symlink-install \
     --packages-skip \
     agro_robot_sim \
     joint_state_publisher_gui \
-    vision_msgs_rviz_plugins \
+    vision_msgs \
+    rviz_plugins \
     rviz_common \
     rviz_rendering \
-    --cmake-args -DCMAKE_BUILD_TYPE=Release   
+    --cmake-args -DCMAKE_BUILD_TYPE=Release  
 
 # 14. ENTRYPOINT
 # Ensures the ROS environment is sourced for every command, with exec to handle signals properly
