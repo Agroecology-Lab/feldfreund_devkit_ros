@@ -1,50 +1,64 @@
+# BUILD: docker build -t feldfreund:jazzy .
 FROM ros:jazzy
+RUN echo "Acquire::http::Timeout \"300\";\nAcquire::ftp::Timeout \"300\";\nAcquire::Retries \"20\";" > /etc/apt/apt.conf.d/99timeout
 
-# 0. MIRROR swap (Cloudflare Resilience)
-# Cloudflare's mirror is often faster and less prone to the 408 Timeouts you're seeing
-RUN sed -i 's|http://gb.archive.ubuntu.com/ubuntu/|https://mirror.accum.se/ubuntu/|g' /etc/apt/sources.list.d/ubuntu.sources || true && \
-    sed -i 's|http://archive.ubuntu.com/ubuntu/|https://mirror.accum.se/ubuntu/|g' /etc/apt/sources.list.d/ubuntu.sources || true
+# 0. RESILIENCE: Mirror Swap (Optional: Remove if you still get 400 Bad Request)
+#RUN sed -i 's|http://gb.archive.ubuntu.com/ubuntu/|https://mirror.accum.se/ubuntu/|g' /etc/apt/sources.list.d/ubuntu.sources || true
+RUN sed -i 's|http://.*archive.ubuntu.com/ubuntu/|https://mirror.init7.net/ubuntu/|g' /etc/apt/sources.list.d/ubuntu.sources || true
 
-# 1. Locale & Timezone
+# 1. LOCALES & TIMEZONE
 RUN apt-get update && apt-get install -y locales tzdata && \
     locale-gen en_US.UTF-8 && \
-    update-locale LC_ALL=en_US.UTF-8 LANG=en_US.UTF-8 && \
-    ln -fs /usr/share/zoneinfo/UTC /etc/localtime && \
-    dpkg-reconfigure --frontend noninteractive tzdata
-ENV LANG=en_US.UTF-8
-ENV LC_ALL=en_US.UTF-8
+    update-locale LC_ALL=en_US.UTF-8 LANG=en_US.UTF-8
+ENV LANG=en_US.UTF-8 LC_ALL=en_US.UTF-8 DEBIAN_FRONTEND=noninteractive
 
-# 2. Hardened System Dependencies (With Retries)
-# We set Acquire::Retries to 10 to push through network blips
+# 2. CORE UTILITIES & PYTHON (Non-negotiable tools)
 RUN apt-get update && \
-    apt-get install -y -o Acquire::Retries=10 --fix-missing --no-install-recommends \
-    wget ca-certificates unzip git python3-pip python3-rosdep curl gnupg2 \
-    libusb-1.0-0-dev libopencv-dev && \
+    apt-get install -y --no-install-recommends \
+    wget curl unzip ca-certificates gnupg2 python3-pip python3-setuptools python3-rosdep && \
     apt-get clean && rm -rf /var/lib/apt/lists/*
 
-# 3. L-CAS Repository (Noble Only)
+# 3. L-CAS REPOSITORY
 RUN mkdir -p /usr/share/keyrings && \
     curl -fsSL https://lcas.lincoln.ac.uk/apt/repo_signing.key | \
     gpg --dearmor -o /usr/share/keyrings/lcas-keyring.gpg && \
     echo "deb [arch=$(dpkg --print-architecture) signed-by=/usr/share/keyrings/lcas-keyring.gpg] https://lcas.lincoln.ac.uk/apt/lcas noble lcas" > /etc/apt/sources.list.d/lcas.list
 
-# 4. ROS Jazzy System & Build Dependencies
+
+# Manually fetch with SSL check disabled to bypass exit code 5
+RUN wget --no-check-certificate --timeout=30 --tries=10 -O /tmp/iceoryx.deb \
+    "https://packages.ros.org/ros2/ubuntu/pool/main/r/ros-jazzy-iceoryx-binding-c/ros-jazzy-iceoryx-binding-c_2.0.6-1noble.20260121.180617_amd64.deb" && \
+    (dpkg -i /tmp/iceoryx.deb || apt-get install -y -f) && \
+    rm -f /tmp/iceoryx.deb
+
+
+
+# 4. SYSTEM & ROS BINARIES
+# We explicitly include rtcm-msgs and gazebo-ros here to satisfy CMake
 RUN apt-get update && \
-    apt-get install -y -o Acquire::Retries=10 --fix-missing --no-install-recommends \
+    apt-get install -y --fix-missing -o Acquire::Retries=10 --no-install-recommends \
+    git libusb-1.0-0-dev libopencv-dev iputils-ping nano \
+    libcurl4t64 libcurl4-openssl-dev || true && \
+    apt-get install -y --fix-missing -o Acquire::Retries=10 --no-install-recommends \
+    ros-jazzy-septentrio-gnss-driver \
+    ros-jazzy-iceoryx-hoofs \
+    ros-jazzy-iceoryx-posh \
     ros-jazzy-rmw-cyclonedds-cpp \
     ros-jazzy-rosbag2-storage-mcap \
-    qt6-base-dev \
-    libqt6svg6-dev \
-    libogre-1.12-dev \
-    libusb-1.0-0-dev \
-    libcurl4-openssl-dev \
-    python3-serial \
-    python3-requests \
-    python3-yaml \
+    ros-jazzy-rtcm-msgs \
+    ros-jazzy-usb-cam \
+    ros-jazzy-image-transport \
+    ros-jazzy-foxglove-bridge \
+    ros-jazzy-tf2-geometry-msgs \
+    ros-jazzy-foxglove-msgs \
+    ros-jazzy-xacro \
+    ros-jazzy-ros-gz \
+    ros-jazzy-tf-transformations \
+    ros-jazzy-cv-bridge \
+    python3-serial python3-requests python3-yaml \
     && apt-get clean && rm -rf /var/lib/apt/lists/*
 
-# 5. LIZARD HARDENING
-# Specifically targets the ESP32 devtools release for hardware orchestration
+# 5. LIZARD INSTALL
 RUN mkdir -p /root/.lizard && cd /root && \
     LIZARD_VERSION=v0.9.0 && \
     wget --tries=10 --waitretry=5 --retry-connrefused \
@@ -53,95 +67,36 @@ RUN mkdir -p /root/.lizard && cd /root && \
     chmod +x /root/.lizard/espresso.py && \
     pip install --break-system-packages --ignore-installed --retries 10 -r /root/.lizard/requirements.txt
 
-# 6. PIP HARDENING
-# Uses BuildKit cache mount to accelerate repetitive builds
+# 6. PIP REQUIREMENTS
 COPY requirements.txt /tmp/requirements.txt
+
 RUN --mount=type=cache,target=/root/.cache/pip \
-    pip install --break-system-packages --ignore-installed --retries 10 \
-    --timeout 1000 --default-timeout=1000 -r /tmp/requirements.txt
+    pip install --break-system-packages --ignore-installed \
+    --retries 10 --timeout 120 \
+    nicegui transforms3d lizard pymongo networkx pyserial scipy -r /tmp/requirements.txt
 
-# 7. Environment
-# This removes the "UndefinedVar" warning by setting a clean initial path
-ENV PYTHONPATH="/root/.lizard:/workspace/install/lib/python3.12/site-packages"
-ENV RMW_IMPLEMENTATION=rmw_cyclonedds_cpp
-ENV DEBIAN_FRONTEND=noninteractive
-
-# 8. WORKSPACE SETUP
+# 7. WORKSPACE SETUP
 WORKDIR /workspace
+COPY ./devkit_driver ./src/devkit_driver
+COPY ./devkit_launch ./src/devkit_launch
+COPY ./devkit_ui ./src/devkit_ui
 
-# 9: Copy existing host source 
-COPY ./src ./src
+RUN GIT_TERMINAL_PROMPT=0 git clone --depth 1 -b main https://github.com/aussierobots/ublox_dgnss src/ublox_dgnss 
+COPY ./src/caatingarobotics ./src/caatingarobotics
 
-# 10: Hardware & Infrastructure dependencies from source
-RUN git config --global core.askPass /bin/echo && \
-    export GIT_TERMINAL_PROMPT=0 && \
-    git clone --depth 1 -b ros2 https://github.com/ros-perception/vision_msgs.git src/vision_msgs && \
-    git clone --depth 1 -b ros2 https://github.com/ros/joint_state_publisher.git src/joint_state_publisher && \
-    git clone --depth 1 -b ros2 https://github.com/ros/xacro.git src/xacro && \
-    git clone --depth 1 -b ros2 https://github.com/ros/diagnostics.git src/diagnostics && \
-    git clone --depth 1 -b main https://github.com/ros-visualization/python_qt_binding.git src/python_qt_binding && \
-    git clone --depth 1 -b main https://github.com/joaodemouragy-hash/caatingarobotics.git src/caatingarobotics && \
-    git clone --depth 1 -b main https://github.com/ros-drivers/transport_drivers.git src/transport_drivers && \
-    git clone --depth 1 -b main https://github.com/ros-drivers/usb_cam.git src/usb_cam && \
-        git clone --depth 1  https://github.com/ros2/rviz src/rviz && \
-    git clone --depth 1 https://github.com/ros-perception/image_transport_plugins.git src/image_transport_plugins && \
-    git clone --depth 1 https://github.com/septentrio-gnss/septentrio_gnss_driver.git src/septentrio_gnss_driver && \
-    git clone --depth 1 https://github.com/aussierobots/ublox_dgnss src/ublox_dgnss && \
-    git clone --depth 1 https://github.com/foxglove/ros-foxglove-bridge.git src/foxglove_bridge && \
-    git clone --depth 1 -b ros2 https://github.com/ros2/geometry2.git src/geometry2
-#issues with this, fix later   git clone --depth 1 https://github.com/ros-agriculture/ntrip_client_ros.git src/ntrip_client && \
-
-# 11. (Rosdep)
+# 8. ROSDEP & FULL BUILD
 RUN if [ ! -d /etc/ros/rosdep/sources.list.d ]; then rosdep init; fi && \
     rosdep update && \
-    apt-get update && \
-    rosdep install --from-paths src --ignore-src -y \
-    --rosdistro jazzy \
-    --skip-keys "\
-    catkin \
-    google-benchmark \
-    cmake_modules \
-    message_generation \
-    message_runtime \
-    roscpp \
-    roslib \
-    rospy \
-    rosconsole \
-    rosgraph_msgs \
-    geometry_msgs \
-    resource_retriever \
-    ament_python \
-    gazebo_ros \
-    nicegui \
-    lizard \
-    transforms3d \
-    pyserial \
-    rosunit \
-    media_export \
-    tf-transformations \
-    tf_transformations" && \
-    rm -rf /var/lib/apt/lists/*
+    rosdep install --from-paths src --ignore-src -y --rosdistro jazzy \
+    --skip-keys "nicegui lizard transforms3d pyserial septentrio_gnss_driver rtcm_msgs gazebo_ros gazebo_ros_pkgs ament_python gps_msgs libusb-1.0-dev tf_transformations xacro image_transport usb_cam libcurl4-openssl-dev libcurl4 libcurl4t64 libcurl-dev libcurl curl diagnostic_updater diagnostic_msgs joint_state_publisher joint-state-publisher vision_msgs cv_bridge cv-bridge" && \
+    /bin/bash -c "source /opt/ros/jazzy/setup.bash && colcon build --symlink-install --cmake-args -DCMAKE_BUILD_TYPE=Release"
 
+# 9. RUNTIME
+COPY ./docker/bashrc /tmp/bashrc
+RUN cat /tmp/bashrc >> /root/.bashrc && rm -f /tmp/bashrc
 
-# 12. Manual PIP Overrides
-# Ensures specific high-level libraries are available in the system-site-packages
-RUN pip install --break-system-packages --no-cache-dir \
-    nicegui pyserial transforms3d lizard pymongo networkx
-   
-   
-# 13. BUILD
-RUN . /opt/ros/jazzy/setup.sh && \
-    colcon build --symlink-install \
-    --packages-skip \
-    agro_robot_sim \
-    joint_state_publisher_gui \
-    vision_msgs \
-    rviz_plugins \
-    rviz_common \
-    rviz_rendering \
-    --cmake-args -DCMAKE_BUILD_TYPE=Release  
+ENV PYTHONPATH="/root/.lizard:/workspace/install/lib/python3.12/site-packages"
+ENV RMW_IMPLEMENTATION=rmw_cyclonedds_cpp
 
-# 14. ENTRYPOINT
-# Ensures the ROS environment is sourced for every command, with exec to handle signals properly
 ENTRYPOINT ["/bin/bash", "-c", "source /opt/ros/jazzy/setup.bash && [ -f /workspace/install/setup.bash ] && source /workspace/install/setup.bash && exec \"$@\"", "--"]
 CMD ["bash"]

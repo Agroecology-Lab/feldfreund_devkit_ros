@@ -55,23 +55,11 @@ This `sowbot` branch is under heavy development and may be broken at any given m
 | D2 | Caatinga biome dataset | Semi-arid row-crop imagery from Brazilian Caatinga conditions contributed by [caatingarobotics](https://github.com/joaodemouragy-hash/caatingarobotics). Validated on T527 AIPU. | Active | 2026 |
 ---
 
-### Status key
-
-| Symbol | Meaning |
-|--------|---------|
-| ✅ Done | Merged and functional on `sowbot` branch |
-| 🔄 Active | In active development |
-| 🚧 In progress | Started, not yet functional |
-| 🔜 Planned | Designed, not yet started |
-| 🔬 Research | Technology selected, implementation not begun |
-
----
-
 ### Collaboration
 
-This project is built on and maintains upstream compatibility with [zauberzeug/feldfreund\_devkit\_ros](https://github.com/zauberzeug/feldfreund_devkit_ros).
+This project is built on and aims to maintain upstream compatibility with [zauberzeug/feldfreund\_devkit\_ros](https://github.com/zauberzeug/feldfreund_devkit_ros).
 
-Navigation software integration is developed in collaboration with the [Lincoln Centre for Autonomous Systems (LCAS)](https://lcas.lincoln.ac.uk) as part of the [Agri-OpenCore](https://agri-opencore.org) open ROS 2 ecosystem for agricultural robotics.
+Navigation software integration is developed from the work of [Lincoln Centre for Autonomous Systems (LCAS)](https://lcas.lincoln.ac.uk) as part of the [Agri-OpenCore](https://agri-opencore.org) open ROS 2 ecosystem for agricultural robotics.
 
 Perception datasets and simulation environments are developed in collaboration with [caatingarobotics](https://github.com/joaodemouragy-hash/caatingarobotics), targeting semi-arid row-crop conditions in the Brazilian Caatinga biome.
 
