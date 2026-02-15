@@ -81,8 +81,8 @@ COPY ./devkit_driver ./src/devkit_driver
 COPY ./devkit_launch ./src/devkit_launch
 COPY ./devkit_ui ./src/devkit_ui
 
-RUN GIT_TERMINAL_PROMPT=0 git clone --depth 1 -b main https://github.com/aussierobots/ublox_dgnss src/ublox_dgnss 
-COPY ./src/caatingarobotics ./src/caatingarobotics
+RUN GIT_TERMINAL_PROMPT=0 git clone --depth 1 -b main https://github.com/aussierobots/ublox_dgnss src/ublox_dgnss && \
+    GIT_TERMINAL_PROMPT=0 git clone --depth 1 -b jazzy https://github.com/samuk/caatingarobotics src/caatingarobotics
 
 # 8. ROSDEP & FULL BUILD
 RUN if [ ! -d /etc/ros/rosdep/sources.list.d ]; then rosdep init; fi && \
