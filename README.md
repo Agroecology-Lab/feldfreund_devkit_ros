@@ -12,19 +12,58 @@ This `sowbot` branch is under heavy development and may be broken at any given m
 
 ### Sowbot roadmap
 
-| Maturity | Feature | Description |
-| :--- | :--- | :--- |
-| **0.8** | **Containerised Deployment** | Full ROS 2 Jazzy/Humble stack managed via Docker and the `manage.py` orchestration script. |
-| **0.6** | **Stable Device Addressing** | Enhanced `fixusb.py` utility with architecture detection (Jetson vs Generic) and kernel-level sanitization (`low_latency`). |
-| **0.5** | **Real-time Telemetry & Teleop Dashboard** | Web-based cockpit for joystick control and GPS health monitoring; symlink-fixed for `devkit_ui` discovery. |
-| **0.4** | **[Ublox DGNSS Driver](https://github.com/aussierobots/ublox_dgnss)** | Modified driver providing high-bandwidth UBX binary data; now supports dynamic switching with Septentrio via `fixusb.py`. |
-| **0.3** | **[Topological Navigation](https://github.com/LCAS/topological_navigation)** | Integration of the LCAS topological framework for graph-based semantic waypoint navigation. (Or  **[EasyNavigation](https://github.com/EasyNavigation/EasyNavigation)**)|
-| **0.0** | **[Sentor Safety & Health Monitoring](https://github.com/LCAS/sentor)** | Integrated hardware-software heartbeat and topic-based diagnostics to trigger automated recovery or emergency motor cut-off. |
-| **0.0** | **[Visual Crop-Row Navigation](https://github.com/Agroecology-Lab/visual-multi-crop-row-navigation/tree/ROS2)** | Vision-based guidance system for following crop rows; currently in porting status for ROS 2. |
-| **0.0** | **[Vizanti Web Visualisation](https://github.com/MoffKalast/vizanti/tree/ros2)** | Planned integration of a web-based mission planner and 3D visualiser for remote operations. || **0.0** | **[Quick hitch for AgBots](https://manaculture.ca/en/a-frame-quick-hitch/)** | Develop & Test triangular quick (qwicc?) hitch system for AgBots. |
-| **0.0** | **[Delta robot module for precision sowing or weeding](https://github.com/Agroecology-Lab/Open-Weeding-Delta/tree/master/hardware#readme)** | Develop & Test Delta module. |
-| **0.0** | **[L&ASER weeding module](https://github.com/Laudando-Associates-LLC/LASER)** | Integrate and validate Laudando laser weeding on Sowbot. |
+## Sowbot Roadmap
 
+> Branch: `sowbot` | ROS 2 Jazzy | Upstream: [zauberzeug/feldfreund\_devkit\_ros](https://github.com/zauberzeug/feldfreund_devkit_ros)  
+> Open-source precision seeding and weeding robot — [sowbot.co.uk](https://sowbot.co.uk) | [Agroecology Lab](https://agroecologylab.org.uk)  
+> **Collaborators welcome.** See [CONTRIBUTING.md](CONTRIBUTING.md). Contact: [sowbot.co.uk](https://sowbot.co.uk)
+
+---
+
+| # | Feature | Description | Status | Phase |
+|---|---------|-------------|--------|-------|
+| **FOUNDATION** | | | | **2025** |
+| F1 | Containerised deployment | Full ROS 2 Jazzy stack managed via Docker and `manage.py`. Live volume mapping to `/workspace`. Build, full-build, and runtime modes. | Done | 2025 |
+| F2 | Stable device addressing | `fixusb.py` with Jetson/generic architecture detection, kernel `low_latency` mode, and udev symlink generation. Writes `.env` consumed by all launch files. | Done | 2025 |
+| F3 | Teleop dashboard | NiceGUI web cockpit on `:80` for joystick control and GPS health monitoring. | Done | 2025 |
+| F4 | ublox DGNSS driver | Modified `ublox_dgnss` providing high-bandwidth UBX binary data. Dual F9P moving-base configuration with dynamic port assignment via `fixusb.py`. | Active | 2025 |
+| F5 | Diagnostics TUI | `agbot-diagnostic.py` terminal status view of all hardware topics. Run inside container via `login.sh`. | Done | 2025 |
+| **MVP FIELD** | | | | **2026** |
+| M1 | **AOC platform integration** | The first non-CUDA, low-cost open hardware entry in the AOC ecosystem. Demonstrates AOC platform abstraction on affordable ARM hardware accessible to smallholders. | Planned | 2026 |
+| M2 | **Topological navigation + nav2 shim** | LCAS `topological_navigation` (AOC branch) running on ROS 2 Jazzy with a `nav2` compatibility shim. First Jazzy-compatible AOC navigation deployment. Action on Condition (AOC) logic for mission state transitions. | Planned | 2026 |
+| M3 | **Open-field row-crop scenario** | AOC scenario definition for open-field arable/horticultural conditions. Environment template derived from real field topology. Caatinga biome variant contributed by [caatingarobotics](https://github.com/joaodemouragy-hash/caatingarobotics). | Planned | 2026 |
+| M4 | RTK-GNSS localisation | Dual u-blox F9P moving-base. NAV-RELPOSNED heading vector fused with wheel odometry in `robot_localisation` EKF. Heading validated at antenna separation >= 0.5 m. | Active | 2026 |
+| M5 | Dual-SBC ROS 2 stack | Both Avaota A1 boards (8x Cortex-A55, T527) run ROS 2 Jazzy with `rmw_zenoh_cpp`. Static peer Zenoh session over dedicated 1 GbE crossover. Multicast discovery disabled. | Planned | 2026 |
+| M6 | NPU perception (Neo board) | Crop detection and row-offset inference on T527 AIPU (2 TOPS). Publishes `/aoc/conditions` to Limbic System via Zenoh. 200 ms capture-to-publish SLA. Non-CUDA NPU inference — validates AOC software interfaces on ARM hardware. | Planned | 2026 |
+| M7 | Sentor safety monitoring | [LCAS Sentor](https://github.com/LCAS/sentor) topic-based diagnostics and hardware-software heartbeat. Triggers automated recovery or emergency motor cut-off on topic silence. | Planned | 2026 |
+| M8 | Visual crop-row navigation | ROS 2 port of [visual-multi-crop-row-navigation](https://github.com/Agroecology-Lab/visual-multi-crop-row-navigation/tree/ROS2). Vision-based row-following on Neo board. Integration conditional on port completion. | In progress | 2026 |
+| M9 | Vizanti web visualisation | [Vizanti](https://github.com/MoffKalast/vizanti/tree/ros2) web-based mission planner and live telemetry for field operators. | Research | 2026 |
+| M10 | Perception degraded mode | Limbic monitors Neo heartbeat. If Neo silent > 2 s: enters `PERCEPTION_DEGRADED`, nav continues on GNSS/odometry only, visual guidance inhibited. Operator acknowledgement required to restore. | Planned | 2026 |
+| M11 | AOC ecosystem integration guide | Written getting-started guide for deploying AOC topological navigation on Sowbot hardware. Contributed to [agri-opencore.org](https://agri-opencore.org) as external ecosystem documentation. | Planned | 2026 |
+| **PRODUCTION** | | | | **2027** |
+| P1 | STM32H7 + copper-rs MCU | Replace ESP32/Lizard DSL with STM32H745 running [copper-rs](https://github.com/copper-project/copper-rs) statically-scheduled Rust firmware. Hard real-time motor PID, hardware safety interlocks. | Research | 2027 |
+| P2 | CANopen bus | ISO 11898 FDCAN at 500 kbit/s arbitration / 2 Mbit/s data phase. [lely-core](https://github.com/lely-industries/lely-core) CANopen master on Limbic T527 native M_CAN peripheral. DSP402 drive profile. | Research | 2027 |
+| P3 | CANopen safety heartbeat | STM32 100 ms heartbeat (object 0x1017). Limbic consumer timeout 250 ms. On timeout: NMT -> PRE-OPERATIONAL, drives coast. Bus-off: PWM disabled, brake asserted. Manual NMT reset required. | Research | 2027 |
+| P4 | OTA firmware update | CANopen SDO block transfer (object 0x1F50) delivers copper-rs firmware binary to STM32. CRC validated before boot. No physical USB access required in field. | Research | 2027 |
+| P5 | RT kernel + core isolation | PREEMPT_RT kernel, `isolcpus=4-7`. CANopen master core 4 (SCHED_FIFO 80), watchdog core 5, RTK EKF core 2 (SCHED_FIFO 60). GbE/CAN IRQ affinity pinned to core 0. | Planned | 2027 |
+| P6 | Buildroot image | Custom Buildroot for Limbic System: RT kernel, Rust toolchain, copper-rs task graph. Reproducible CI build pipeline. | Research | 2027 |
+| **END-EFFECTORS** | | | | **TBD** |
+| E1 | Delta weeding module | [Open-Weeding-Delta](https://github.com/Agroecology-Lab/Open-Weeding-Delta) precision mechanical weeding end-effector. CANopen actuator node on delta controller. | Research | TBD |
+| E2 | LASER weeding module | [Laudando LASER](https://github.com/Laudando-Associates-LLC/LASER) integration and validation on Sowbot. Requires E-Stop interlocking with CANopen safety chain. | Research | TBD |
+| **DATASETS & COLLABORATION** | | | | **Ongoing** |
+| D1 | UK open-field dataset | Field imagery and GNSS logs from UK agroecological farm conditions. Published under CC licence for training and benchmarking. | Planned | 2026 |
+| D2 | Caatinga biome dataset | Semi-arid row-crop imagery from Brazilian Caatinga conditions contributed by [caatingarobotics](https://github.com/joaodemouragy-hash/caatingarobotics). Validated on T527 AIPU. | Active | 2026 |
+---
+
+### Collaboration
+
+This project is built on and aims to maintain upstream compatibility with [zauberzeug/feldfreund\_devkit\_ros](https://github.com/zauberzeug/feldfreund_devkit_ros).
+
+Navigation software integration is developed from the work of [Lincoln Centre for Autonomous Systems (LCAS)](https://lcas.lincoln.ac.uk) as part of the [Agri-OpenCore](https://agri-opencore.org) open ROS 2 ecosystem for agricultural robotics.
+
+Perception datasets and simulation environments are developed in collaboration with [caatingarobotics](https://github.com/joaodemouragy-hash/caatingarobotics), targeting semi-arid row-crop conditions in the Brazilian Caatinga biome.
+
+> ⚠️ The `sowbot` branch is under active development and may be broken at any given moment. For a stable reference implementation see the upstream Zauberzeug project.
 # ⚠️ CRITICAL SAFETY WARNING: 
 
 **THIS SOFTWARE COULD CONTROL PHYSICAL HARDWARE CAPABLE OF PRODUCING SIGNIFICANT KINETIC FORCE.**
