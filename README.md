@@ -1,3 +1,5 @@
+This branch is pretty experimental
+
 
 # Sowbot (ROS 2 stack)
 
@@ -55,18 +57,6 @@ This `sowbot` branch is under heavy development and may be broken at any given m
 | D2 | Caatinga biome dataset | Semi-arid row-crop imagery from Brazilian Caatinga conditions contributed by [caatingarobotics](https://github.com/joaodemouragy-hash/caatingarobotics). Validated on T527 AIPU. | Active | 2026 |
 ---
 
-### Status key
-
-| Symbol | Meaning |
-|--------|---------|
-| ✅ Done | Merged and functional on `sowbot` branch |
-| 🔄 Active | In active development |
-| 🚧 In progress | Started, not yet functional |
-| 🔜 Planned | Designed, not yet started |
-| 🔬 Research | Technology selected, implementation not begun |
-
----
-
 ### Collaboration
 
 This project is built on and maintains upstream compatibility with [zauberzeug/feldfreund\_devkit\_ros](https://github.com/zauberzeug/feldfreund_devkit_ros).
@@ -103,7 +93,7 @@ This repo may contain traces of LLM slop, We've done our best to mitigate this. 
 ### 1. Clone the Repository
 Open a terminal on your host machine and download the workspace:
 ```bash
-git clone -b sowbot https://github.com/Agroecology-Lab/feldfreund_devkit_ros.git
+git clone -b caatinga-dev https://github.com/Agroecology-Lab/feldfreund_devkit_ros.git
 cd feldfreund_devkit_ros
 ```
 
