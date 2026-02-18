@@ -99,7 +99,8 @@ cd feldfreund_devkit_ros
 Use the management script to build the ROS 2 workspace and launch the robot stack. This script automatically handles hardware discovery and port permissions:
 ```bash
 ./manage.py full-build
-./manage.py
+xhost +local:docker
+./manage.py 
 ```
 *Note: manage.py automatically detects hardware ports (ESP32 & u-blox), updates your .env configuration, and launches the container with live volume mapping to /workspace.*
 
