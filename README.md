@@ -123,6 +123,9 @@ To enter the running container for debugging or manual ROS 2 commands:
 ```bash
 ./login.sh
 ```
+### Caatinga tools
+
+Once inside the container refer to [Docs](https://github.com/samuk/caatingarobotics/?tab=readme-ov-file#3-run-agro_robot_sim-simulation-and-navigation)
 
 ### Diagnostics
 If hardware is connected but topics are not flowing, run the diagnostic tool from inside the container:
