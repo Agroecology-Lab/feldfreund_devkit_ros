@@ -46,7 +46,7 @@ This `sowbot` branch is under heavy development and may be broken at any given m
 | P3 | CANopen safety heartbeat | STM32 100 ms heartbeat (object 0x1017). Limbic consumer timeout 250 ms. On timeout: NMT -> PRE-OPERATIONAL, drives coast. Bus-off: PWM disabled, brake asserted. Manual NMT reset required. | Research | 2027 |
 | P4 | OTA firmware update | CANopen SDO block transfer (object 0x1F50) delivers copper-rs firmware binary to STM32. CRC validated before boot. No physical USB access required in field. | Research | 2027 |
 | P5 | RT kernel + core isolation | PREEMPT_RT kernel, `isolcpus=4-7`. CANopen master core 4 (SCHED_FIFO 80), watchdog core 5, RTK EKF core 2 (SCHED_FIFO 60). GbE/CAN IRQ affinity pinned to core 0. | Planned | 2027 |
-| P6 | Buildroot image | Custom Buildroot for Limbic System: RT kernel, Rust toolchain, copper-rs task graph. Reproducible CI build pipeline. | Research | 2027 |
+| P6 | Buildroot image | Custom Buildroot for Limbic System: RT kernel, Yocto or buildroot,  LCAS `topological_navigation` (AOC branch) running on ROS 2 Jazzy with a `nav2`  | Research | 2027 |
 | **END-EFFECTORS** | | | | **TBD** |
 | E1 | Delta weeding module | [Open-Weeding-Delta](https://github.com/Agroecology-Lab/Open-Weeding-Delta) precision mechanical weeding end-effector. CANopen actuator node on delta controller. | Research | TBD |
 | E2 | LASER weeding module | [Laudando LASER](https://github.com/Laudando-Associates-LLC/LASER) integration and validation on Sowbot. Requires E-Stop interlocking with CANopen safety chain. | Research | TBD |
