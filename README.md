@@ -55,6 +55,8 @@ This `sowbot` branch is under heavy development and may be broken at any given m
 | D2 | Caatinga biome dataset | Semi-arid row-crop imagery from Brazilian Caatinga conditions contributed by [caatingarobotics](https://github.com/joaodemouragy-hash/caatingarobotics). Validated on T527 AIPU. | Active | 2026 |
 ---
 
+
+
 ### Collaboration
 
 This project is built on and aims to maintain upstream compatibility with [zauberzeug/feldfreund\_devkit\_ros](https://github.com/zauberzeug/feldfreund_devkit_ros).
@@ -63,8 +65,9 @@ Navigation software integration is developed from the work of [Lincoln Centre fo
 
 Perception datasets and simulation environments are developed in collaboration with [caatingarobotics](https://github.com/joaodemouragy-hash/caatingarobotics), targeting semi-arid row-crop conditions in the Brazilian Caatinga biome.
 
-> ⚠️ The `sowbot` branch is under active development and may be broken at any given moment. For a stable reference implementation see the upstream Zauberzeug project.
 # ⚠️ CRITICAL SAFETY WARNING: 
+
+ The `sowbot` branch is under active development and may be broken at any given moment. For a stable reference implementation see the upstream Zauberzeug project.
 
 **THIS SOFTWARE COULD CONTROL PHYSICAL HARDWARE CAPABLE OF PRODUCING SIGNIFICANT KINETIC FORCE.**
 
@@ -175,9 +178,14 @@ python3 agbot-diagnostic.py full
 * **Function:** NPU-accelerated inference (YOLO/Object tracking) and sensor fusion.
 * **Connectivity:** Native Zenoh integration via `rmw_zenoh_cpp`. Publishes environment states and "Conditions" to the Zenoh network.
 
+# Navigation detail for 2026
 
-
-
+| Layer          | Component                                      | Role                                                        |
+|----------------|------------------------------------------------|-------------------------------------------------------------|
+| **Task**       | LCAS topological_navigation                    | "Visit crop rows A, B, C" — graph of named farm locations   |
+| **Navigation** | Nav2 (fazenda_completa)                        | Moves between poses                                         |
+| **Localisation**| GPS + EKF (navsat_transform + ekf_node)       | Outdoor positioning                                         |
+| **Simulation** | Gazebo (sim.launch.py + minha_fazenda.world)   | Simulated environment                                       |
 
 ## Sketch of possible eventual ~2027 architecture
 
@@ -192,7 +200,7 @@ python3 agbot-diagnostic.py full
 * **Hardware:** Avaota A1 #1 (Allwinner T527).
 * **Software:** RT kernel, Buildroot `copper-rs`
 * **Role:** Deterministic Executive.
-* **Function:** Statically scheduled Rust task graph. UBLOX sensors, Executes Action on Condition (AOC) logic for topological navigation.
+* **Function:** UBLOX sensors, Executes Action on Condition (AOC) logic for topological navigation.
 * **Data Entry:** Directly consumes Zenoh keys from the Neo board to trigger mission state transitions and motion planning.
 
 | Core(s)   | Role                | Allocation Strategy                                                                 |
