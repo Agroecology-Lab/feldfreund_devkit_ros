@@ -7,16 +7,11 @@ Development is led by the <a href="https://agroecologylab.org.uk" target="_blank
 
 Reference open hardware stack(s) under development at [Sowbot.co.uk](https://sowbot.co.uk) in addition to orginal [Zauberzeug Field Friend](https://github.com/zauberzeug/)
 
-This `sowbot` branch is under heavy development and may be broken at any given moment. For a stable version, check out the upstream Zauberzeug project
-
-
-### Sowbot roadmap
-
 ## Sowbot Roadmap
 
-> Branch: `sowbot` | ROS 2 Jazzy | Upstream: [zauberzeug/feldfreund\_devkit\_ros](https://github.com/zauberzeug/feldfreund_devkit_ros)  
-> Open-source precision seeding and weeding robot — [sowbot.co.uk](https://sowbot.co.uk) | [Agroecology Lab](https://agroecologylab.org.uk)  
-> **Collaborators welcome.** See [CONTRIBUTING.md](CONTRIBUTING.md). Contact: [sowbot.co.uk](https://sowbot.co.uk)
+Branch: `sowbot` | ROS 2 Jazzy | Upstream: [zauberzeug/feldfreund\_devkit\_ros](https://github.com/zauberzeug/feldfreund_devkit_ros)  
+Open-source precision seeding and weeding robot — [sowbot.co.uk](https://sowbot.co.uk) | [Agroecology Lab](https://agroecologylab.org.uk)  
+**Collaborators welcome.** See [CONTRIBUTING.md](CONTRIBUTING.md). Contact: [sowbot.co.uk](https://sowbot.co.uk)
 
 ---
 
@@ -55,19 +50,17 @@ This `sowbot` branch is under heavy development and may be broken at any given m
 | D2 | Caatinga biome dataset | Semi-arid row-crop imagery from Brazilian Caatinga conditions contributed by [caatingarobotics](https://github.com/joaodemouragy-hash/caatingarobotics). Validated on T527 AIPU. | Active | 2026 |
 ---
 
-
-
 ### Collaboration
 
 This project is built on and aims to maintain upstream compatibility with [zauberzeug/feldfreund\_devkit\_ros](https://github.com/zauberzeug/feldfreund_devkit_ros).
 
-Navigation software integration is developed from the work of [Lincoln Centre for Autonomous Systems (LCAS)](https://lcas.lincoln.ac.uk) as part of the [Agri-OpenCore](https://agri-opencore.org) open ROS 2 ecosystem for agricultural robotics.
+High Level navigation is developed from the work of [Lincoln Centre for Autonomous Systems (LCAS)](https://lcas.lincoln.ac.uk) as part of the [Agri-OpenCore](https://agri-opencore.org) open ROS 2 ecosystem for agricultural robotics.
 
-Perception datasets and simulation environments are developed in collaboration with [caatingarobotics](https://github.com/joaodemouragy-hash/caatingarobotics), targeting semi-arid row-crop conditions in the Brazilian Caatinga biome.
+Perception models, Nav2 stack, datasets and simulation environments are developed in collaboration with [caatingarobotics](https://github.com/joaodemouragy-hash/caatingarobotics), The [Sowbot Jazzy fork](https://github.com/samuk/caatingarobotics) is pending upstream merge.
 
 # ⚠️ CRITICAL SAFETY WARNING: 
 
- The `sowbot` branch is under active development and may be broken at any given moment. For a stable reference implementation see the upstream Zauberzeug project.
+ This software is under active development and may be broken at any given moment. For a stable reference implementation see the upstream Zauberzeug project.
 
 **THIS SOFTWARE COULD CONTROL PHYSICAL HARDWARE CAPABLE OF PRODUCING SIGNIFICANT KINETIC FORCE.**
 
@@ -155,7 +148,7 @@ python3 agbot-diagnostic.py full
 
 ## Sketch of MVP 2026 architecture
 
-### 1. The Lizard Brain (Hardware Abstraction)
+### 1. The Lizard Brain (RT Microcontroller)
 * **Hardware:** ESP32 MCU.
 * **Software:** Lizard DSL.
 * **Role:** Hard Real-Time Execution.
