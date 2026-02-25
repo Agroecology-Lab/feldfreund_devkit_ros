@@ -10,11 +10,10 @@ from typing import List, Dict
 
 class DevkitManager:
     def __init__(self):
-        self.image_name = 'feldfreund:jazzy'
-        self.container_name = 'feldfreund_runtime'
+        self.image_name = 'sowbot:jazzy'
+        self.container_name = 'sowbot_runtime'
         self.root_dir = Path(__file__).parent.resolve()
         self.src_dir = self.root_dir / 'src'
-        self.packages = ['devkit_launch', 'devkit_ui', 'devkit_driver']
         signal.signal(signal.SIGINT, self._handle_exit)
 
     def _log(self, msg: str, level: str = "INFO"):
@@ -26,21 +25,39 @@ class DevkitManager:
         sys.exit(0)
 
     def sync_workspace(self):
-        """Standardizes the workspace by mirroring src/ to the root for the Docker context."""
-        for pkg in self.packages:
+        """Standardizes the workspace by mirroring EVERYTHING from src/ to root."""
+        if not self.src_dir.exists():
+            self._log("src/ directory not found!", "ERROR")
+            return
+
+        # 1. Identify everything currently in src/
+        current_packages = [d.name for d in self.src_dir.iterdir() if d.is_dir() and not d.name.startswith('.')]
+        
+        # 2. Sync each one
+        for pkg in current_packages:
             pkg_src = self.src_dir / pkg
             pkg_root = self.root_dir / pkg
             
-            # Wipe stale root copy to ensure no 'ghost' files (like the old ublox.launch.py) remain
+            # Remove stale symlinks or folders at the root level (the Docker context area)
             if pkg_root.exists():
-                shutil.rmtree(pkg_root)
+                if pkg_root.is_symlink():
+                    pkg_root.unlink()
+                else:
+                    shutil.rmtree(pkg_root)
             
-            if pkg_src.is_dir():
-                self._log(f"Syncing {pkg}...")
-                shutil.copytree(pkg_src, pkg_root)
+            self._log(f"Syncing {pkg} to build context...")
+            shutil.copytree(pkg_src, pkg_root)
+
+        # 3. Cleanup: Remove folders at root that no longer exist in src/
+        for item in self.root_dir.iterdir():
+            if item.is_dir() and item.name not in current_packages:
+                # Protection: Don't delete standard project folders
+                if item.name not in ['src', 'docker', 'build', 'install', 'log', '.git', '__pycache__']:
+                    self._log(f"Cleaning up ghost package: {item.name}", "DEBUG")
+                    shutil.rmtree(item)
 
     def build(self, full_clean: bool = False):
-        """Builds the Docker image. Use full-build to bypass cache and purge old artifacts."""
+        """Builds the Docker image."""
         self.sync_workspace()
         build_cmd = ['docker', 'build', '-t', self.image_name, '-f', 'docker/Dockerfile', '.']
         
@@ -60,7 +77,7 @@ class DevkitManager:
                 if '=' in line and not line.startswith('#') for k, v in [line.split('=', 1)]}
 
     def run(self, extra_args: List[str]):
-        """Runs the stack. Maps ports and environment variables from .env."""
+        """Runs the stack."""
         if (self.root_dir / 'fixusb.py').exists():
             subprocess.run(['python3', 'fixusb.py'], check=True)
 
