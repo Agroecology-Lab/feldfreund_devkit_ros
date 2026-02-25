@@ -54,6 +54,7 @@ RUN apt-get update && \
     ros-jazzy-image-transport \
     ros-jazzy-foxglove-bridge \
     ros-jazzy-tf2-geometry-msgs \
+    ros-jazzy-tf-transformations \
     ros-jazzy-interactive-markers \
     python3-serial python3-requests python3-yaml \
     && apt-get clean && rm -rf /var/lib/apt/lists/*
@@ -87,7 +88,9 @@ COPY ./devkit_launch ./src/devkit_launch
 COPY ./devkit_ui ./src/devkit_ui
 
 RUN GIT_TERMINAL_PROMPT=0 git clone --depth 1 -b main https://github.com/aussierobots/ublox_dgnss src/ublox_dgnss && \
-    GIT_TERMINAL_PROMPT=0 git clone --depth 1 -b aoc_refactor https://github.com/LCAS/topological_navigation src/topological_navigation
+    GIT_TERMINAL_PROMPT=0 git clone --depth 1 -b aoc_refactor https://github.com/LCAS/topological_navigation src/topological_navigation && \
+    GIT_TERMINAL_PROMPT=0 git clone --depth 1 -b jazzy https://github.com/samuk/caatingarobotics src/caatingarobotics && \
+    GIT_TERMINAL_PROMPT=0 git clone --depth 1 -b master https://github.com/LCAS/sentor src/sentor
 
 # 9.1: Automated Dependency Resolution
 RUN if [ ! -d /etc/ros/rosdep/sources.list.d ]; then rosdep init; fi && \
@@ -96,7 +99,6 @@ RUN if [ ! -d /etc/ros/rosdep/sources.list.d ]; then rosdep init; fi && \
     rosdep install --from-paths src --ignore-src -y \
     --rosdistro jazzy \
     --skip-keys "\
-    tf-transformations \
     ros-jazzy-tf-transformations \
     tf_transformations \
     interactive_markers \
@@ -116,7 +118,15 @@ RUN if [ ! -d /etc/ros/rosdep/sources.list.d ]; then rosdep init; fi && \
     image_transport \
     foxglove_bridge \
     lizard \
-    ament_python" && \
+    ament_python \
+    gazebo_ros \
+    agro_robot_sim \
+    caatinga_nav \
+    caatinga_vision \
+    sowbot_row_follow \
+    ultralytics \
+    PyQt5 \
+    sentor" && \
     rm -rf /var/lib/apt/lists/*
     
 
@@ -124,7 +134,8 @@ RUN if [ ! -d /etc/ros/rosdep/sources.list.d ]; then rosdep init; fi && \
 
 # 10. Manual PIP Overrides
 RUN pip install --break-system-packages --no-cache-dir \
-    nicegui pyserial transforms3d lizard pymongo networkx
+    nicegui pyserial transforms3d lizard pymongo networkx \
+    ultralytics PyQt5 PyQtWebEngine
 
 # 11. BUILD
 RUN . /opt/ros/jazzy/setup.sh && \
