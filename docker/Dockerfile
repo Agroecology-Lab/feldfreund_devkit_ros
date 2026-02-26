@@ -1,10 +1,10 @@
 FROM ros:jazzy
 
-# 0. MIRROR swap (Cloudflare Resilience)
+# 1. MIRROR swap (Cloudflare Resilience)
 RUN sed -i 's|http://gb.archive.ubuntu.com/ubuntu/|https://mirror.accum.se/ubuntu/|g' /etc/apt/sources.list.d/ubuntu.sources || true && \
     sed -i 's|http://archive.ubuntu.com/ubuntu/|https://mirror.accum.se/ubuntu/|g' /etc/apt/sources.list.d/ubuntu.sources || true
 
-# 1. Locale & Timezone
+# 2. Locale & Timezone
 RUN apt-get update && apt-get install -y locales tzdata && \
     locale-gen en_US.UTF-8 && \
     update-locale LC_ALL=en_US.UTF-8 LANG=en_US.UTF-8 && \
@@ -13,35 +13,21 @@ RUN apt-get update && apt-get install -y locales tzdata && \
 ENV LANG=en_US.UTF-8
 ENV LC_ALL=en_US.UTF-8
 
-# 2. Hardened System Dependencies (With Retries)
+# 3. Hardened System Dependencies (With Retries)
 RUN apt-get update && \
     apt-get install -y -o Acquire::Retries=10 --fix-missing --no-install-recommends \
     wget ca-certificates unzip git python3-pip python3-rosdep curl gnupg2 \
     libusb-1.0-0-dev libopencv-dev && \
     apt-get clean && rm -rf /var/lib/apt/lists/*
 
-# 3. L-CAS Repository (Noble Only)
+# 4. L-CAS Repository (Noble Only)
 RUN mkdir -p /usr/share/keyrings && \
     curl -fsSL https://lcas.lincoln.ac.uk/apt/repo_signing.key | \
     gpg --dearmor -o /usr/share/keyrings/lcas-keyring.gpg && \
     echo "deb [arch=$(dpkg --print-architecture) signed-by=/usr/share/keyrings/lcas-keyring.gpg] https://lcas.lincoln.ac.uk/apt/lcas noble lcas" > /etc/apt/sources.list.d/lcas.list
-
-# 4. ROS Jazzy Binaries
-RUN apt-get update && \
-    apt-get install -y -o Acquire::Retries=10 --fix-missing --no-install-recommends \
-    ros-jazzy-septentrio-gnss-driver \
-    ros-jazzy-rmw-cyclonedds-cpp \
-    ros-jazzy-rosbag2-storage-mcap \
-    ros-jazzy-rtcm-msgs \
-    ros-jazzy-usb-cam \
-    ros-jazzy-image-transport \
-    ros-jazzy-foxglove-bridge \
-    ros-jazzy-tf2-geometry-msgs \
-    ros-jazzy-interactive-markers \
-    python3-serial python3-requests python3-yaml \
-    && apt-get clean && rm -rf /var/lib/apt/lists/*
-
+    
 # 5. Core tools & Essential ROS Binaries
+ARG CACHE_BUST=1
 RUN apt-get update && \
     apt-get install -y --fix-missing --no-install-recommends \
     wget ca-certificates unzip git python3-pip python3-rosdep \
@@ -89,7 +75,7 @@ COPY ./devkit_ui ./src/devkit_ui
 
 RUN GIT_TERMINAL_PROMPT=0 git clone --depth 1 -b main https://github.com/aussierobots/ublox_dgnss src/ublox_dgnss && \
     GIT_TERMINAL_PROMPT=0 git clone --depth 1 -b aoc_refactor https://github.com/LCAS/topological_navigation src/topological_navigation && \
-    GIT_TERMINAL_PROMPT=0 git clone --depth 1 -b jazzy https://github.com/samuk/caatingarobotics src/caatingarobotics && \
+    GIT_TERMINAL_PROMPT=0 git clone --depth 1 -b feat/gazebo-harmonic-port https://github.com/samuk/caatingarobotics src/caatingarobotics && \
     GIT_TERMINAL_PROMPT=0 git clone --depth 1 -b master https://github.com/LCAS/sentor src/sentor
 
 # 9.1: Automated Dependency Resolution
@@ -137,10 +123,24 @@ RUN pip install --break-system-packages --no-cache-dir \
     nicegui pyserial transforms3d lizard pymongo networkx \
     ultralytics PyQt5 PyQtWebEngine
 
-# 11. BUILD
+    
+# 11. BUILD (Cleanup moved here)
 RUN . /opt/ros/jazzy/setup.sh && \
-    colcon build --symlink-install --cmake-args -DCMAKE_BUILD_TYPE=Release
+    colcon build --symlink-install --cmake-args -DCMAKE_BUILD_TYPE=Release && \
+    apt-get clean && rm -rf /var/lib/apt/lists/*
 
 # 12. ENTRYPOINT
 ENTRYPOINT ["/bin/bash", "-c", "source /opt/ros/jazzy/setup.bash && [ -f /workspace/install/setup.bash ] && source /workspace/install/setup.bash && exec \"$@\"", "--"]
-CMD ["bash"]
+CMD ["bash"]    
+    
+    
+    
+    
+    
+    
+    
+    
+    
+    
+    
+    
