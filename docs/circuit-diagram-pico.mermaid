@@ -1,0 +1,30 @@
+flowchart TD
+    A["🔋 3S LiPo Battery ~11.1V"] --> B["⚡ Blade Fuse"]
+
+    B --> C["XT60 (F) Connector A"]
+    B --> D["XT60 (F) Connector B"]
+
+    C --> E[" Voltage regulator/isolator PCB"]
+
+    E --> J["Barrel Jack 1"]
+    E --> K["Barrel Jack 2"]
+
+    J --> L["🖥️ Avaota A1 SBC #1"]
+    K --> M["🖥️ Avaota A1 SBC #2"]
+
+    D --> F["XT60 (M) Screw Terminal Block"]
+    F --> G["Cable to PH 2.0 Connector"]
+    G --> H["Zio Motor Driver"]
+
+    style A fill:#c0392b,color:#fff,stroke:#922b21
+    style B fill:#f39c12,color:#fff,stroke:#d68910
+    style C fill:#e67e22,color:#fff,stroke:#ca6f1e
+    style D fill:#e67e22,color:#fff,stroke:#ca6f1e
+    style E fill:#2980b9,color:#fff,stroke:#1a5276
+    style J fill:#2980b9,color:#fff,stroke:#1a5276
+    style K fill:#2980b9,color:#fff,stroke:#1a5276
+    style L fill:#8e44ad,color:#fff,stroke:#6c3483
+    style M fill:#8e44ad,color:#fff,stroke:#6c3483
+    style F fill:#7f8c8d,color:#fff,stroke:#626567
+    style G fill:#7f8c8d,color:#fff,stroke:#626567
+    style H fill:#27ae60,color:#fff,stroke:#1e8449
