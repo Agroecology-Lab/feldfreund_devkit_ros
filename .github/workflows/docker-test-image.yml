@@ -4,6 +4,7 @@ on:
   push:
     branches: [caatinga-dev, robbrit/set-up-ci]
     paths:
+      - '.github/workflows/docker-test-image.yml'
       - 'docker/**'
       - 'requirements.txt'
       - 'manage.py'
