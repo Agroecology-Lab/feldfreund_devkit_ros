@@ -9,10 +9,6 @@ RUN sed -i \
     sed -i 's/^Suites: noble$/Suites: noble noble-updates noble-security/' \
     /etc/apt/sources.list.d/ubuntu.sources
 
-
-
-
-
 # 2. Locale & Timezone
 RUN apt-get update && apt-get install -y locales tzdata && \
     locale-gen en_US.UTF-8 && \
@@ -34,7 +30,7 @@ RUN mkdir -p /usr/share/keyrings && \
     curl -fsSL https://lcas.lincoln.ac.uk/apt/repo_signing.key | \
     gpg --dearmor -o /usr/share/keyrings/lcas-keyring.gpg && \
     echo "deb [arch=$(dpkg --print-architecture) signed-by=/usr/share/keyrings/lcas-keyring.gpg] https://lcas.lincoln.ac.uk/apt/lcas noble lcas" > /etc/apt/sources.list.d/lcas.list
-    
+
 # 4b. Mirror ROS2 packages repo to avoid 400 Bad Request from CDN
 RUN sed -i 's|http://packages.ros.org/ros2/ubuntu|https://packages.ros.org/ros2/ubuntu|g' \
     /etc/apt/sources.list.d/ros2-latest.list 2>/dev/null || \
@@ -43,7 +39,7 @@ RUN sed -i 's|http://packages.ros.org/ros2/ubuntu|https://packages.ros.org/ros2/
     echo 'Acquire::Retries "10";' > /etc/apt/apt.conf.d/80retries && \
     echo 'Acquire::http::Timeout "120";' >> /etc/apt/apt.conf.d/80retries && \
     echo 'Acquire::https::Timeout "120";' >> /etc/apt/apt.conf.d/80retries
-    
+
 # 5. Core tools & Manual Nav2/Control Fix (Forces refresh to fix 400 Bad Request)
 ARG CACHE_BUST=1
 RUN for i in 1 2 3 4 5; do \
@@ -67,7 +63,7 @@ RUN for i in 1 2 3 4 5; do \
       && break || (echo "Attempt $i failed, retrying in 15s..." && sleep 15); \
     done && \
     apt-get clean && rm -rf /var/lib/apt/lists/*
-    
+
 # 6. LIZARD HARDENING
 RUN mkdir -p /root/.lizard && cd /root && \
     LIZARD_VERSION=v0.9.0 && \
@@ -84,6 +80,9 @@ RUN --mount=type=cache,target=/root/.cache/pip \
     --timeout 1000 --default-timeout=1000 \
     opencv-python-headless \
     -r /tmp/requirements.txt
+
+# 7.1 rosys config
+RUN mkdir -p /root/.rosys && echo '{}' > /root/.rosys/rosys.config.json
 
 # 8. ENVIRONMENT
 COPY ./docker/bashrc /tmp/bashrc
@@ -153,10 +152,18 @@ RUN apt-get update && apt-get install -y --fix-broken && \
     done && \
     rm -rf /var/lib/apt/lists/*
 
-# 10. Manual PIP Overrides (No PyQt)
+# 10. Manual PIP Overrides (CPU-only torch to avoid CUDA bloat)
 RUN pip install --break-system-packages --no-cache-dir \
-    nicegui pyserial transforms3d lizard pymongo networkx \
-    ultralytics 
+    "transforms3d>=0.4.2" && \
+    pip install --break-system-packages --no-cache-dir \
+    torch torchvision --index-url https://download.pytorch.org/whl/cpu && \
+    pip install --break-system-packages --no-cache-dir \
+    nicegui pyserial lizard pymongo networkx ultralytics
+
+# 10.5. RViz2
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    ros-jazzy-rviz2 && \
+    apt-get clean && rm -rf /var/lib/apt/lists/*
 
 # 11. BUILD
 RUN . /opt/ros/jazzy/setup.sh && \
