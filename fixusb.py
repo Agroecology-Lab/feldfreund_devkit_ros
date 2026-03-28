@@ -92,8 +92,9 @@ def scan_and_export():
     for p in ports:
         if p.vid in [UBLOX_VID, SEP_VID]:
             g_type = 'ublox' if p.vid == UBLOX_VID else 'septentrio'
-            gnss_found.append((p.device, g_type))
-            print(f'Found {g_type.upper()} GPS: {p.device}')
+            g_serial = p.serial_number or ''
+            gnss_found.append((p.device, g_type, g_serial))
+            print(f'Found {g_type.upper()} GPS: {p.device} (serial={g_serial or "unknown"})')
         elif p.vid == ESP32_VID:
             mcu_device = p.device
             print(f'Found ESP32 MCU: {mcu_device}')
@@ -102,15 +103,13 @@ def scan_and_export():
         mcu_device = '/dev/ttyTHS0'
         print(f'Using Jetson Header MCU: {mcu_device}')
 
-    r_port = gnss_found[0][0] if len(gnss_found) > 0 else 'virtual'
-    r_type = gnss_found[0][1] if len(gnss_found) > 0 else 'none'
-    r1_port = gnss_found[1][0] if len(gnss_found) > 1 else 'virtual'
-    r1_type = gnss_found[1][1] if len(gnss_found) > 1 else 'none'
+    r_port,   r_type,  r_serial  = gnss_found[0] if len(gnss_found) > 0 else ('virtual', 'none', '')
+    r1_port,  r1_type, r1_serial = gnss_found[1] if len(gnss_found) > 1 else ('virtual', 'none', '')
     mcu_p = mcu_device if mcu_device else 'virtual'
 
-    sanitize_hardware(r_port, '46800')
-    sanitize_hardware(r1_port, '46800')
-    sanitize_hardware(mcu_p, '115200')
+    sanitize_hardware(r_port,  '460800')
+    sanitize_hardware(r1_port, '460800')
+    sanitize_hardware(mcu_p,   '115200')
 
     usb_cam = 'true' if Path('/dev/video0').exists() else 'false'
     axis_cam = 'true' if subprocess.run(['ping', '-c', '1', '-W', '1', AXIS_IP], 
@@ -121,8 +120,10 @@ def scan_and_export():
         f.write(f'SOWBOT_SAFETY_ACK={safety_ack}\n')
         f.write(f'GPS_PORT_ROVER={r_port}\n')
         f.write(f'GPS_TYPE_ROVER={r_type}\n')
+        f.write(f'GPS_SERIAL_ROVER={r_serial}\n')
         f.write(f'GPS_PORT_ROVER1={r1_port}\n')
         f.write(f'GPS_TYPE_ROVER1={r1_type}\n')
+        f.write(f'GPS_SERIAL_ROVER1={r1_serial}\n')
         f.write(f'MCU_PORT={mcu_p}\n')
         f.write(f'USB_CAM_ENABLED={usb_cam}\n')
         f.write(f'AXIS_CAM_ENABLED={axis_cam}\n')
@@ -131,7 +132,11 @@ def scan_and_export():
         f.write(f'IS_JETSON={"true" if is_jetson else "false"}\n')
     
     print(f'\nConfiguration Exported to .env')
-    print(f'Safety Ack: {safety_ack} | MCU: {mcu_p} | Rover: {r_port} | Rover1: {r1_port}')
+    print(f'Safety Ack: {safety_ack} | MCU: {mcu_p}')
+    print(f'Rover:  {r_port}  serial={r_serial or "none"}  type={r_type}')
+    print(f'Rover1: {r1_port}  serial={r1_serial or "none"}  type={r1_type}')
 
 if __name__ == '__main__':
     scan_and_export()
+
+

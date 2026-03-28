@@ -32,19 +32,19 @@ class DevkitManager:
 
         # 1. Identify everything currently in src/
         current_packages = [d.name for d in self.src_dir.iterdir() if d.is_dir() and not d.name.startswith('.')]
-        
+
         # 2. Sync each one
         for pkg in current_packages:
             pkg_src = self.src_dir / pkg
             pkg_root = self.root_dir / pkg
-            
+
             # Remove stale symlinks or folders at the root level (the Docker context area)
             if pkg_root.exists():
                 if pkg_root.is_symlink():
                     pkg_root.unlink()
                 else:
                     shutil.rmtree(pkg_root)
-            
+
             self._log(f"Syncing {pkg} to build context...")
             shutil.copytree(pkg_src, pkg_root)
 
@@ -60,11 +60,11 @@ class DevkitManager:
         """Builds the Docker image."""
         self.sync_workspace()
         build_cmd = ['docker', 'build', '-t', self.image_name, '-f', 'docker/Dockerfile', '.']
-        
+
         if full_clean:
             self._log("Full rebuild requested: Purging host artifacts and cache...", "WARN")
             build_cmd.insert(2, '--no-cache')
-            for d in ['build', 'install', 'log']: 
+            for d in ['build', 'install', 'log']:
                 shutil.rmtree(self.root_dir / d, ignore_errors=True)
 
         if subprocess.run(build_cmd).returncode != 0:
@@ -73,7 +73,7 @@ class DevkitManager:
     def _get_env_config(self) -> Dict[str, str]:
         env_file = self.root_dir / '.env'
         if not env_file.exists(): return {}
-        return {k.strip(): v.strip() for line in env_file.read_text().splitlines() 
+        return {k.strip(): v.strip() for line in env_file.read_text().splitlines()
                 if '=' in line and not line.startswith('#') for k, v in [line.split('=', 1)]}
 
     def run(self, extra_args: List[str]):
@@ -90,25 +90,29 @@ class DevkitManager:
         if is_sim == 'false' and Path(mcu_port).exists():
             self._log(f"Waking MCU on {mcu_port}")
             os.system(f"stty -F {mcu_port} 115200 && (echo 's' > {mcu_port} &)")
-
+            
+            
         ros_command = (
-            "source /opt/ros/jazzy/setup.bash && "
-            "if [ -f /workspace/install/setup.bash ]; then source /workspace/install/setup.bash; fi && "
-            f"ros2 launch devkit_launch devkit.launch.py sim:={is_sim} rover_port:={r_port} mcu_port:={mcu_port} " +
-            " ".join(extra_args)
-        )
+  	  "source /opt/ros/jazzy/setup.bash && "
+  	  "if [ -f /workspace/install/setup.bash ]; then source /workspace/install/setup.bash; fi && "
+ 	  f"ros2 launch devkit_launch devkit.launch.py sim:={is_sim} rover_port:={r_port} mcu_port:={mcu_port} " +
+      " ".join(extra_args)
+)    
+
+       
 
         docker_cmd = [
             'docker', 'run', '-it', '--rm', '--name', self.container_name, '--net=host', '--privileged',
             '--env', 'RMW_IMPLEMENTATION=rmw_cyclonedds_cpp',
             '--env', 'PYTHONPATH=/root/.lizard:/workspace/install/lib/python3.12/site-packages',
             '--env-file', str(self.root_dir / '.env') if (self.root_dir / '.env').exists() else '/dev/null',
-            '-v', '/dev:/dev', '-v', f'{self.root_dir}:/workspace/host_root:ro',
-            self.image_name, 'bash', '-c', ros_command
+            '-v', '/dev:/dev',
+            self.image_name, 'bash', '-c', ros_command,
         ]
 
         self._log(f"Runtime active. Sim: {is_sim.upper()}")
         subprocess.run(docker_cmd)
+
 
 if __name__ == '__main__':
     manager = DevkitManager()
