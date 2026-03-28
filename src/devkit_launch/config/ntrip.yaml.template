@@ -1,0 +1,9 @@
+ntrip_client_node:
+  ros__parameters:
+    host: ""           # NTRIP caster hostname or IP, e.g. "ntrip.example.com"
+    port: 2101         # NTRIP caster port (standard is 2101)
+    mountpoint: ""     # Mountpoint name, e.g. "MOUNTPOINT0"
+    authenticate: true
+    username: ""
+    password: ""
+    rtcm_message_package: rtcm_msgs  # Must match ublox_dgnss expectation
