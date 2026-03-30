@@ -119,4 +119,14 @@ def generate_launch_description():
                 os.path.join(ui_pkg, 'launch', 'ui.launch.py')
             ),
         ),
+
+        # Topological Navigation
+        IncludeLaunchDescription(
+            PythonLaunchDescriptionSource(
+                os.path.join(
+                    get_package_share_directory('topological_navigation'),
+                    'launch', 'topological_navigation.launch.py'
+                )
+            ),
+        ),
     ])

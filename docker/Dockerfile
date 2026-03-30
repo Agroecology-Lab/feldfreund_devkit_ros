@@ -40,7 +40,7 @@ RUN sed -i 's|http://packages.ros.org/ros2/ubuntu|https://packages.ros.org/ros2/
     echo 'Acquire::http::Timeout "120";' >> /etc/apt/apt.conf.d/80retries && \
     echo 'Acquire::https::Timeout "120";' >> /etc/apt/apt.conf.d/80retries
 
-# 5. Core tools & Manual Nav2/Control Fix (Forces refresh to fix 400 Bad Request)
+# 5. Core tools & RViz2 display deps (no nvidia/GLX — uses software rendering via llvmpipe)
 ARG CACHE_BUST=1
 RUN for i in 1 2 3 4 5; do \
       apt-get update && \
@@ -59,17 +59,21 @@ RUN for i in 1 2 3 4 5; do \
         ros-jazzy-nav2-bt-navigator \
         ros-jazzy-control-msgs \
         ros-jazzy-controller-manager-msgs \
+        ros-jazzy-rviz2 \
+        libgl1-mesa-dri \
+        libgl1-mesa-glx \
+        libegl1-mesa \
+        libgles2-mesa \
+        mesa-utils \
+        x11-utils \
         python3-serial python3-requests python3-yaml \
       && break || (echo "Attempt $i failed, retrying in 15s..." && sleep 15); \
     done && \
     apt-get clean && rm -rf /var/lib/apt/lists/*
 
-# 6. LIZARD HARDENING
-RUN mkdir -p /root/.lizard && cd /root && \
-    LIZARD_VERSION=v0.9.0 && \
-    wget --tries=10 --waitretry=5 --retry-connrefused \
-    https://github.com/zauberzeug/lizard/releases/download/${LIZARD_VERSION}/lizard_firmware_and_devtools_${LIZARD_VERSION}_esp32.zip && \
-    unzip -qo *.zip -d /root/.lizard && rm *.zip && \
+# 6. LIZARD HARDENING — Agroecology-Lab fork
+RUN mkdir -p /root/.lizard && \
+    GIT_TERMINAL_PROMPT=0 git clone --depth 1 https://github.com/Agroecology-Lab/lizard /root/.lizard && \
     chmod +x /root/.lizard/espresso.py && \
     pip install --break-system-packages --ignore-installed --retries 10 -r /root/.lizard/requirements.txt
 
@@ -90,6 +94,9 @@ RUN cat /tmp/bashrc >> /root/.bashrc && rm -f /tmp/bashrc
 ENV PYTHONPATH="/root/.lizard:/workspace/install/lib/python3.12/site-packages"
 ENV RMW_IMPLEMENTATION=rmw_cyclonedds_cpp
 ENV DEBIAN_FRONTEND=noninteractive
+# Software rendering fallback — allows RViz2 without a GPU or X forwarding nvidia driver
+ENV LIBGL_ALWAYS_SOFTWARE=1
+ENV MESA_GL_VERSION_OVERRIDE=3.3
 
 # 9. WORKSPACE SETUP
 WORKDIR /workspace
@@ -97,10 +104,14 @@ COPY ./devkit_driver ./src/devkit_driver
 COPY ./devkit_launch ./src/devkit_launch
 COPY ./devkit_ui ./src/devkit_ui
 
-RUN GIT_TERMINAL_PROMPT=0 git clone --depth 1 -b main https://github.com/aussierobots/ublox_dgnss src/ublox_dgnss && \
-    GIT_TERMINAL_PROMPT=0 git clone --depth 1 -b aoc_refactor https://github.com/LCAS/topological_navigation src/topological_navigation && \
-    GIT_TERMINAL_PROMPT=0 git clone --depth 1 -b feat/gazebo-harmonic-port https://github.com/samuk/caatingarobotics src/caatingarobotics && \
-    GIT_TERMINAL_PROMPT=0 git clone --depth 1 -b master https://github.com/LCAS/sentor src/sentor
+RUN GIT_TERMINAL_PROMPT=0 git clone --depth 1 -b main \
+        https://github.com/aussierobots/ublox_dgnss src/ublox_dgnss && \
+    GIT_TERMINAL_PROMPT=0 git clone --depth 1 -b aoc_refactor_container \
+        https://github.com/LCAS/topological_navigation src/topological_navigation && \
+    GIT_TERMINAL_PROMPT=0 git clone --depth 1 -b feat/gazebo-harmonic-port \
+        https://github.com/samuk/caatingarobotics src/caatingarobotics && \
+    GIT_TERMINAL_PROMPT=0 git clone --depth 1 -b master \
+        https://github.com/LCAS/sentor src/sentor
 
 # 9.1: Automated Dependency Resolution
 RUN apt-get update && apt-get install -y --fix-broken && \
@@ -159,11 +170,6 @@ RUN pip install --break-system-packages --no-cache-dir \
     torch torchvision --index-url https://download.pytorch.org/whl/cpu && \
     pip install --break-system-packages --no-cache-dir \
     nicegui pyserial lizard pymongo networkx ultralytics
-
-# 10.5. RViz2
-RUN apt-get update && apt-get install -y --no-install-recommends \
-    ros-jazzy-rviz2 && \
-    apt-get clean && rm -rf /var/lib/apt/lists/*
 
 # 11. BUILD
 RUN . /opt/ros/jazzy/setup.sh && \
