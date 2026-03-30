@@ -23,7 +23,8 @@ ENV DEBIAN_FRONTEND=noninteractive
 RUN apt-get update && \
     apt-get install -y -o Acquire::Retries=10 --fix-missing --no-install-recommends \
     wget ca-certificates unzip git python3-pip python3-rosdep curl gnupg2 \
-    libusb-1.0-0-dev && \
+    libusb-1.0-0-dev \
+    ros-jazzy-ros-gz && \
     apt-get clean && rm -rf /var/lib/apt/lists/*
 
 # 4. L-CAS repository
@@ -41,6 +42,7 @@ RUN sed -i 's|http://packages.ros.org/ros2/ubuntu|https://packages.ros.org/ros2/
     echo 'Acquire::Retries "10";'          >  /etc/apt/apt.conf.d/80retries && \
     echo 'Acquire::http::Timeout "120";'   >> /etc/apt/apt.conf.d/80retries && \
     echo 'Acquire::https::Timeout "120";'  >> /etc/apt/apt.conf.d/80retries
+    
 
 # 5. ROS packages + RViz2 (software rendering only, no nvidia/GLX)
 ARG CACHE_BUST=1
@@ -113,18 +115,11 @@ COPY ./devkit_driver ./src/devkit_driver
 COPY ./devkit_launch ./src/devkit_launch
 COPY ./devkit_ui     ./src/devkit_ui
 
-RUN GIT_TERMINAL_PROMPT=0 git clone --depth 1 -b main \
-        https://github.com/aussierobots/ublox_dgnss \
-        src/ublox_dgnss && \
-    GIT_TERMINAL_PROMPT=0 git clone --depth 1 -b aoc_refactor_container \
-        https://github.com/LCAS/topological_navigation \
-        src/topological_navigation && \
-    GIT_TERMINAL_PROMPT=0 git clone --depth 1 -b feat/gazebo-harmonic-port \
-        https://github.com/samuk/caatingarobotics \
-        src/caatingarobotics && \
-    GIT_TERMINAL_PROMPT=0 git clone --depth 1 -b master \
-        https://github.com/LCAS/sentor \
-        src/sentor
+#WORKSPACE SETUP (Fixed branch for ublox_dgnss)
+RUN GIT_TERMINAL_PROMPT=0 git clone --depth 1 -b main https://github.com/aussierobots/ublox_dgnss src/ublox_dgnss && \
+    GIT_TERMINAL_PROMPT=0 git clone --depth 1 -b aoc_refactor https://github.com/LCAS/topological_navigation src/topological_navigation && \
+    GIT_TERMINAL_PROMPT=0 git clone --depth 1 -b feat/gazebo-harmonic-port https://github.com/samuk/caatingarobotics src/caatingarobotics && \
+    GIT_TERMINAL_PROMPT=0 git clone --depth 1 -b master https://github.com/LCAS/sentor src/sentor
 
 # 9.1 Automated dependency resolution via rosdep
 RUN apt-get update && apt-get install -y --fix-broken && \
@@ -191,6 +186,8 @@ RUN pip install --break-system-packages --no-cache-dir \
 RUN apt-get update && \
     apt-get install -y --no-install-recommends \
     ros-jazzy-rmw-cyclonedds-cpp \
+    usbutils \
+    libusb-1.0-0-dev \
     ros-jazzy-rtcm-msgs \
     ros-jazzy-nmea-msgs \
     ros-jazzy-libcurl-vendor \
