@@ -13,7 +13,7 @@ from launch_ros.actions import Node, PushRosNamespace
 
 
 def generate_launch_description():
-    ublox_pkg = get_package_share_directory('ublox_dgnss_node')
+    ublox_pkg = get_package_share_directory('ublox_dgnss')
     devkit_launch_pkg = get_package_share_directory('devkit_launch')
     ui_pkg = get_package_share_directory('devkit_ui')
 

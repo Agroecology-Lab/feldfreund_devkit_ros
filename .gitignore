@@ -28,3 +28,5 @@ build/
 install/
 
 devkit_launch/config/secrets.yaml
+ublox_dgnss/
+src/ublox_dgnss/
