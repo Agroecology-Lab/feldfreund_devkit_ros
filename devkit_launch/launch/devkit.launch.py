@@ -15,6 +15,7 @@ from launch_ros.actions import Node, PushRosNamespace
 def generate_launch_description():
     ublox_pkg = get_package_share_directory('ublox_dgnss_node')
     devkit_launch_pkg = get_package_share_directory('devkit_launch')
+    ui_pkg = get_package_share_directory('devkit_ui')
 
     # Front antenna (primary position source)
     rover_port   = os.getenv('GPS_PORT_ROVER',   'virtual')
@@ -41,8 +42,6 @@ def generate_launch_description():
     )
 
     # Build launch_arguments for each ublox instance.
-    # DEVICE_SERIAL_STRING pins the driver to a specific physical module so
-    # two instances do not race to claim the same device.
     front_args = {'device': rover_port, 'baudrate': '460800'}
     if rover_serial:
         front_args['DEVICE_SERIAL_STRING'] = rover_serial
@@ -51,9 +50,6 @@ def generate_launch_description():
     if rover1_serial:
         rear_args['DEVICE_SERIAL_STRING'] = rover1_serial
 
-    # ntrip_client nodes — one per receiver namespace so each ublox instance
-    # picks up corrections on its own <namespace>/ntrip_client/rtcm topic.
-    # Both connect to the same caster; RTCM corrections are not receiver-specific.
     ntrip_front = Node(
         package='ntrip_client',
         executable='ntrip_client_node',
@@ -115,5 +111,12 @@ def generate_launch_description():
                 os.path.join(devkit_launch_pkg, 'launch', 'devkit_driver.launch.py')
             ),
             launch_arguments={'port': mcu_port}.items(),
+        ),
+
+        # Devkit UI
+        IncludeLaunchDescription(
+            PythonLaunchDescriptionSource(
+                os.path.join(ui_pkg, 'launch', 'ui.launch.py')
+            ),
         ),
     ])
