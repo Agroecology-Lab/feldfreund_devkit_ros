@@ -76,10 +76,69 @@ class DevkitManager:
         return {k.strip(): v.strip() for line in env_file.read_text().splitlines()
                 if '=' in line and not line.startswith('#') for k, v in [line.split('=', 1)]}
 
+    def _find_ublox_interfaces(self) -> List[str]:
+        """Returns sysfs interface names (e.g. ['1-2:1.0', '1-2:1.1']) for any bound ublox cdc_acm device."""
+        ifaces = []
+        cdc_path = Path('/sys/bus/usb/drivers/cdc_acm')
+        if not cdc_path.exists():
+            return ifaces
+        for entry in cdc_path.iterdir():
+            if not entry.is_symlink():
+                continue
+            vendor_file = entry / 'device' / 'idVendor'
+            if not vendor_file.exists():
+                # interface dir — check parent device
+                parts = entry.name.split(':')
+                if len(parts) == 2:
+                    dev_path = cdc_path / parts[0]
+                    vendor_file = Path(f'/sys/bus/usb/devices/{parts[0]}/idVendor')
+            try:
+                if vendor_file.exists() and vendor_file.read_text().strip() == '1546':
+                    ifaces.append(entry.name)
+            except Exception:
+                pass
+        return ifaces
+
+    def _cdc_acm_bind(self, ifaces: List[str]):
+        for iface in ifaces:
+            subprocess.run(['sudo', 'sh', '-c', f'echo "{iface}" > /sys/bus/usb/drivers/cdc_acm/bind'],
+                           stderr=subprocess.DEVNULL)
+
+    def _cdc_acm_unbind(self, ifaces: List[str]):
+        for iface in ifaces:
+            subprocess.run(['sudo', 'sh', '-c', f'echo "{iface}" > /sys/bus/usb/drivers/cdc_acm/unbind'],
+                           stderr=subprocess.DEVNULL)
+
     def run(self, extra_args: List[str]):
         """Runs the stack."""
         if (self.root_dir / 'fixusb.py').exists():
-            subprocess.run(['python3', 'fixusb.py'], check=True)
+            # Bind cdc_acm so fixusb.py can detect GPS via serial port enumeration,
+            # then unbind so libusb (ublox_dgnss) can claim the device directly.
+            unbound_ifaces = []
+            bound_before = self._find_ublox_interfaces()
+            if not bound_before:
+                # Try to find all cdc_acm interfaces for ublox by scanning sysfs devices
+                ublox_ifaces = []
+                for dev in Path('/sys/bus/usb/devices').iterdir():
+                    vendor_file = dev / 'idVendor'
+                    try:
+                        if vendor_file.exists() and vendor_file.read_text().strip() == '1546':
+                            dev_name = dev.name
+                            ublox_ifaces = [f'{dev_name}:1.0', f'{dev_name}:1.1']
+                            break
+                    except Exception:
+                        pass
+                if ublox_ifaces:
+                    self._log("Binding cdc_acm for GPS detection...")
+                    self._cdc_acm_bind(ublox_ifaces)
+                    unbound_ifaces = ublox_ifaces
+
+            subprocess.run(['sudo', 'python3', 'fixusb.py'], check=True)
+
+            ifaces_to_unbind = self._find_ublox_interfaces()
+            if ifaces_to_unbind:
+                self._log("Unbinding cdc_acm so libusb can claim GPS...")
+                self._cdc_acm_unbind(ifaces_to_unbind)
 
         cfg = self._get_env_config()
         r_port = cfg.get('GPS_PORT_ROVER', 'virtual')
