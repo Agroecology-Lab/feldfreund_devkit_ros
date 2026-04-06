@@ -149,21 +149,24 @@ class DevkitManager:
         if is_sim == 'false' and Path(mcu_port).exists():
             self._log(f"Waking MCU on {mcu_port}")
             os.system(f"stty -F {mcu_port} 115200 && (echo 's' > {mcu_port} &)")
-            
-            
-        ros_command = (
-  	  "source /opt/ros/jazzy/setup.bash && "
-  	  "if [ -f /workspace/install/setup.bash ]; then source /workspace/install/setup.bash; fi && "
- 	  f"ros2 launch devkit_launch devkit.launch.py sim:={is_sim} rover_port:={r_port} mcu_port:={mcu_port} " +
-      " ".join(extra_args)
-)    
 
-       
+        ros_command = (
+            "source /opt/ros/jazzy/setup.bash && "
+            "if [ -f /workspace/install/setup.bash ]; then source /workspace/install/setup.bash; fi && "
+            f"ros2 launch devkit_launch devkit.launch.py sim:={is_sim} rover_port:={r_port} mcu_port:={mcu_port} " +
+            " ".join(extra_args)
+        )
+
+        # Allow Docker to connect to host X server
+        subprocess.run(['xhost', '+local:docker'], capture_output=True)
 
         docker_cmd = [
             'docker', 'run', '-it', '--rm', '--name', self.container_name, '--net=host', '--privileged',
             '--env', 'RMW_IMPLEMENTATION=rmw_cyclonedds_cpp',
             '--env', 'PYTHONPATH=/root/.lizard:/workspace/install/lib/python3.12/site-packages',
+            '--env', f'DISPLAY={os.environ.get("DISPLAY", ":0")}',
+            '--env', 'QT_X11_NO_MITSHM=1',
+            '-v', '/tmp/.X11-unix:/tmp/.X11-unix:rw',
             '--env-file', str(self.root_dir / '.env') if (self.root_dir / '.env').exists() else '/dev/null',
             '-v', '/dev:/dev',
             self.image_name, 'bash', '-c', ros_command,

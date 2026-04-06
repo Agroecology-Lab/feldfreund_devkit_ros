@@ -118,7 +118,7 @@ COPY ./devkit_ui     ./src/devkit_ui
 #WORKSPACE SETUP (Fixed branch for ublox_dgnss)
 RUN GIT_TERMINAL_PROMPT=0 git clone --depth 1 -b main https://github.com/aussierobots/ublox_dgnss src/ublox_dgnss && \
     GIT_TERMINAL_PROMPT=0 git clone --depth 1 -b aoc_refactor https://github.com/LCAS/topological_navigation src/topological_navigation && \
-    GIT_TERMINAL_PROMPT=0 git clone --depth 1 -b feat/gazebo-harmonic-port https://github.com/samuk/caatingarobotics src/caatingarobotics && \
+    GIT_TERMINAL_PROMPT=0 git clone --depth 1 -b main https://github.com/samuk/caatingarobotics src/caatingarobotics && \
     GIT_TERMINAL_PROMPT=0 git clone --depth 1 -b master https://github.com/LCAS/sentor src/sentor
 
 # 9.1 Automated dependency resolution via rosdep
@@ -141,6 +141,8 @@ RUN apt-get update && apt-get install -y --fix-broken && \
           ros-jazzy-nav2-behavior-tree \
           ros-jazzy-nav2-bt-navigator \
           ros-jazzy-tf-transformations \
+          ros-jazzy-nav2-bringup \
+          ros-jazzy-navigation2 \
           tf_transformations \
           interactive_markers \
           topological_navigation \

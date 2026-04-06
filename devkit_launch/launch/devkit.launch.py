@@ -17,15 +17,15 @@ def generate_launch_description():
     devkit_launch_pkg = get_package_share_directory('devkit_launch')
     ui_pkg = get_package_share_directory('devkit_ui')
 
-    # Front antenna (primary position source)
-    rover_port   = os.getenv('GPS_PORT_ROVER',   'virtual')
-    rover_serial = os.getenv('GPS_SERIAL_ROVER',  '')
-    gps_type     = os.getenv('GPS_TYPE_ROVER',    'ublox')
+    # ublox_dgnss uses libusb directly — requires /dev/bus/usb/BUS/DEV, not /dev/ttyACMx
+    # GPS_USB_PATH_ROVER is written by fixusb.py alongside the tty path
+    rover_port   = os.getenv('GPS_USB_PATH_ROVER', os.getenv('GPS_PORT_ROVER', 'virtual'))
+    rover_serial = os.getenv('GPS_SERIAL_ROVER', '')
+    gps_type     = os.getenv('GPS_TYPE_ROVER', 'ublox')
 
-    # Rear antenna (second receiver for heading baseline)
-    rover1_port   = os.getenv('GPS_PORT_ROVER1',  'virtual')
+    rover1_port   = os.getenv('GPS_USB_PATH_ROVER1', os.getenv('GPS_PORT_ROVER1', 'virtual'))
     rover1_serial = os.getenv('GPS_SERIAL_ROVER1', '')
-    gps1_type     = os.getenv('GPS_TYPE_ROVER1',   'ublox')
+    gps1_type     = os.getenv('GPS_TYPE_ROVER1', 'ublox')
 
     mcu_port = os.getenv('MCU_PORT', 'virtual')
 
@@ -41,7 +41,6 @@ def generate_launch_description():
         ["'", rover1_port, "' != 'virtual' and '", gps1_type, "' == 'ublox'"]
     )
 
-    # Build launch_arguments for each ublox instance.
     front_args = {'device': rover_port, 'baudrate': '460800'}
     if rover_serial:
         front_args['DEVICE_SERIAL_STRING'] = rover_serial
