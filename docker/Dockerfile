@@ -19,13 +19,25 @@ ENV LANG=en_US.UTF-8
 ENV LC_ALL=en_US.UTF-8
 ENV DEBIAN_FRONTEND=noninteractive
 
+   
+    
 # 3. Base system deps
 RUN apt-get update && \
-    apt-get install -y -o Acquire::Retries=10 --fix-missing --no-install-recommends \
+    # Standard retries usually aren't enough for 408 errors, 
+    # but -o Acquire::http::Timeout="30" helps with slow mirrors.
+    apt-get install -y \
+    -o Acquire::Retries=10 \
+    -o Acquire::http::Timeout="30" \
+    -o Acquire::ftp::Timeout="30" \
+    --fix-missing --no-install-recommends \
     wget ca-certificates unzip git python3-pip python3-rosdep curl gnupg2 \
     libusb-1.0-0-dev \
+    ros-jazzy-navigation2 \
+    ros-jazzy-nav2-bringup \
     ros-jazzy-ros-gz && \
     apt-get clean && rm -rf /var/lib/apt/lists/*
+    
+    
 
 # 4. L-CAS repository
 RUN mkdir -p /usr/share/keyrings && \
@@ -195,7 +207,9 @@ RUN apt-get update && \
     ros-jazzy-libcurl-vendor \
     ros-jazzy-interactive-markers \
     ros-jazzy-tf-transformations \
-    ros-jazzy-rviz2 && \
+    ros-jazzy-rviz2 \
+    ros-jazzy-nav2-bringup \
+    ros-jazzy-navigation2 && \
     pip install --break-system-packages --no-cache-dir transforms3d && \
     . /opt/ros/jazzy/setup.sh && \
     colcon build --symlink-install --cmake-args -DCMAKE_BUILD_TYPE=Release && \
