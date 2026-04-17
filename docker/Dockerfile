@@ -129,8 +129,9 @@ COPY ./devkit_ui     ./src/devkit_ui
 
 #WORKSPACE SETUP (Fixed branch for ublox_dgnss)
 RUN GIT_TERMINAL_PROMPT=0 git clone --depth 1 -b main https://github.com/aussierobots/ublox_dgnss src/ublox_dgnss && \
-    GIT_TERMINAL_PROMPT=0 git clone --depth 1 -b aoc_refactor https://github.com/LCAS/topological_navigation src/topological_navigation && \
+    GIT_TERMINAL_PROMPT=0 git clone --depth 1 -b aoc_refactor_container https://github.com/LCAS/topological_navigation src/topological_navigation && \
     GIT_TERMINAL_PROMPT=0 git clone --depth 1 -b main https://github.com/samuk/caatingarobotics src/caatingarobotics && \
+    GIT_TERMINAL_PROMPT=0 git clone --depth 1 https://github.com/manankharwar/fusioncore src/fusioncore && \
     GIT_TERMINAL_PROMPT=0 git clone --depth 1 -b master https://github.com/LCAS/sentor src/sentor
 
 # 9.1 Automated dependency resolution via rosdep
@@ -142,6 +143,7 @@ RUN apt-get update && apt-get install -y --fix-broken && \
       rosdep install --from-paths src --ignore-src -y \
         --rosdistro jazzy \
         --skip-keys "\
+          fusioncore \
           libopencv-dev \
           opencv-python-headless \
           PyQt5 \
@@ -186,6 +188,7 @@ RUN apt-get update && apt-get install -y --fix-broken && \
     rm -rf /var/lib/apt/lists/*
 
 # 10. CPU-only torch + remaining pip packages
+# Note: transforms3d is a strict requirement for fusioncore's IMU math
 RUN pip install --break-system-packages --no-cache-dir \
     "transforms3d>=0.4.2" && \
     pip install --break-system-packages --no-cache-dir \
