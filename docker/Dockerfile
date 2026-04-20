@@ -181,20 +181,26 @@ RUN apt-get update && apt-get install -y --fix-broken && \
           caatinga_nav \
           caatinga_vision \
           sowbot_row_follow \
-          ultralytics \
+          yolox \
           sentor" \
       && break || (echo "Attempt $i failed, retrying in 15s..." && sleep 15); \
     done && \
     rm -rf /var/lib/apt/lists/*
 
-# 10. CPU-only torch + remaining pip packages
+# 10. CPU-only torch + YOLOX + remaining pip packages
 # Note: transforms3d is a strict requirement for fusioncore's IMU math
 RUN pip install --break-system-packages --no-cache-dir \
     "transforms3d>=0.4.2" && \
     pip install --break-system-packages --no-cache-dir \
     torch torchvision --index-url https://download.pytorch.org/whl/cpu && \
+    pip install --break-system-packages --no-deps yolox==0.3.0 && \
     pip install --break-system-packages --no-cache-dir \
-    nicegui pyserial lizard pymongo networkx ultralytics
+    thop tqdm loguru ninja tabulate nicegui pyserial lizard pymongo networkx
+
+# 10.1 Download YOLOX-Nano COCO pretrained weights
+RUN mkdir -p /root/models && \
+    wget -q -O /root/models/yolox_nano.pth \
+    https://github.com/Megvii-BaseDetection/YOLOX/releases/download/0.1.1rc0/yolox_nano.pth
 
 # 11. Final apt safety net + colcon build
 # Re-installs key ROS packages in case rosdep missed anything, then builds.

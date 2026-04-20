@@ -5,7 +5,7 @@
     ## Important: Make sure the values provided are in decimal points, or else might give error in execution
     pose_stddev: [0.1, 0.1, 0.0, 0.0, 0.0, 0.1] # [m]
     twist_stddev: [0.01, 0.0, 0.0, 0.0, 0.0, 0.01] # [m/s]
-    publish_tf: False
+    publish_tf: True
     expander_name: "p0" # Name of the expander in the lizard configuration
     flash_parameters: "-j orin --nand" # Parameters for espresso.py (e.g., "-j orin --nand" for "flash.py orin nand v05")
     serial_port: "/dev/ttyTHS0" # This needs to be in the docker-compose.yml file as well
