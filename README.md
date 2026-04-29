@@ -24,7 +24,8 @@ Open-source precision seeding and weeding robot — [sowbot.co.uk](https://sowbo
 | F5 | Diagnostics TUI | `agbot-diagnostic.py` terminal status view of all hardware topics. Run inside container via `login.sh`. | Done | 2025 |
 | **MVP FIELD** | | | | **2026** |
 | M1 | AOC platform integration | The first non-CUDA, low-cost open hardware entry in the AOC ecosystem. Demonstrates AOC platform abstraction on affordable ARM hardware accessible to smallholders. | In progress | 2026 |
-| M2 | Topological navigation + nav2 | LCAS `topological_navigation` (`aoc_refactor` branch) cloned and building in Dockerfile. Self-contained `navigation2.py` with A\* route planning, explicit state machine, and `row_traversal` / `NavigateToPose` / `goal_align` edge actions. `fake_nav2_server` simulator enables full pipeline testing without hardware. Pending: Nav2 topic remapping shim and Jazzy field validation (Issue #8 gate). | In progress  | 2026 |
+| M2 | Topological navigation + nav2 | LCAS `topological_navigation` (`aoc_refactor` branch) building in Dockerfile; RViz visualisation confirmed working. Self-contained `navigation2.py` with A\* route planning, explicit state machine, and `row_traversal` / `NavigateToPose` / `goal_align` edge actions. `fake_nav2_server` simulator enables full pipeline testing without hardware. Nav2 topic remapping handled via [fusioncore](https://github.com/manankharwar/fusioncore) (see M2a). Pending: Jazzy field validation (Issue #8 gate). | In progress | 2026 |
+| M2a | fusioncore nav2 bridge | [fusioncore](https://github.com/manankharwar/fusioncore) provides the Nav2 topic remapping shim between LCAS `topological_navigation` and Nav2. Cloned and building in Dockerfile. Replaces the previously hand-rolled remapping approach and unblocks Issue #8. Pending: end-to-end smoke-test on live hardware. | In progress | 2026 |
 | M3 | Open-field row-crop scenario | `strawberry_polytunnel.tmap2.yaml` (Riseholme) serves as format reference. Caatinga farm maps (`meu_mapa.pgm`, `novo_mapa_fazenda.pgm`) committed to [caatingarobotics](https://github.com/samuk/caatingarobotics). AOC scenario definition for Caatinga semi-arid row-crop conditions pending tmap2 authoring from real field survey. | ~20% Done | 2026 |
 | M4 | RTK-GNSS localisation | Dual u-blox F9P moving-base. NAV-RELPOSNED heading vector fused with wheel odometry in `robot_localization` EKF (`gps_ekf.yaml` authored in caatingarobotics). Pending: topic remapping from `ublox_dgnss` native topics (`ublox_nav_sat_fix_hp`, `ubx_nav_rel_pos_ned`) to EKF inputs (`/gps/fix`, `/imu`). Heading validated at antenna separation >= 0.5 m. | ~40% Done | 2026 |
 | M5 | Dual-SBC ROS 2 stack | Both Avaota A1 boards (8x Cortex-A55, T527) run ROS 2 Jazzy with `rmw_zenoh_cpp`. Static peer Zenoh session over dedicated 1 GbE crossover. Multicast discovery disabled. Pending: `zenoh_config.json` peer config committed to both repos. | Planned | 2026 |
@@ -43,7 +44,6 @@ Open-source precision seeding and weeding robot — [sowbot.co.uk](https://sowbo
 | **DATASETS & COLLABORATION** | | | | **Ongoing** |
 | D1 | UK open-field dataset | Field imagery and GNSS logs from UK agroecological farm conditions. Published under CC licence for training and benchmarking. | Planned | 2026 |
 | D2 | Caatinga biome dataset | Semi-arid row-crop imagery from Brazilian Caatinga conditions contributed by [caatingarobotics](https://github.com/joaodemouragy-hash/caatingarobotics). Validated on T527 AIPU. | Active | 2026 |
----
 
 ### Collaboration
 
