@@ -82,7 +82,7 @@ This repo may contain traces of LLM slop, We've done our best to mitigate this. 
 ### 1. Clone the Repository
 Open a terminal on your host machine and download the workspace:
 ```bash
-git clone -b sowbot https://github.com/Agroecology-Lab/feldfreund_devkit_ros.git
+git clone -b caatinga-dev https://github.com/Agroecology-Lab/feldfreund_devkit_ros.git
 cd feldfreund_devkit_ros
 ```
 
