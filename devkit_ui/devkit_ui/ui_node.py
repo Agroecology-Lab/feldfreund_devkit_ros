@@ -230,17 +230,12 @@ class NiceGuiNode(Node):
     # ── topo nav actions ──────────────────────────────────────────────────────
 
     def send_nav_goal(self, target: str) -> None:
-        if self.topo_demo or not _ACTION_OK:
-            self.topo_nav_status = f'[DEMO] Navigating → {target}'
-            self.topo_navigating = True
-            threading.Timer(4.0, lambda: (
-                setattr(self, 'topo_nav_status', 'Idle'),
-                setattr(self, 'topo_navigating', False),
-                setattr(self, 'topo_current', target),
-            )).start()
+        if not _ACTION_OK:
+            self.topo_nav_status = 'ERROR: topological_navigation_msgs not installed'
             return
 
-        if not self._nav_ac.wait_for_server(timeout_sec=3.0):
+        # Use the real action server — fake_nav2_server handles this in sim mode
+        if not self._nav_ac.wait_for_server(timeout_sec=0.0):
             self.topo_nav_status = 'ERROR: action server not available'
             return
 
