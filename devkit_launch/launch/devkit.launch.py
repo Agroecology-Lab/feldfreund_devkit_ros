@@ -38,6 +38,15 @@ def generate_launch_description():
     fusioncore_config = devkit_fc_config if os.path.isfile(devkit_fc_config) \
                         else os.path.join(fusioncore_pkg, 'config', 'fusioncore.yaml')
 
+    # ── Topological map ───────────────────────────────────────────────────────
+    # TMAP2_FILE env var overrides the default (use this for real field maps).
+    # Falls back to test_simple_tmap2.yaml shipped with topological_navigation.
+    # The same path is passed to topo nav as map_path AND exported as TMAP2_FILE
+    # so the NiceGUI Navigate tab shows identical nodes to what topo nav routes on.
+    topo_nav_share = get_package_share_directory('topological_navigation')
+    default_tmap2  = os.path.join(topo_nav_share, 'config', 'test_simple_tmap2.yaml')
+    tmap2_file     = os.getenv('TMAP2_FILE', default_tmap2)
+
     # ── Conditions ────────────────────────────────────────────────────────────
     gps_enabled  = PythonExpression(
         ["'", rover_port,  "' != 'virtual' and '", gps_type,  "' == 'ublox'"]
@@ -154,6 +163,7 @@ def generate_launch_description():
 
     return LaunchDescription([
         SetEnvironmentVariable('RCUTILS_CONSOLE_OUTPUT_FORMAT', '[{severity}] [{name}]: {message}'),
+        SetEnvironmentVariable('TMAP2_FILE', tmap2_file),
 
         # Front ublox — mb+r ROVER → /rover/*
         GroupAction(
@@ -202,5 +212,6 @@ def generate_launch_description():
                     'launch', 'topological_navigation.launch.py'
                 )
             ),
+            launch_arguments={'map_path': tmap2_file}.items(),
         ),
     ])
