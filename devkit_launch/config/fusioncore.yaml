@@ -26,7 +26,7 @@ fusioncore:
 
     # ── GNSS ──────────────────────────────────────────────────────────────────
     # /gnss/fix     ← relay from /rover/ublox_nav_sat_fix_hp (see launch)
-    # /gnss/heading ← relposned_heading_shim (compass_msgs/Compass, ENU, radians)
+    # /gnss/heading ← relposned_heading_shim (sensor_msgs/Imu, yaw in orientation quaternion, ENU)
     gnss.fix_topic:     /gnss/fix
     gnss.heading_topic: /gnss/heading
 
