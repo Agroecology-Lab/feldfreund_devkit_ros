@@ -45,18 +45,31 @@ SAFETY_QOS = QoSProfile(depth=1,
 # ── tmap2 helpers ─────────────────────────────────────────────────────────────
 
 def _load_tmap2(path: str) -> dict[str, dict]:
-    """Parse .tmap2.yaml → {name: {x, y, edges: [name, ...]}}"""
+    """Parse .tmap2.yaml → {name: {x, y, edges: [name, ...]}}
+
+    Handles both formats produced by the LCAS aoc_refactor branch:
+      New (dict root):  {meta: ..., nodes: [{meta: ..., node: {name, pose, edges}}]}
+      Old (list root):  [{name: ..., pose: ..., edges: [...]}]
+    """
     with open(path) as f:
         raw = yaml.safe_load(f)
+
+    # New format: root is a dict with a 'nodes' list
+    if isinstance(raw, dict):
+        entries = raw.get('nodes', [])
+    else:
+        # Old format: root is a bare list of node dicts
+        entries = raw
+
     nodes: dict[str, dict] = {}
-    for entry in raw:
-        n = entry.get('node', entry)        # handle wrapped and flat formats
+    for entry in entries:
+        # Each entry may be {meta: ..., node: {...}} or a flat node dict
+        n = entry.get('node', entry) if isinstance(entry, dict) else entry
         name: str = n['name']
         pos = n['pose']['position']
         edges = [e['node'] for e in n.get('edges', []) if 'node' in e]
         nodes[name] = {'x': float(pos['x']), 'y': float(pos['y']), 'edges': edges}
     return nodes
-
 
 def _demo_nodes() -> dict[str, dict]:
     return {
