@@ -1,0 +1,59 @@
+# config/fusioncore.yaml
+# FusionCore UKF — Sowbot dual F9P + Lizard wheel odometry
+#
+# No separate IMU. Heading supplied by dual-antenna NAV-RELPOSNED shim.
+# BNO085 is present on the Lizard board but not yet published by devkit_driver.
+# Set use_imu: true and add imu.* params once /imu/data is wired up.
+#
+# Validate after launch:
+#   ros2 topic hz /fusion/odom
+#   ros2 topic echo /fusion/odom --field pose.pose.position
+#   ros2 service call /fusioncore/reset std_srvs/srv/Trigger
+
+fusioncore:
+  ros__parameters:
+
+    # ── Frames ────────────────────────────────────────────────────────────────
+    base_frame:   base_link
+    odom_frame:   odom
+    publish_tf:   true      # publishes odom → base_link TF directly
+    publish_rate: 30.0      # Hz — matches Nav2 / topo nav costmap rate
+
+    # ── Sensor enable ─────────────────────────────────────────────────────────
+    use_gnss: true
+    use_imu:  false         # enable once devkit_driver publishes /imu/data
+    use_odom: true
+
+    # ── GNSS ──────────────────────────────────────────────────────────────────
+    # /gnss/fix     ← relay from /rover/ublox_nav_sat_fix_hp (see launch)
+    # /gnss/heading ← relposned_heading_shim (compass_msgs/Compass, ENU, radians)
+    gnss.fix_topic:     /gnss/fix
+    gnss.heading_topic: /gnss/heading
+
+    # RTK FLOAT = 4, RTK FIXED = 5. Reject AUTONOMOUS (1) and SBAS (2).
+    gnss.min_fix_type: 4
+
+    # Mahalanobis outlier gate — 5σ is conservative for open field
+    gnss.mahalanobis_threshold: 5.0
+
+    # Physical offset of rover antenna from base_link origin (metres x y z).
+    # TODO: measure on physical robot before field use.
+    gnss.antenna_offset: [0.0, 0.0, 0.0]
+
+    # Trust published NavSatFix covariance. F9P RTK covariance is well-calibrated.
+    gnss.pos_noise_std: 0.05
+
+    # Dual-antenna baseline >= 0.5 m → ~0.2° heading accuracy → 0.0035 rad
+    gnss.heading_noise: 0.0035
+
+    # ── Wheel odometry ─────────────────────────────────────────────────────────
+    # devkit_driver publishes /odom; relayed to /odom/wheels in launch so
+    # fusioncore topic name is explicit and distinct from raw odometry.
+    odom.topic:                  /odom/wheels
+    odom.velocity_noise:         0.05
+    odom.angular_velocity_noise: 0.02
+
+    # ── ZUPT ──────────────────────────────────────────────────────────────────
+    # Suppress velocity drift when stationary (node dwell, row-end turns).
+    zupt_enabled:            true
+    zupt_velocity_threshold: 0.02   # m/s
