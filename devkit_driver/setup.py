@@ -25,6 +25,7 @@ setup(
         'console_scripts': [
             # FORMAT: 'executable_name = package_name.file_name:main_function'
             'devkit_driver_node = devkit_driver.devkit_driver_node:main',
+            'relposned_heading_shim = devkit_driver.relposned_heading_shim:main',
         ],
     },
 )
