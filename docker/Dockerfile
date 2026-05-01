@@ -82,6 +82,7 @@ RUN for i in 1 2 3 4 5; do \
         ros-jazzy-rtcm-msgs \
         ros-jazzy-nmea-msgs \
         ros-jazzy-libcurl-vendor \
+        ros-jazzy-topic-tools \
         ros-jazzy-usb-cam \
         ros-jazzy-image-transport \
         ros-jazzy-foxglove-bridge \
