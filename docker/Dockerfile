@@ -212,6 +212,7 @@ RUN apt-get update && apt-get install -y --fix-broken && \
           ros-jazzy-tf-transformations \
           ros-jazzy-nav2-bringup \
           ros-jazzy-navigation2 \
+          ros-jazzy-opennav-docking \
           tf_transformations \
           interactive_markers \
           topological_navigation \
@@ -240,6 +241,9 @@ RUN apt-get update && apt-get install -y --fix-broken && \
           sentor" && \
       break || (echo "rosdep attempt $i failed, retrying in 15s..." && sleep 15); \
     done && \
+    apt-get install -y --fix-missing \
+      ros-jazzy-opennav-docking || \
+    echo "opennav-docking install failed (archive issue) — skipping" && \
     rm -rf /var/lib/apt/lists/*
 
 # ============================================================
