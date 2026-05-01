@@ -64,6 +64,7 @@ RUN apt-get update && \
       libgl1-mesa-dri \
       libglx-mesa0 \
       libegl-mesa0 \
+      nano \
       libgles2 && \
     apt-get clean && rm -rf /var/lib/apt/lists/*
 
