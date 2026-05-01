@@ -7,8 +7,8 @@ FROM ros:jazzy
 # Stage 1: Mirror + Locale + Timezone
 # ============================================================
 RUN sed -i \
-    -e 's|http://gb.archive.ubuntu.com/ubuntu/|https://mirror.accum.se/ubuntu/|g' \
-    -e 's|http://archive.ubuntu.com/ubuntu/|https://mirror.accum.se/ubuntu/|g' \
+    -e 's|http://gb.archive.ubuntu.com/ubuntu/|g' \
+    -e 's|http://archive.ubuntu.com/ubuntu/|g' \
     /etc/apt/sources.list.d/ubuntu.sources || true && \
     sed -i 's/^Suites: noble$/Suites: noble noble-updates noble-security/' \
     /etc/apt/sources.list.d/ubuntu.sources || true
