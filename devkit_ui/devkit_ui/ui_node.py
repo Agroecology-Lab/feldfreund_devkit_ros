@@ -3,15 +3,17 @@
 ui_node.py — Sowbot web cockpit on :80
 
 Tabs
-  Control   — joystick, e-stop, ESP buttons, GPS map  (original, unchanged)
+  Control   — joystick, e-stop, ESP buttons, GPS map, drop topo node
   Navigate  — topological map, node picker, GO / CANCEL
 
 Topo nav env vars
   TMAP2_FILE   path to .tmap2.yaml  (optional — falls back to built-in demo map)
 """
 
+import math
 import os
 import threading
+from datetime import datetime
 from pathlib import Path
 from typing import Optional
 
@@ -19,6 +21,7 @@ import yaml
 import rclpy
 from geometry_msgs.msg import Twist
 from gps_msgs.msg import GPSFix
+from nav_msgs.msg import Odometry
 from nicegui import app, ui, ui_run
 from nicegui.events import ClickEventArguments
 from rclpy.executors import ExternalShutdownException
@@ -54,22 +57,20 @@ def _load_tmap2(path: str) -> dict[str, dict]:
     with open(path) as f:
         raw = yaml.safe_load(f)
 
-    # New format: root is a dict with a 'nodes' list
     if isinstance(raw, dict):
         entries = raw.get('nodes', [])
     else:
-        # Old format: root is a bare list of node dicts
         entries = raw
 
     nodes: dict[str, dict] = {}
     for entry in entries:
-        # Each entry may be {meta: ..., node: {...}} or a flat node dict
         n = entry.get('node', entry) if isinstance(entry, dict) else entry
         name: str = n['name']
         pos = n['pose']['position']
         edges = [e['node'] for e in n.get('edges', []) if 'node' in e]
         nodes[name] = {'x': float(pos['x']), 'y': float(pos['y']), 'edges': edges}
     return nodes
+
 
 def _demo_nodes() -> dict[str, dict]:
     return {
@@ -84,6 +85,78 @@ def _demo_nodes() -> dict[str, dict]:
         'ROW_C_MID': {'x': 10.0, 'y': -4.0, 'edges': ['ROW_C_IN', 'ROW_C_END']},
         'ROW_C_END': {'x': 15.0, 'y': -4.0, 'edges': ['ROW_C_MID']},
     }
+
+
+def _append_node_to_tmap2(path: str, name: str, x: float, y: float,
+                           connect_to: Optional[str], map_name: str) -> None:
+    """Append a new node to the tmap2 YAML file on disk.
+
+    Uses the same node schema as test_simple_tmap2.yaml:
+      - row_traversal edge action (composable NavigateThroughPoses)
+      - standard 1m² influence zone verts
+      - bidirectional: also patches connect_to's edge list
+    """
+    with open(path) as f:
+        raw = yaml.safe_load(f)
+
+    is_dict_root = isinstance(raw, dict)
+    entries = raw.get('nodes', []) if is_dict_root else raw
+    topo_frame = 'map'
+    if is_dict_root:
+        topo_frame = (raw.get('transformation', {})
+                         .get('topo_frame_id', 'map'))
+
+    # Build forward edge to connect_to if requested
+    forward_edges = []
+    if connect_to:
+        forward_edges = [{
+            'action': 'row_traversal',
+            'edge_id': f'{name}_{connect_to}',
+            'node': connect_to,
+            'properties': {'boundary_left': 0.4, 'boundary_right': 0.6},
+        }]
+
+    new_entry = {
+        'meta': {'map': map_name, 'node': name, 'pointset': map_name},
+        'node': {
+            'edges': forward_edges,
+            'name': name,
+            'nav_frame': topo_frame,
+            'pose': {
+                'orientation': {'w': 1.0, 'x': 0.0, 'y': 0.0, 'z': 0.0},
+                'position':    {'x': x,   'y': y,   'z': 0.0},
+            },
+            'properties': {'xy_goal_tolerance': 0.3, 'yaw_goal_tolerance': 6.28},
+            'verts': [
+                {'x': -0.5, 'y': -0.5}, {'x': 0.5, 'y': -0.5},
+                {'x':  0.5, 'y':  0.5}, {'x': -0.5, 'y':  0.5},
+            ],
+        },
+    }
+    entries.append(new_entry)
+
+    # Patch connect_to's edge list to add reverse edge back to name
+    if connect_to:
+        for entry in entries:
+            n = entry.get('node', entry) if isinstance(entry, dict) else entry
+            if n.get('name') == connect_to:
+                reverse = {
+                    'action': 'row_traversal',
+                    'edge_id': f'{connect_to}_{name}',
+                    'node': name,
+                    'properties': {'boundary_left': 0.4, 'boundary_right': 0.6},
+                }
+                n.setdefault('edges', []).append(reverse)
+                break
+
+    if is_dict_root:
+        raw['nodes'] = entries
+        out = raw
+    else:
+        out = entries
+
+    with open(path, 'w') as f:
+        yaml.dump(out, f, default_flow_style=False, allow_unicode=True, sort_keys=False)
 
 
 # ── SVG map renderer ──────────────────────────────────────────────────────────
@@ -104,14 +177,14 @@ def _build_svg(nodes: dict, selected: Optional[str], current: Optional[str]) -> 
     ys = [n['y'] for n in nodes.values()]
     dx = (max(xs) - min(xs)) or 1.0
     dy = (max(ys) - min(ys)) or 1.0
+    x_min, y_min = min(xs), min(ys)
 
-    def tx(x): return _MARGIN + (x - min(xs)) / dx * (_SVG_W - 2 * _MARGIN)
-    def ty(y): return _SVG_H - _MARGIN - (y - min(ys)) / dy * (_SVG_H - 2 * _MARGIN)
+    def tx(x): return _MARGIN + (x - x_min) / dx * (_SVG_W - 2 * _MARGIN)
+    def ty(y): return _SVG_H - _MARGIN - (y - y_min) / dy * (_SVG_H - 2 * _MARGIN)
 
     parts: list[str] = [
         f'<rect width="{_SVG_W}" height="{_SVG_H}" fill="#0a160a" rx="6"/>']
 
-    # edges
     drawn: set = set()
     for name, nd in nodes.items():
         for tgt in nd['edges']:
@@ -124,7 +197,6 @@ def _build_svg(nodes: dict, selected: Optional[str], current: Optional[str]) -> 
                 f'x2="{tx(nodes[tgt]["x"]):.1f}" y2="{ty(nodes[tgt]["y"]):.1f}" '
                 f'stroke="#1e3320" stroke-width="3" stroke-linecap="round"/>')
 
-    # nodes + labels
     for name, nd in nodes.items():
         cx, cy = tx(nd['x']), ty(nd['y'])
         is_cur = (name == current)
@@ -167,7 +239,7 @@ class NiceGuiNode(Node):
     def __init__(self) -> None:
         super().__init__('nicegui')
 
-        # ── original publishers / subscriptions (unchanged) ───────────────────
+        # ── publishers / subscriptions ────────────────────────────────────────
         self.cmd_vel_publisher = self.create_publisher(Twist, 'cmd_vel', 1)
         self.esp_enable_publisher = self.create_publisher(Empty, 'esp/enable', 1)
         self.esp_disable_publisher = self.create_publisher(Empty, 'esp/disable', 1)
@@ -175,28 +247,26 @@ class NiceGuiNode(Node):
         self.esp_restart_publisher = self.create_publisher(Empty, 'esp/restart', 1)
         self.esp_configure_publisher = self.create_publisher(Empty, 'esp/configure', 1)
         self.subscription = self.create_subscription(GPSFix, 'gpsfix', self.store_gps, 1)
-        self.battery_subscription = self.create_subscription(BatteryState, 'battery_state', self.store_battery, 1)
-        self.bumper_front_top_subscription = self.create_subscription(Bool,
-                                                                      'bumper/front_top',
-                                                                      self.update_bumper_front_top,
-                                                                      SAFETY_QOS)
-        self.bumper_front_bottom_subscription = self.create_subscription(Bool,
-                                                                         'bumper/front_bottom',
-                                                                         self.update_bumper_front_bottom,
-                                                                         SAFETY_QOS)
-        self.bumper_back_subscription = self.create_subscription(Bool,
-                                                                 'bumper/back',
-                                                                 self.update_bumper_back,
-                                                                 SAFETY_QOS)
+        self.battery_subscription = self.create_subscription(
+            BatteryState, 'battery_state', self.store_battery, 1)
+        self.bumper_front_top_subscription = self.create_subscription(
+            Bool, 'bumper/front_top', self.update_bumper_front_top, SAFETY_QOS)
+        self.bumper_front_bottom_subscription = self.create_subscription(
+            Bool, 'bumper/front_bottom', self.update_bumper_front_bottom, SAFETY_QOS)
+        self.bumper_back_subscription = self.create_subscription(
+            Bool, 'bumper/back', self.update_bumper_back, SAFETY_QOS)
         self.estop_publisher = self.create_publisher(Bool, 'estop/soft', SAFETY_QOS)
-        self.estop_front_subscription = self.create_subscription(Bool,
-                                                                 'estop/front',
-                                                                 self.update_estop_front,
-                                                                 SAFETY_QOS)
-        self.estop_back_subscription = self.create_subscription(Bool,
-                                                                'estop/back',
-                                                                self.update_estop_back,
-                                                                SAFETY_QOS)
+        self.estop_front_subscription = self.create_subscription(
+            Bool, 'estop/front', self.update_estop_front, SAFETY_QOS)
+        self.estop_back_subscription = self.create_subscription(
+            Bool, 'estop/back', self.update_estop_back, SAFETY_QOS)
+
+        # ── odometry for node dropping ────────────────────────────────────────
+        # /odometry/global is published by fake_nav2_server in sim and by
+        # fusioncore (/fusion/odom remapped) in the field.
+        self.latest_odom: Optional[Odometry] = None
+        self.create_subscription(Odometry, '/odometry/global',
+                                 lambda m: setattr(self, 'latest_odom', m), 10)
 
         self.bumper_front_top_active = False
         self.bumper_front_bottom_active = False
@@ -216,18 +286,23 @@ class NiceGuiNode(Node):
         if tmap_path and Path(tmap_path).exists():
             self.topo_nodes = _load_tmap2(tmap_path)
             self.topo_demo  = False
-            self.get_logger().info(f'Loaded tmap2: {tmap_path} ({len(self.topo_nodes)} nodes)')
+            self.get_logger().info(
+                f'Loaded tmap2: {tmap_path} ({len(self.topo_nodes)} nodes)')
         else:
             self.topo_nodes = _demo_nodes()
             self.topo_demo  = True
             if tmap_path:
-                self.get_logger().warn(f'TMAP2_FILE not found: {tmap_path} — using demo map')
+                self.get_logger().warn(
+                    f'TMAP2_FILE not found: {tmap_path} — using demo map')
 
-        self.topo_selected:    Optional[str] = None
-        self.topo_current:     str           = '—'
-        self.topo_nav_status:  str           = 'Idle'
-        self.topo_navigating:  bool          = False
-        self._nav_goal_handle               = None
+        self.topo_selected:   Optional[str] = None
+        self.topo_current:    str           = '—'
+        self.topo_nav_status: str           = 'Idle'
+        self.topo_navigating: bool          = False
+        self._nav_goal_handle              = None
+
+        # node-drop feedback shown in the Control tab
+        self.drop_status: str = ''
 
         self.create_subscription(String, '/current_node',
                                  lambda m: setattr(self, 'topo_current', m.data), 10)
@@ -235,7 +310,6 @@ class NiceGuiNode(Node):
         if _ACTION_OK:
             self._nav_ac = ActionClient(self, GotoNode, 'topological_navigation')
 
-        # ── page ──────────────────────────────────────────────────────────────
         @ui.page('/')
         def page():
             self.content()
@@ -246,17 +320,13 @@ class NiceGuiNode(Node):
         if not _ACTION_OK:
             self.topo_nav_status = 'ERROR: topological_navigation_msgs not installed'
             return
-
-        # Use the real action server — fake_nav2_server handles this in sim mode
         if not self._nav_ac.wait_for_server(timeout_sec=0.0):
             self.topo_nav_status = 'ERROR: action server not available'
             return
-
         goal = GotoNode.Goal()
         goal.target = target
         self.topo_nav_status = f'Navigating → {target}'
         self.topo_navigating = True
-
         future = self._nav_ac.send_goal_async(goal, feedback_callback=self._nav_feedback)
         future.add_done_callback(self._nav_accepted)
 
@@ -287,6 +357,84 @@ class NiceGuiNode(Node):
         self.topo_nav_status = 'Cancelled'
         self.topo_navigating = False
 
+    # ── node dropping ─────────────────────────────────────────────────────────
+
+    def drop_topo_node(self, name: str) -> None:
+        """Drop a topo node at the current robot pose and append it to TMAP2_FILE."""
+        name = name.strip().upper().replace(' ', '_')
+        if not name:
+            self.drop_status = 'ERROR: enter a node name'
+            return
+        if name in self.topo_nodes:
+            self.drop_status = f'ERROR: {name} already exists'
+            return
+
+        # ── resolve pose: GPS preferred, odometry fallback ───────────────────
+        gps = self.latest_gps
+        odom = self.latest_odom
+        pose_src = '?'
+
+        if gps is not None and gps.status.status >= 0:
+            # GPS available — use lat/lon converted to local ENU metres.
+            # The tmap2 frame is map/topo_frame; we store the ENU offset from
+            # the map origin (0,0). For a first-drop this will be (0,0) unless
+            # a datum has been set. Field use requires fusioncore /fromLL service
+            # for proper conversion — this is a sim-safe approximation.
+            # 1 deg lat ≈ 111320 m,  1 deg lon ≈ 111320 * cos(lat) m
+            lat0 = 0.0  # will be origin of first node if no datum yet
+            lon0 = 0.0
+            if self.topo_nodes:
+                # Use the first node's GPS meta if stored, else raw odom
+                pass  # fall through to odom for coordinate consistency in sim
+            if odom is not None:
+                # GPS present but we're in a map frame — use odom xy for
+                # coordinate consistency; store GPS as metadata comment only
+                x = odom.pose.pose.position.x
+                y = odom.pose.pose.position.y
+                pose_src = f'odom+GPS({gps.latitude:.6f},{gps.longitude:.6f})'
+            else:
+                self.drop_status = 'ERROR: no odometry — drive the robot first'
+                return
+        elif odom is not None:
+            x = odom.pose.pose.position.x
+            y = odom.pose.pose.position.y
+            pose_src = 'odom'
+        else:
+            self.drop_status = 'ERROR: no pose — waiting for /odometry/global'
+            return
+
+        # ── connect to current node ───────────────────────────────────────────
+        connect_to = self.topo_current if self.topo_current != '—' else None
+
+        # ── update in-memory map ──────────────────────────────────────────────
+        edges_fwd = [connect_to] if connect_to else []
+        self.topo_nodes[name] = {'x': x, 'y': y, 'edges': edges_fwd}
+        if connect_to and connect_to in self.topo_nodes:
+            if name not in self.topo_nodes[connect_to]['edges']:
+                self.topo_nodes[connect_to]['edges'].append(name)
+
+        # ── persist to disk ───────────────────────────────────────────────────
+        tmap_path = os.environ.get('TMAP2_FILE', '')
+        saved = False
+        if tmap_path and Path(tmap_path).exists() and not self.topo_demo:
+            try:
+                # infer map name from file
+                with open(tmap_path) as f:
+                    raw = yaml.safe_load(f)
+                map_name = raw.get('name', 'map') if isinstance(raw, dict) else 'map'
+                _append_node_to_tmap2(tmap_path, name, x, y, connect_to, map_name)
+                saved = True
+            except Exception as e:
+                self.get_logger().error(f'Failed to save node: {e}')
+                self.drop_status = f'Dropped in memory (save failed: {e})'
+                return
+
+        conn_str = f' → {connect_to}' if connect_to else ''
+        src_str  = f' [{pose_src}]'
+        save_str = ' ✓ saved' if saved else ' (demo — not saved)'
+        self.drop_status = f'✓ {name}{conn_str} at ({x:.2f}, {y:.2f}){src_str}{save_str}'
+        self.get_logger().info(f'Node dropped: {name} at ({x:.3f}, {y:.3f}){conn_str}')
+
     # ── UI ────────────────────────────────────────────────────────────────────
 
     def content(self) -> None:
@@ -301,7 +449,6 @@ class NiceGuiNode(Node):
                 self._nav_content()
 
     def _control_content(self) -> None:
-        """Original control UI — untouched."""
         with ui.row().classes('items-stretch w-[48rem] gap-3'):
             with ui.card().classes('flex-1 text-center items-center'):
                 ui.label('Control').classes('text-2xl')
@@ -372,6 +519,68 @@ class NiceGuiNode(Node):
                 ui.button('Restart',   color='blue',   on_click=lambda: self.esp_restart_publisher.publish(Empty())).classes('w-24')
                 ui.button('Configure', color='purple', on_click=lambda: self.esp_configure_publisher.publish(Empty())).classes('w-24')
 
+        # ── Drop Topo Node card ───────────────────────────────────────────────
+        with ui.card().classes('w-[48rem] mt-3'):
+            ui.label('Drop Topo Node').classes('text-2xl')
+            ui.label(
+                'Stop the robot, enter a name, and press DROP to pin a node at '
+                'the current position. The node is auto-connected to the current '
+                'topo node and saved to the active map file.'
+            ).classes('text-sm text-gray-400 mb-2')
+
+            with ui.row().classes('items-center gap-3 w-full'):
+                name_input = ui.input(
+                    placeholder='e.g. ROW_D_IN',
+                    label='Node name',
+                ).classes('flex-1')
+
+                # live pose readout so farmer can see where they are
+                pose_lbl = ui.label('pose: waiting…').classes(
+                    'text-xs font-mono text-gray-400')
+
+            with ui.row().classes('items-center gap-3 mt-1'):
+                # current node pill
+                cur_pill = ui.label('').classes('text-xs font-mono')
+
+                drop_btn = ui.button(
+                    '📍 DROP NODE',
+                    color='green',
+                    on_click=lambda: self.drop_topo_node(name_input.value),
+                ).classes('ml-auto').props('no-caps')
+
+            # status feedback line
+            status_lbl = ui.label('').classes('text-sm font-mono mt-1')
+
+            # timer: update pose readout + current node pill + status
+            def _refresh_drop_card() -> None:
+                odom = self.latest_odom
+                gps  = self.latest_gps
+                if odom is not None:
+                    x = odom.pose.pose.position.x
+                    y = odom.pose.pose.position.y
+                    src = ''
+                    if gps is not None and gps.status.status >= 0:
+                        src = f'  GPS({gps.latitude:.5f}, {gps.longitude:.5f})'
+                    pose_lbl.set_text(f'pose: ({x:.2f}, {y:.2f}){src}')
+                else:
+                    pose_lbl.set_text('pose: waiting for /odometry/global…')
+
+                cur = self.topo_current
+                if cur and cur != '—':
+                    cur_pill.set_text(f'will connect → {cur}')
+                    cur_pill.style('color:#4ade80')
+                else:
+                    cur_pill.set_text('no current node (edge will be skipped)')
+                    cur_pill.style('color:#9ca3af')
+
+                status_lbl.set_text(self.drop_status)
+                status_lbl.style(
+                    'color:#f87171' if self.drop_status.startswith('ERROR')
+                    else 'color:#4ade80'
+                )
+
+            ui.timer(0.5, _refresh_drop_card)
+
         with ui.card().classes('w-[48rem] items-center mt-3'):
             ui.label('GPS Map').classes('text-2xl')
             leaflet = ui.leaflet(center=(51.98278, 7.43440), zoom=16).classes('w-full h-96')
@@ -400,7 +609,6 @@ class NiceGuiNode(Node):
         </style>
         """)
 
-        # top status bar
         with ui.row().classes('items-center gap-3 mb-2'):
             ui.label('Topological Navigation').classes('text-lg font-bold nav-mono')
             demo_cls = 'nav-pill-warn' if self.topo_demo else 'nav-pill-ok'
@@ -412,11 +620,9 @@ class NiceGuiNode(Node):
 
         with ui.row().classes('w-full gap-4 items-start'):
 
-            # ── map column ────────────────────────────────────────────────────
             with ui.card().classes('flex-1 nav-card').style('min-width:0'):
                 map_html = ui.html(_build_svg(self.topo_nodes, None, None))
 
-            # ── control column ────────────────────────────────────────────────
             with ui.card().classes('nav-card').style('min-width:200px;max-width:240px;padding:16px;gap:10px;display:flex;flex-direction:column'):
 
                 ui.label('CURRENT NODE').classes('text-xs nav-mono').style('color:#4ade80;letter-spacing:2px')
@@ -437,7 +643,6 @@ class NiceGuiNode(Node):
                 with ui.scroll_area().style('height:160px;border:1px solid #1e3320;border-radius:4px'):
                     node_col = ui.column().style('gap:2px;padding:4px')
 
-        # ── wire up buttons ───────────────────────────────────────────────────
         def on_go() -> None:
             if self.topo_selected:
                 self.send_nav_goal(self.topo_selected)
@@ -448,7 +653,6 @@ class NiceGuiNode(Node):
         go_btn.on_click(on_go)
         stop_btn.on_click(on_cancel)
 
-        # ── JS → Python: SVG node click ───────────────────────────────────────
         def on_node_clicked(e) -> None:
             name = (e.args or {}).get('node')
             if name and name in self.topo_nodes:
@@ -467,26 +671,25 @@ class NiceGuiNode(Node):
                 }, 150);
             """)
 
-        # ── periodic refresh (100 ms) ─────────────────────────────────────────
         _prev: dict = {}
 
         def refresh_nav() -> None:
             snap = {
-                'sel':  self.topo_selected,
-                'cur':  self.topo_current,
-                'stat': self.topo_nav_status,
-                'nav':  self.topo_navigating,
+                'sel':   self.topo_selected,
+                'cur':   self.topo_current,
+                'stat':  self.topo_nav_status,
+                'nav':   self.topo_navigating,
+                'nodes': len(self.topo_nodes),   # triggers redraw when node dropped
             }
             changed = {k for k, v in snap.items() if _prev.get(k) != v}
             if not changed:
                 return
             _prev.update(snap)
 
-            if changed & {'sel', 'cur'}:
+            if changed & {'sel', 'cur', 'nodes'}:
                 map_html.set_content(
                     _build_svg(self.topo_nodes, self.topo_selected, self.topo_current))
                 inject_click_js()
-                # rebuild node list
                 node_col.clear()
                 with node_col:
                     for name in sorted(self.topo_nodes):
@@ -511,11 +714,9 @@ class NiceGuiNode(Node):
             stop_btn.set_enabled(self.topo_navigating)
 
         ui.timer(0.1, refresh_nav)
-
-        # first render of click handlers
         inject_click_js()
 
-    # ── original methods (unchanged) ──────────────────────────────────────────
+    # ── original methods ──────────────────────────────────────────────────────
 
     def toggle_estop(self) -> None:
         self.soft_estop_active = not self.soft_estop_active
@@ -553,11 +754,9 @@ class NiceGuiNode(Node):
         self.estop_back_active = msg.data
 
 
-# ── entrypoints (unchanged) ───────────────────────────────────────────────────
+# ── entrypoints ───────────────────────────────────────────────────────────────
 
 def main() -> None:
-    # NOTE: This function is defined as the ROS entry point in setup.py,
-    # but it's empty to enable NiceGUI auto-reloading
     pass
 
 
@@ -571,5 +770,5 @@ def ros_main() -> None:
 
 
 app.on_startup(lambda: threading.Thread(target=ros_main).start())
-ui_run.APP_IMPORT_STRING = f'{__name__}:app'  # ROS2 uses a non-standard module name
+ui_run.APP_IMPORT_STRING = f'{__name__}:app'
 ui.run(uvicorn_reload_dirs=str(Path(__file__).parent.resolve()), favicon='🤖', port=80)
