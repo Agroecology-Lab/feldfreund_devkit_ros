@@ -17,6 +17,7 @@ def generate_launch_description():
     devkit_launch_pkg = get_package_share_directory('devkit_launch')
     ui_pkg            = get_package_share_directory('devkit_ui')
     fusioncore_pkg    = get_package_share_directory('fusioncore_ros')
+    row_follow_pkg    = get_package_share_directory('sowbot_row_follow')
 
     # ── GPS env vars written by fixusb.py ─────────────────────────────────────
     # mb+r launch files identify hardware by serial string (libusb), not tty.
@@ -213,5 +214,12 @@ def generate_launch_description():
                 )
             ),
             launch_arguments={'map_path': tmap2_file}.items(),
+        ),
+
+        # Row following — limbic_row_follow action server on /limbic_row_follow
+        IncludeLaunchDescription(
+            PythonLaunchDescriptionSource(
+                os.path.join(row_follow_pkg, 'launch', 'row_follow.launch.py')
+            ),
         ),
     ])
