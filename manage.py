@@ -10,7 +10,7 @@ from typing import List, Dict
 
 class DevkitManager:
     def __init__(self):
-        self.image_name = ':jazzy'
+        self.image_name = 'sowbot:jazzy'
         self.container_name = 'sowbot_runtime'
         self.root_dir = Path(__file__).parent.resolve()
         self.src_dir = self.root_dir / 'src'
