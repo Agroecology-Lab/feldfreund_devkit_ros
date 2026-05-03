@@ -1,0 +1,370 @@
+meta:
+  last_updated: 08-03-2026_12-00-00
+  origin:
+    latitude: 53.268642038
+    longitude: -0.524509505881
+    altitude: 0
+metric_map: mixed_test_map
+name: mixed_test_map
+pointset: mixed_test_map
+transformation:
+  topo_frame_id: mixed_test_map
+  parent: map
+  rotation:
+    w: 1.0
+    x: 0.0
+    y: 0.0
+    z: 0.0
+  translation:
+    x: 0.0
+    y: 0.0
+    z: 0.0
+definitions:
+  default_bt: "<root main_tree_to_execute=\"MainTree\">\n  <BehaviorTree ID=\"MainTree\"\
+    >\n    <PipelineSequence name=\"NavigateWithReplanning\">\n      <ComputePathToPose\
+    \ goal=\"{goal}\" path=\"{path}\" planner_id=\"GridBased\"/>\n      <FollowPath\
+    \ path=\"{path}\" controller_id=\"FollowPath\"/>\n    </PipelineSequence>\n  </BehaviorTree>\n\
+    </root>\n"
+  goal_align_bt: "<root main_tree_to_execute=\"MainTree\">\n  <BehaviorTree ID=\"\
+    MainTree\">\n    <PipelineSequence name=\"NavigateWithReplanning\">\n      <ComputePathToPose\
+    \ goal=\"{goal}\" path=\"{path}\" planner_id=\"GridBased\"/>\n      <FollowPath\
+    \ path=\"{path}\" controller_id=\"FollowPath\"/>\n    </PipelineSequence>\n  </BehaviorTree>\n\
+    </root>\n"
+  row_traversal_bt: "<root main_tree_to_execute=\"MainTree\">\n  <BehaviorTree ID=\"\
+    MainTree\">\n    <PipelineSequence name=\"NavigateWithReplanning\">\n      <ComputePathThroughPoses\
+    \ goals=\"{goals}\" path=\"{path}\" planner_id=\"GridBased\"/>\n      <FollowPath\
+    \ path=\"{path}\" controller_id=\"FollowPath\"/>\n    </PipelineSequence>\n  </BehaviorTree>\n\
+    </root>\n"
+actions:
+  navigate_to_pose:
+    composable: false
+    action_type: nav2_msgs.action.NavigateToPose
+    action_server: /navigate_to_pose
+    action_goal_template:
+      pose:
+        header:
+          frame_id: ${node.nav_frame}
+        pose: ${node.pose}
+      behavior_tree: ${definitions.default_bt}
+  navigate_to_poses:
+    composable: true
+    action_type: nav2_msgs.action.NavigateThroughPoses
+    action_server: /navigate_through_poses
+    action_goal_template:
+      poses:
+      - header:
+          frame_id: ${node.nav_frame}
+        pose: ${node.pose}
+      behavior_tree: ${definitions.default_bt}
+  goal_align:
+    composable: false
+    action_type: nav2_msgs.action.NavigateToPose
+    action_server: /navigate_to_pose
+    action_goal_template:
+      pose:
+        header:
+          frame_id: ${node.nav_frame}
+        pose: ${node.pose}
+      behavior_tree: ${definitions.goal_align_bt}
+  row_traversal:
+    composable: true
+    action_type: nav2_msgs.action.NavigateThroughPoses
+    action_server: /navigate_through_poses
+    action_goal_template:
+      poses:
+      - header:
+          frame_id: ${node.nav_frame}
+        pose: ${node.pose}
+      behavior_tree: ${definitions.row_traversal_bt}
+  limbic_row_follow:
+    composable: false
+    action_type: nav2_msgs.action.NavigateToPose
+    action_server: /limbic_row_follow
+    action_goal_template:
+      pose:
+        header:
+          frame_id: ${node.nav_frame}
+        pose: ${node.pose}
+      behavior_tree: ""
+nodes:
+- meta:
+    map: mixed_test_map
+    node: N1
+    pointset: mixed_test_map
+  node:
+    edges:
+    - action: navigate_to_pose
+      edge_id: N1_N2
+      node: N2
+    - action: navigate_to_pose
+      edge_id: N1_N0
+      node: N0
+    name: N1
+    pose:
+      orientation:
+        w: 1.0
+        x: 0.0
+        y: 0.0
+        z: 0.0
+      position:
+        x: 0.0
+        y: 0.0
+        z: 0.0
+    properties:
+      xy_goal_tolerance: 0.3
+      yaw_goal_tolerance: 0.1
+    verts:
+    - x: -1.0
+      y: -1.0
+    - x: 1.0
+      y: -1.0
+    - x: 1.0
+      y: 1.0
+    - x: -1.0
+      y: 1.0
+- meta:
+    map: mixed_test_map
+    node: N2
+    pointset: mixed_test_map
+  node:
+    edges:
+    - action: navigate_to_pose
+      edge_id: N2_N3
+      node: N3
+    - action: navigate_to_pose
+      edge_id: N2_N1
+      node: N1
+    name: N2
+    pose:
+      orientation:
+        w: 1.0
+        x: 0.0
+        y: 0.0
+        z: 0.0
+      position:
+        x: 3.0
+        y: 0.0
+        z: 0.0
+    properties:
+      xy_goal_tolerance: 0.3
+      yaw_goal_tolerance: 0.1
+    verts:
+    - x: -1.0
+      y: -1.0
+    - x: 1.0
+      y: -1.0
+    - x: 1.0
+      y: 1.0
+    - x: -1.0
+      y: 1.0
+- meta:
+    map: mixed_test_map
+    node: N3
+    pointset: mixed_test_map
+  node:
+    edges:
+    - action: navigate_to_pose
+      edge_id: N3_N4
+      node: N4
+    - action: navigate_to_pose
+      edge_id: N3_N2
+      node: N2
+    - action: navigate_to_pose
+      edge_id: N3_N10
+      node: N10
+    name: N3
+    pose:
+      orientation:
+        w: 1.0
+        x: 0.0
+        y: 0.0
+        z: 0.0
+      position:
+        x: 6.0
+        y: 0.0
+        z: 0.0
+    properties:
+      xy_goal_tolerance: 0.1
+      yaw_goal_tolerance: 0.05
+    verts:
+    - x: -0.5
+      y: -0.5
+    - x: 0.5
+      y: -0.5
+    - x: 0.5
+      y: 0.5
+    - x: -0.5
+      y: 0.5
+- meta:
+    map: mixed_test_map
+    node: N4
+    pointset: mixed_test_map
+  node:
+    edges:
+    - action: navigate_to_pose
+      edge_id: N4_N5
+      node: N5
+    - action: navigate_to_pose
+      edge_id: N4_N3
+      node: N3
+    name: N4
+    pose:
+      orientation:
+        w: 1.0
+        x: 0.0
+        y: 0.0
+        z: 0.0
+      position:
+        x: 9.0
+        y: 0.0
+        z: 0.0
+    properties:
+      xy_goal_tolerance: 0.1
+      yaw_goal_tolerance: 0.05
+    verts:
+    - x: -0.5
+      y: -0.5
+    - x: 0.5
+      y: -0.5
+    - x: 0.5
+      y: 0.5
+    - x: -0.5
+      y: 0.5
+- meta:
+    map: mixed_test_map
+    node: N5
+    pointset: mixed_test_map
+  node:
+    edges:
+    - action: goal_align
+      edge_id: N5_N6
+      node: N6
+    - action: navigate_to_pose
+      edge_id: N5_N4
+      node: N4
+    name: N5
+    pose:
+      orientation:
+        w: 0.707
+        x: 0.0
+        y: 0.0
+        z: 0.707
+      position:
+        x: 12.0
+        y: 0.0
+        z: 0.0
+    properties:
+      xy_goal_tolerance: 0.05
+      yaw_goal_tolerance: 0.02
+    verts:
+    - x: -0.5
+      y: -0.5
+    - x: 0.5
+      y: -0.5
+    - x: 0.5
+      y: 0.5
+    - x: -0.5
+      y: 0.5
+- meta:
+    map: mixed_test_map
+    node: N6
+    pointset: mixed_test_map
+  node:
+    edges:
+    - action: goal_align
+      edge_id: N6_N5
+      node: N5
+    name: N6
+    nav_frame: map
+    pose:
+      orientation:
+        w: 0.707
+        x: 0.0
+        y: 0.0
+        z: 0.707
+      position:
+        x: 15.0
+        y: 0.0
+        z: 0.0
+    properties:
+      xy_goal_tolerance: 0.05
+      yaw_goal_tolerance: 0.02
+    verts:
+    - x: -0.5
+      y: -0.5
+    - x: 0.5
+      y: -0.5
+    - x: 0.5
+      y: 0.5
+    - x: -0.5
+      y: 0.5
+- meta:
+    map: mixed_test_map
+    node: N0
+    pointset: mixed_test_map
+    dropped_by: webui
+    timestamp: 02-05-2026_09-41-56
+  node:
+    edges:
+    - action: navigate_to_pose
+      edge_id: N0_N1
+      node: N1
+    name: N0
+    nav_frame: mixed_test_map
+    pose:
+      orientation:
+        w: 1.0
+        x: 0.0
+        y: 0.0
+        z: 0.0
+      position:
+        x: 0.0
+        y: 0.0
+        z: 0.0
+    properties:
+      xy_goal_tolerance: 0.3
+      yaw_goal_tolerance: 0.1
+    verts:
+    - x: -1.0
+      y: -1.0
+    - x: 1.0
+      y: -1.0
+    - x: 1.0
+      y: 1.0
+    - x: -1.0
+      y: 1.0
+- meta:
+    map: mixed_test_map
+    node: N10
+    pointset: mixed_test_map
+    dropped_by: webui
+    timestamp: 02-05-2026_09-44-30
+  node:
+    edges:
+    - action: navigate_to_pose
+      edge_id: N10_N3
+      node: N3
+    name: N10
+    nav_frame: mixed_test_map
+    pose:
+      orientation:
+        w: 1.0
+        x: 0.0
+        y: 0.0
+        z: 0.0
+      position:
+        x: 6.0
+        y: 0.0
+        z: 0.0
+    properties:
+      xy_goal_tolerance: 0.3
+      yaw_goal_tolerance: 0.1
+    verts:
+    - x: -1.0
+      y: -1.0
+    - x: 1.0
+      y: -1.0
+    - x: 1.0
+      y: 1.0
+    - x: -1.0
+      y: 1.0
