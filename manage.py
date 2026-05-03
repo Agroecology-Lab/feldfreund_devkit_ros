@@ -10,7 +10,7 @@ from typing import List, Dict
 
 class DevkitManager:
     def __init__(self):
-        self.image_name = 'sowbot:jazzy'
+        self.image_name = ':jazzy'
         self.container_name = 'sowbot_runtime'
         self.root_dir = Path(__file__).parent.resolve()
         self.src_dir = self.root_dir / 'src'
@@ -49,10 +49,16 @@ class DevkitManager:
             shutil.copytree(pkg_src, pkg_root)
 
         # 3. Cleanup: Remove folders at root that no longer exist in src/
+        # Protection: Don't delete standard project folders OR persistent data dirs
+        PROTECTED = {
+            'src', 'docker', 'build', 'install', 'log',
+            '.git', '__pycache__',
+            'maps',   # persistent map files — must survive sync
+        }
+
         for item in self.root_dir.iterdir():
             if item.is_dir() and item.name not in current_packages:
-                # Protection: Don't delete standard project folders
-                if item.name not in ['src', 'docker', 'build', 'install', 'log', '.git', '__pycache__']:
+                if item.name not in PROTECTED:
                     self._log(f"Cleaning up ghost package: {item.name}", "DEBUG")
                     shutil.rmtree(item)
 
@@ -160,6 +166,12 @@ class DevkitManager:
         # Allow Docker to connect to host X server
         subprocess.run(['xhost', '+local:docker'], capture_output=True)
 
+        # Ensure maps directory exists on host before mounting.
+        # Must be created by the user process — if Docker creates it, it will be
+        # owned by root and the container will fail to write map files.
+        maps_dir = self.root_dir / 'maps'
+        maps_dir.mkdir(exist_ok=True)
+
         docker_cmd = [
             'docker', 'run', '-it', '--rm', '--name', self.container_name, '--net=host', '--privileged',
             '--env', 'RMW_IMPLEMENTATION=rmw_cyclonedds_cpp',
@@ -169,6 +181,7 @@ class DevkitManager:
             '-v', '/tmp/.X11-unix:/tmp/.X11-unix:rw',
             '--env-file', str(self.root_dir / '.env') if (self.root_dir / '.env').exists() else '/dev/null',
             '-v', '/dev:/dev',
+            '-v', f'{self.root_dir}/maps:/workspace/maps',  # persist maps across container restarts
             self.image_name, 'bash', '-c', ros_command,
         ]
 
