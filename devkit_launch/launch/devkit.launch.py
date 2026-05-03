@@ -45,7 +45,7 @@ def generate_launch_description():
     # The same path is passed to topo nav as map_path AND exported as TMAP2_FILE
     # so the NiceGUI Navigate tab shows identical nodes to what topo nav routes on.
     topo_nav_share = get_package_share_directory('topological_navigation')
-    default_tmap2  = os.path.join(topo_nav_share, 'config', 'test_simple_tmap2.yaml')
+    default_tmap2  = '/workspace/maps/mixed_test_map'
     tmap2_file     = os.getenv('TMAP2_FILE', default_tmap2)
 
     # ── Conditions ────────────────────────────────────────────────────────────
