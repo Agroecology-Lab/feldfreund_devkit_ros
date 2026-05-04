@@ -353,6 +353,10 @@ class NiceGuiNode(Node):
 
         self._track_timer:    Optional[object] = None
         self._track_counter:  int              = 0
+        self._track_prefix:   str              = ''
+        self._track_row_id:   Optional[int]    = None
+        self._track_is_row:   bool             = False
+        self._track_first:    bool             = True
         self.track_status:    str              = ''
 
         self.create_subscription(
@@ -640,10 +644,26 @@ class NiceGuiNode(Node):
         self._track_counter = (
             max(int(n[len(prefix) + 1:]) for n in existing) if existing else 0)
 
+        # Store tracking state for stop_track to use
+        self._track_prefix  = prefix
+        self._track_row_id  = row_id
+        self._track_is_row  = row_id is not None
+        self._track_first   = True   # next drop is the entry node
+
         def _drop() -> None:
             self._track_counter += 1
-            self.drop_topo_node(f'{prefix}_{self._track_counter}', row_id, row_role)
-            self.track_status = (f'recording  {prefix}_{self._track_counter}'
+            node_name = f'{prefix}_{self._track_counter}'
+
+            if self._track_is_row:
+                # First drop → entry, all subsequent → middle
+                # Exit is patched by stop_track on the last node
+                role = 'entry' if self._track_first else 'middle'
+                self._track_first = False
+            else:
+                role = row_role  # non-row track: pass through as-is
+
+            self.drop_topo_node(node_name, row_id, role)
+            self.track_status = (f'recording  {node_name}'
                                  f'  (#{self._track_counter})')
 
         _drop()
@@ -653,8 +673,67 @@ class NiceGuiNode(Node):
         if self._track_timer is not None:
             self._track_timer.cancel()
             self._track_timer = None
-        self.track_status = f'stopped at #{self._track_counter}'
+
+        # Patch last node to 'exit' if this was a row track
+        if self._track_is_row and self._track_counter > 0:
+            last_name = f'{self._track_prefix}_{self._track_counter}'
+            self._patch_node_role(last_name, 'exit')
+            self.track_status = (f'stopped — {last_name} marked exit'
+                                 f'  (#{self._track_counter} nodes)')
+        else:
+            self.track_status = f'stopped at #{self._track_counter}'
+
         self._track_counter = 0
+        self._track_prefix  = ''
+        self._track_row_id  = None
+        self._track_is_row  = False
+        self._track_first   = True
+
+    def _patch_node_role(self, node_name: str, role: str) -> None:
+        """Patch row_role on an already-dropped node in memory and on disk."""
+        import yaml as _yaml
+
+        # Patch in-memory UI nodes
+        if node_name in self.topo_nodes:
+            nd = dict(self.topo_nodes[node_name])
+            nd['meta'] = {**nd.get('meta', {}), 'row_role': role}
+            new_nodes = dict(self.topo_nodes)
+            new_nodes[node_name] = nd
+            self.topo_nodes = new_nodes
+
+        # Patch in-memory topo doc
+        for entry in self._topo_doc.get('nodes', []):
+            n = entry.get('node', {})
+            if n.get('name') == node_name:
+                entry.get('meta', {})['row_role'] = role
+                n.get('properties', {})['row_role'] = role
+                break
+
+        # Patch on disk
+        map_name = self._topo_doc.get('name', 'mixed_test_map')
+        map_file = f'/workspace/maps/{map_name}'
+
+        def _write():
+            try:
+                if not os.path.exists(map_file):
+                    return
+                with open(map_file) as f:
+                    doc = _yaml.safe_load(f)
+                for entry in doc.get('nodes', []):
+                    n = entry.get('node', {})
+                    if n.get('name') == node_name:
+                        entry.get('meta', {})['row_role'] = role
+                        n.get('properties', {})['row_role'] = role
+                        break
+                with open(map_file, 'w') as f:
+                    _yaml.dump(doc, f, default_flow_style=False,
+                               allow_unicode=True, sort_keys=False)
+                self.get_logger().info(
+                    f'Patched {node_name} row_role → {role}')
+            except Exception as e:
+                self.get_logger().error(f'_patch_node_role failed: {e}')
+
+        threading.Thread(target=_write, daemon=True).start()
 
     # ── UI ────────────────────────────────────────────────────────────────────
 
@@ -865,11 +944,14 @@ class NiceGuiNode(Node):
             track_start_btn.set_enabled(not running)
             track_stop_btn.set_enabled(running)
             if track_row_id.value:
-                track_row_hint.set_text(f'action: {_ROW_ACTION}')
+                track_row_hint.set_text(
+                    f'action: {_ROW_ACTION}  |  first=entry  middle=middle  last=exit')
                 track_row_hint.style('color:#0969da')
+                track_row_role.set_visibility(False)
             else:
                 track_row_hint.set_text(f'action: {_NAV_ACTION}')
                 track_row_hint.style('color:#8c959f')
+                track_row_role.set_visibility(True)
             track_status_lbl.set_text(self.track_status)
             track_status_lbl.style(
                 'color:#cf222e' if self.track_status.startswith('ERROR') else
