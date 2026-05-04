@@ -154,7 +154,6 @@ WORKDIR /workspace
 COPY ./devkit_driver ./src/devkit_driver
 COPY ./devkit_launch ./src/devkit_launch
 COPY ./devkit_ui     ./src/devkit_ui
-COPY ./sowbot_row_follow ./src/sowbot_row_follow
 
 # ============================================================
 # Stage 8: Workspace — Git Clones (each repo has its own
