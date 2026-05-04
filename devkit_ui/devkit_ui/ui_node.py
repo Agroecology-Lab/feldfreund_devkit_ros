@@ -1,3 +1,4 @@
+#!/usr/bin/env python3
 # pylint: disable=duplicate-code
 """
 ui_node.py — Sowbot web cockpit on :80
@@ -740,40 +741,34 @@ class NiceGuiNode(Node):
     def content(self) -> None:
         ui.add_head_html(_GLOBAL_CSS)
         with ui.tabs().classes('w-full') as tabs:
-            tab_navigate = ui.tab('Navigate', icon='route')
-            tab_control  = ui.tab('Control',  icon='settings')
+            tab_nav     = ui.tab('Nav',     icon='route')
+            tab_mission = ui.tab('Mission', icon='checklist')
+            tab_system  = ui.tab('System',  icon='settings')
 
-        with ui.tab_panels(tabs, value=tab_navigate).classes('w-full'):
-            with ui.tab_panel(tab_navigate):
+        with ui.tab_panels(tabs, value=tab_nav).classes('w-full'):
+            with ui.tab_panel(tab_nav):
                 self._nav_content()
-            with ui.tab_panel(tab_control):
-                self._control_content()
+            with ui.tab_panel(tab_mission):
+                self._mission_content()
+            with ui.tab_panel(tab_system):
+                self._system_content()
 
-    # ── Navigate tab ─────────────────────────────────────────────────────────
+    # ── Nav tab ───────────────────────────────────────────────────────────────
+    # Layout: top strip (joy + estop + pose + track + drop)
+    #         bottom row: topo map (flex) | nav sidebar (fixed 200px)
 
     def _nav_content(self) -> None:
-        # Top status row
-        with ui.row().classes('items-center gap-3 mb-3 w-full'):
-            ui.label('Sowbot').classes('text-lg font-semibold')
-            map_pill   = ui.html('')
-            action_pill = ui.html('')
 
-        # Main layout: map + sidebar
-        with ui.row().classes('w-full gap-3 items-start'):
+        # ── Top strip ─────────────────────────────────────────────────────────
+        with ui.row().classes('w-full gap-3 items-start mb-3'):
 
-            # Left column: map + controls stacked
-            with ui.column().classes('flex-1 gap-3').style('min-width:0'):
-
-                # Topo map
-                with ui.card().style('padding:8px'):
-                    map_html = ui.html(_build_svg(self.topo_nodes, None, None))
-
-                # Joystick + E-Stop
-                with ui.card().classes('w-full'):
-                    with ui.row().classes('items-center gap-6 justify-center'):
-                        ui.joystick(color='#1a7f37', size=48,
-                                    on_move=lambda e: self.send_speed(float(e.y), float(e.x)),
-                                    on_end=lambda _: self.send_speed(0.0, 0.0))
+            # Joystick + E-Stop + pose
+            with ui.card().style('padding:10px 16px'):
+                with ui.row().classes('items-center gap-4'):
+                    ui.joystick(color='#1a7f37', size=44,
+                                on_move=lambda e: self.send_speed(float(e.y), float(e.x)),
+                                on_end=lambda _: self.send_speed(0.0, 0.0))
+                    with ui.column().classes('gap-1'):
                         def update_estop(e: ClickEventArguments) -> None:
                             assert isinstance(e.sender, ui.button)
                             self.toggle_estop()
@@ -784,86 +779,86 @@ class NiceGuiNode(Node):
                                 e.sender.props('color=primary')
                                 e.sender.text = 'E-Stop'
                         ui.button('E-Stop', on_click=update_estop).props(
-                            'color=primary outline no-caps').classes('w-28 h-12')
+                            'color=primary outline no-caps').classes('w-24')
                         pose_lbl = ui.label('—').classes('text-xs font-mono').style(
                             'color:#57606a')
 
-                # Drop Node
-                with ui.card().classes('w-full'):
-                    with ui.row().classes('items-baseline gap-2 mb-2'):
-                        ui.label('Drop Node').classes('font-semibold')
-                        ui.label('pins at current pose').classes('text-xs').style(
-                            'color:#8c959f')
+            # Track Mode
+            with ui.card().classes('flex-1').style('padding:10px 14px'):
+                with ui.row().classes('items-baseline gap-2 mb-1'):
+                    ui.label('Track').classes('font-semibold')
+                    ui.label('auto-drop every N s').classes('text-xs').style('color:#8c959f')
+                with ui.row().classes('items-center gap-2 w-full'):
+                    track_prefix = ui.input(
+                        placeholder='Prefix e.g. ROW_A', label='Prefix',
+                    ).classes('flex-1')
+                    track_interval = ui.number(
+                        label='s', value=5, min=2, max=30, step=1, precision=0,
+                    ).classes('w-16')
+                with ui.row().classes('items-center gap-2 w-full mt-1'):
+                    track_row_id = ui.number(
+                        label='Row ID', placeholder='blank=standard',
+                        min=1, step=1, precision=0,
+                    ).classes('w-28')
+                    track_row_role = ui.toggle(
+                        {'entry': 'Entry', 'exit': 'Exit'}, value='entry',
+                    ).props('dense')
+                    track_row_hint = ui.label('').classes('text-xs font-mono').style(
+                        'color:#8c959f')
+                with ui.row().classes('items-center gap-2 mt-1'):
+                    track_start_btn = ui.button('Start', on_click=lambda: self.start_track(
+                        track_prefix.value,
+                        float(track_interval.value or 5),
+                        int(track_row_id.value) if track_row_id.value else None,
+                        track_row_role.value,
+                    )).props('color=positive no-caps dense')
+                    track_stop_btn = ui.button('Stop', on_click=self.stop_track).props(
+                        'color=negative no-caps dense')
+                    track_status_lbl = ui.label('').classes('text-xs font-mono ml-1').style(
+                        'color:#57606a')
 
-                    with ui.row().classes('items-center gap-3 w-full'):
-                        name_input = ui.input(
-                            placeholder='e.g. ROW_D_IN', label='Name',
-                        ).classes('flex-1')
+            # Drop Node
+            with ui.card().classes('flex-1').style('padding:10px 14px'):
+                with ui.row().classes('items-baseline gap-2 mb-1'):
+                    ui.label('Drop Node').classes('font-semibold')
+                    ui.label('pins at current pose').classes('text-xs').style('color:#8c959f')
+                with ui.row().classes('items-center gap-2 w-full'):
+                    name_input = ui.input(
+                        placeholder='e.g. ROW_D_IN', label='Name',
+                    ).classes('flex-1')
+                with ui.row().classes('items-center gap-2 w-full mt-1'):
+                    row_id_input = ui.number(
+                        label='Row ID', placeholder='blank=standard',
+                        min=1, step=1, precision=0,
+                    ).classes('w-28')
+                    row_role_toggle = ui.toggle(
+                        {'entry': 'Entry', 'exit': 'Exit'}, value='entry',
+                    ).props('dense')
+                    row_hint = ui.label('').classes('text-xs font-mono').style('color:#8c959f')
+                with ui.row().classes('items-center gap-2 mt-1'):
+                    cur_drop_lbl = ui.label('').classes('text-xs font-mono').style(
+                        'color:#8c959f')
+                    ui.button('Drop', on_click=lambda: self.drop_topo_node(
+                        name_input.value,
+                        int(row_id_input.value) if row_id_input.value else None,
+                        row_role_toggle.value,
+                    )).classes('ml-auto').props('color=positive no-caps dense')
+                drop_status_lbl = ui.label('').classes('text-xs font-mono mt-1')
 
-                    with ui.row().classes('items-center gap-3 w-full mt-1'):
-                        row_id_input = ui.number(
-                            label='Row ID', placeholder='blank = standard',
-                            min=1, step=1, precision=0,
-                        ).classes('w-32')
-                        row_role_toggle = ui.toggle(
-                            {'entry': 'Entry', 'exit': 'Exit'}, value='entry',
-                        ).props('dense')
-                        row_hint = ui.label('').classes('text-xs font-mono').style(
-                            'color:#8c959f')
+        # ── Bottom: topo map + nav sidebar side by side ───────────────────────
+        with ui.row().classes('w-full gap-3 items-start'):
 
-                    with ui.row().classes('items-center gap-3 mt-2'):
-                        cur_drop_lbl = ui.label('').classes('text-xs font-mono').style(
-                            'color:#8c959f')
-                        ui.button('Drop Node', on_click=lambda: self.drop_topo_node(
-                            name_input.value,
-                            int(row_id_input.value) if row_id_input.value else None,
-                            row_role_toggle.value,
-                        )).classes('ml-auto').props('color=positive no-caps')
+            # Topo map
+            with ui.column().classes('flex-1 gap-2').style('min-width:0'):
+                with ui.row().classes('items-center gap-2 mb-1'):
+                    map_pill    = ui.html('')
+                    action_pill = ui.html('')
+                with ui.card().style('padding:8px'):
+                    map_html = ui.html(_build_svg(self.topo_nodes, None, None))
 
-                    drop_status_lbl = ui.label('').classes('text-xs font-mono mt-1')
-
-                # Track Mode
-                with ui.card().classes('w-full'):
-                    with ui.row().classes('items-baseline gap-2 mb-2'):
-                        ui.label('Track Mode').classes('font-semibold')
-                        ui.label('auto-drop every N seconds').classes('text-xs').style(
-                            'color:#8c959f')
-
-                    with ui.row().classes('items-center gap-3 w-full'):
-                        track_prefix = ui.input(
-                            placeholder='e.g. TOP_FIELD', label='Prefix',
-                        ).classes('flex-1')
-                        track_interval = ui.number(
-                            label='s', value=5, min=2, max=30, step=1, precision=0,
-                        ).classes('w-20')
-
-                    with ui.row().classes('items-center gap-3 w-full mt-1'):
-                        track_row_id = ui.number(
-                            label='Row ID', placeholder='blank = standard',
-                            min=1, step=1, precision=0,
-                        ).classes('w-32')
-                        track_row_role = ui.toggle(
-                            {'entry': 'Entry', 'exit': 'Exit'}, value='entry',
-                        ).props('dense')
-                        track_row_hint = ui.label('').classes('text-xs font-mono').style(
-                            'color:#8c959f')
-
-                    with ui.row().classes('items-center gap-2 mt-2'):
-                        track_start_btn = ui.button('Start', on_click=lambda: self.start_track(
-                            track_prefix.value,
-                            float(track_interval.value or 5),
-                            int(track_row_id.value) if track_row_id.value else None,
-                            track_row_role.value,
-                        )).props('color=positive no-caps')
-                        track_stop_btn = ui.button('Stop', on_click=self.stop_track).props(
-                            'color=negative no-caps')
-                        track_status_lbl = ui.label('').classes('text-xs font-mono ml-1').style(
-                            'color:#57606a')
-
-            # Right sidebar: nav controls + node list
+            # Nav sidebar
             with ui.card().style('width:200px;padding:12px;flex-shrink:0;'
                                   'display:flex;flex-direction:column;gap:8px'):
-
                 ui.html('<div class="sec-label">Current node</div>')
                 cur_lbl = ui.label('—').classes('text-sm font-mono font-bold')
 
@@ -880,7 +875,7 @@ class NiceGuiNode(Node):
                     'no-caps flat')
 
                 ui.html('<div class="sec-label mt-2">Nodes</div>')
-                with ui.scroll_area().style('height:200px'):
+                with ui.scroll_area().style('height:220px'):
                     node_col = ui.column().style('gap:1px;width:100%')
 
         go_btn.on_click(
@@ -907,7 +902,7 @@ class NiceGuiNode(Node):
         _prev: dict = {}
 
         def refresh_nav() -> None:
-            # Pose / connect label
+            # Pose
             odom = self.latest_odom
             gps  = self.latest_gps
             if odom is not None:
@@ -919,37 +914,34 @@ class NiceGuiNode(Node):
             else:
                 pose_lbl.set_text('no odometry')
 
+            # Drop node hints
             cur = self.topo_current
             if cur and cur != '—':
-                cur_drop_lbl.set_text(f'connects to {cur}')
+                cur_drop_lbl.set_text(f'→ {cur}')
                 cur_drop_lbl.style('color:#1a7f37')
             else:
-                cur_drop_lbl.set_text('no current node — edge skipped')
+                cur_drop_lbl.set_text('no current node')
                 cur_drop_lbl.style('color:#8c959f')
-
             if row_id_input.value:
-                row_hint.set_text(f'action: {_ROW_ACTION}  tol: 0.1 m')
+                row_hint.set_text(f'{_ROW_ACTION}')
                 row_hint.style('color:#0969da')
             else:
-                row_hint.set_text(f'action: {_NAV_ACTION}')
+                row_hint.set_text(f'{_NAV_ACTION}')
                 row_hint.style('color:#8c959f')
-
             drop_status_lbl.set_text(self.drop_status)
             drop_status_lbl.style(
-                'color:#cf222e' if self.drop_status.startswith('ERROR')
-                else 'color:#1a7f37')
+                'color:#cf222e' if self.drop_status.startswith('ERROR') else 'color:#1a7f37')
 
-            # Track
+            # Track hints
             running = self._track_timer is not None
             track_start_btn.set_enabled(not running)
             track_stop_btn.set_enabled(running)
             if track_row_id.value:
-                track_row_hint.set_text(
-                    f'action: {_ROW_ACTION}  |  first=entry  middle=middle  last=exit')
+                track_row_hint.set_text('entry→middle→exit auto')
                 track_row_hint.style('color:#0969da')
                 track_row_role.set_visibility(False)
             else:
-                track_row_hint.set_text(f'action: {_NAV_ACTION}')
+                track_row_hint.set_text(f'{_NAV_ACTION}')
                 track_row_hint.style('color:#8c959f')
                 track_row_role.set_visibility(True)
             track_status_lbl.set_text(self.track_status)
@@ -957,6 +949,7 @@ class NiceGuiNode(Node):
                 'color:#cf222e' if self.track_status.startswith('ERROR') else
                 'color:#1a7f37' if running else 'color:#57606a')
 
+            # Map + sidebar
             snap = {
                 'sel':   self.topo_selected,
                 'cur':   self.topo_current,
@@ -985,15 +978,15 @@ class NiceGuiNode(Node):
                 node_col.clear()
                 with node_col:
                     for nname in sorted(self.topo_nodes):
-                        nd       = self.topo_nodes[nname]
-                        is_sel   = (nname == self.topo_selected)
-                        is_row   = nd.get('meta', {}).get('row_id') is not None
-                        row_id_v = nd.get('meta', {}).get('row_id', '')
+                        nd         = self.topo_nodes[nname]
+                        is_sel     = (nname == self.topo_selected)
+                        is_row     = nd.get('meta', {}).get('row_id') is not None
+                        row_id_v   = nd.get('meta', {}).get('row_id', '')
                         row_role_v = nd.get('meta', {}).get('row_role', '')
-                        gps_lat  = nd.get('meta', {}).get('gps_lat', '')
-                        gps_lon  = nd.get('meta', {}).get('gps_lon', '')
-                        title    = (f'Row {row_id_v} {row_role_v} | {gps_lat} {gps_lon}'.strip()
-                                    if is_row else f'{gps_lat} {gps_lon}'.strip())
+                        gps_lat    = nd.get('meta', {}).get('gps_lat', '')
+                        gps_lon    = nd.get('meta', {}).get('gps_lon', '')
+                        title = (f'Row {row_id_v} {row_role_v} | {gps_lat} {gps_lon}'.strip()
+                                 if is_row else f'{gps_lat} {gps_lon}'.strip())
                         cls = ('node-item'
                                + (' sel' if is_sel else '')
                                + (' row' if is_row else ''))
@@ -1011,7 +1004,6 @@ class NiceGuiNode(Node):
                 'color:#cf222e' if 'fail' in self.topo_nav_status else
                 'color:#1a7f37' if self.topo_nav_status == 'arrived' else
                 'color:#57606a')
-
             can_go = (bool(self.topo_selected) and not self.topo_navigating
                       and not self.soft_estop_active)
             go_btn.set_enabled(can_go)
@@ -1020,10 +1012,193 @@ class NiceGuiNode(Node):
         ui.timer(0.2, refresh_nav)
         inject_click_js()
 
-    # ── Control tab ───────────────────────────────────────────────────────────
+    # ── Mission tab ───────────────────────────────────────────────────────────
 
-    def _control_content(self) -> None:
-        with ui.row().classes('items-stretch w-[48rem] gap-3'):
+    def _mission_content(self) -> None:
+
+        # ── Fields2Cover ──────────────────────────────────────────────────────
+        with ui.card().classes('w-full mb-3'):
+            with ui.row().classes('items-baseline gap-2 mb-2'):
+                ui.label('Coverage Planning').classes('font-semibold')
+                ui.label('fields2cover — draw field boundary, generate row plan').classes(
+                    'text-xs').style('color:#8c959f')
+
+            with ui.row().classes('items-center gap-3 w-full mb-2'):
+                f2c_width = ui.number(
+                    label='Working width (m)', value=1.5, min=0.1, step=0.1, precision=2,
+                ).classes('w-40')
+                f2c_angle = ui.number(
+                    label='Row angle (°)', value=0, min=-180, max=180, step=1, precision=0,
+                ).classes('w-36')
+                f2c_row_id_start = ui.number(
+                    label='First row ID', value=1, min=1, step=1, precision=0,
+                ).classes('w-32')
+
+            # Polygon definition via GPS waypoints
+            with ui.card().style('background:#f6f8fa;border:1px dashed #d0d7de;padding:12px'):
+                ui.html('<div class="sec-label mb-2">Field boundary — GPS waypoints</div>')
+                ui.label(
+                    'Drive to each field corner and press Add Corner. '
+                    'Minimum 3 corners. Current robot pose is used.'
+                ).classes('text-xs').style('color:#8c959f')
+
+                f2c_corners: list = []
+                corners_lbl = ui.label('No corners yet').classes('text-xs font-mono mt-2').style(
+                    'color:#57606a')
+
+                with ui.row().classes('gap-2 mt-2'):
+                    def add_corner():
+                        if self.latest_odom is None:
+                            return
+                        x = round(self.latest_odom.pose.pose.position.x, 3)
+                        y = round(self.latest_odom.pose.pose.position.y, 3)
+                        f2c_corners.append((x, y))
+                        corners_lbl.set_text(
+                            f'{len(f2c_corners)} corners: '
+                            + '  '.join(f'({c[0]:.1f},{c[1]:.1f})' for c in f2c_corners))
+                    ui.button('Add Corner', on_click=add_corner).props(
+                        'color=primary outline no-caps dense')
+                    def clear_corners():
+                        f2c_corners.clear()
+                        corners_lbl.set_text('No corners yet')
+                    ui.button('Clear', on_click=clear_corners).props(
+                        'outline no-caps dense')
+
+            f2c_status = ui.label('').classes('text-xs font-mono mt-2').style('color:#57606a')
+
+            def generate_coverage():
+                if len(f2c_corners) < 3:
+                    f2c_status.set_text('ERROR: need at least 3 corners')
+                    f2c_status.style('color:#cf222e')
+                    return
+                f2c_status.set_text(
+                    f'fields2cover integration not yet implemented — '
+                    f'{len(f2c_corners)} corners recorded, '
+                    f'width={f2c_width.value}m, angle={f2c_angle.value}°, '
+                    f'first row ID={int(f2c_row_id_start.value or 1)}'
+                )
+                f2c_status.style('color:#9a6700')
+
+            ui.button('Generate Row Plan', on_click=generate_coverage).props(
+                'color=positive no-caps').classes('mt-2')
+
+        # ── Mission queue ─────────────────────────────────────────────────────
+        with ui.card().classes('w-full'):
+            with ui.row().classes('items-baseline gap-2 mb-3'):
+                ui.label('Mission Queue').classes('font-semibold')
+                ui.label('select rows to run today').classes('text-xs').style('color:#8c959f')
+
+            with ui.row().classes('w-full gap-4 items-start'):
+
+                # Available rows (left)
+                with ui.card().classes('flex-1').style('background:#f6f8fa;padding:10px'):
+                    ui.html('<div class="sec-label mb-2">Available rows</div>')
+                    available_col = ui.column().style('gap:2px;width:100%')
+
+                # Queue (right)
+                with ui.card().classes('flex-1').style('background:#f6f8fa;padding:10px'):
+                    ui.html('<div class="sec-label mb-2">Today\'s queue</div>')
+                    queue_col = ui.column().style('gap:2px;width:100%')
+                    queue_lbl = ui.label('Empty — add rows from the left').classes(
+                        'text-xs').style('color:#8c959f')
+
+            mission_queue: list = []  # list of row_ids in order
+
+            def _render_queue():
+                queue_col.clear()
+                if not mission_queue:
+                    queue_lbl.set_visibility(True)
+                    return
+                queue_lbl.set_visibility(False)
+                with queue_col:
+                    for i, rid in enumerate(mission_queue):
+                        r = i  # capture
+                        with ui.row().classes('items-center gap-1 w-full'):
+                            ui.label(f'Row {rid}').classes('text-sm font-mono flex-1')
+                            ui.button('↑', on_click=lambda _, r=r: _move(r, -1)).props(
+                                'flat dense').classes('text-xs').style(
+                                'color:#57606a').set_enabled(i > 0)
+                            ui.button('↓', on_click=lambda _, r=r: _move(r, 1)).props(
+                                'flat dense').classes('text-xs').style(
+                                'color:#57606a').set_enabled(i < len(mission_queue) - 1)
+                            ui.button('✕', on_click=lambda _, r=r: _remove(r)).props(
+                                'flat dense').classes('text-xs').style('color:#cf222e')
+
+            def _move(idx: int, direction: int):
+                new_idx = idx + direction
+                if 0 <= new_idx < len(mission_queue):
+                    mission_queue[idx], mission_queue[new_idx] = (
+                        mission_queue[new_idx], mission_queue[idx])
+                _render_queue()
+
+            def _remove(idx: int):
+                mission_queue.pop(idx)
+                _render_queue()
+
+            def _add_row(row_id: int):
+                if row_id not in mission_queue:
+                    mission_queue.append(row_id)
+                _render_queue()
+
+            mission_status = ui.label('').classes('text-xs font-mono mt-3').style(
+                'color:#57606a')
+
+            with ui.row().classes('gap-2 mt-3'):
+                mission_go_btn = ui.button('Run Mission', on_click=lambda: self._run_mission(
+                    mission_queue, mission_status,
+                )).props('color=positive no-caps')
+                mission_cancel_btn = ui.button('Cancel', on_click=self.cancel_nav_goal).props(
+                    'color=negative no-caps flat')
+
+            # Refresh available rows from map metadata
+            _mission_prev_nodes = [None]
+
+            def refresh_mission() -> None:
+                if id(self.topo_nodes) == _mission_prev_nodes[0]:
+                    return
+                _mission_prev_nodes[0] = id(self.topo_nodes)
+
+                # Find unique row IDs with entry nodes
+                rows: dict[int, str] = {}
+                for nname, nd in self.topo_nodes.items():
+                    meta = nd.get('meta', {})
+                    rid  = meta.get('row_id')
+                    role = meta.get('row_role', '')
+                    if rid is not None and role == 'entry':
+                        rows[int(rid)] = nname
+
+                available_col.clear()
+                if not rows:
+                    with available_col:
+                        ui.label('No rows in map yet').classes('text-xs').style('color:#8c959f')
+                else:
+                    with available_col:
+                        for rid in sorted(rows):
+                            r = rid
+                            with ui.row().classes('items-center gap-2 w-full'):
+                                ui.label(f'Row {rid}').classes('text-sm font-mono flex-1')
+                                ui.label(rows[rid]).classes('text-xs font-mono').style(
+                                    'color:#8c959f')
+                                ui.button('Add →', on_click=lambda _, r=r: _add_row(r)).props(
+                                    'color=primary outline no-caps dense')
+
+            ui.timer(1.0, refresh_mission)
+
+    def _run_mission(self, queue: list, status_lbl) -> None:
+        """Placeholder — sequential GotoNode calls to be implemented."""
+        if not queue:
+            status_lbl.set_text('ERROR: queue is empty')
+            status_lbl.style('color:#cf222e')
+            return
+        status_lbl.set_text(
+            f'Mission executor not yet implemented — '
+            f'queue: rows {queue}')
+        status_lbl.style('color:#9a6700')
+
+    # ── System tab ────────────────────────────────────────────────────────────
+
+    def _system_content(self) -> None:
+        with ui.row().classes('items-stretch w-full gap-3'):
             with ui.card().classes('flex-1'):
                 ui.label('Telemetry').classes('font-semibold mb-2')
                 ui.html('<div class="sec-label">Linear velocity</div>')
@@ -1073,7 +1248,7 @@ class NiceGuiNode(Node):
                         return _u
                     ui.timer(0.2, _mk2())
 
-        with ui.card().classes('w-[48rem] mt-3'):
+        with ui.card().classes('w-full mt-3'):
             ui.label('ESP').classes('font-semibold mb-2')
             with ui.row().classes('gap-2 flex-wrap'):
                 ui.button('Enable',    on_click=lambda: self.esp_enable_publisher.publish(Empty())).props('color=positive outline no-caps').classes('px-4')
@@ -1082,7 +1257,7 @@ class NiceGuiNode(Node):
                 ui.button('Restart',   on_click=lambda: self.esp_restart_publisher.publish(Empty())).props('color=primary outline no-caps').classes('px-4')
                 ui.button('Configure', on_click=lambda: self.esp_configure_publisher.publish(Empty())).props('outline no-caps').classes('px-4')
 
-        with ui.card().classes('w-[48rem] mt-3'):
+        with ui.card().classes('w-full mt-3'):
             ui.label('GPS').classes('font-semibold mb-2')
             leaflet = ui.leaflet(center=(51.98278, 7.43440), zoom=16).classes('w-full h-80')
             marker  = leaflet.marker(latlng=leaflet.center)
