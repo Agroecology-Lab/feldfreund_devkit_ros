@@ -92,8 +92,12 @@ RUN for i in 1 2 3 4 5; do \
         ros-jazzy-control-msgs \
         ros-jazzy-controller-manager-msgs \
         ros-jazzy-rviz2 \
+        python3-sympy \
+        python3-fonttools \
+        python3-ufolib2 \
+        python3-matplotlib \
         ros-jazzy-fields2cover \
-     #   ros-jazzy-ros-gz \
+       # ros-jazzy-ros-gz \
         python3-serial python3-requests python3-yaml && \
       break || (echo "Stage 3.2 attempt $i failed, retrying in 15s..." && sleep 15); \
     done && \
