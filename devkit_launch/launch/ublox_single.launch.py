@@ -3,6 +3,7 @@ from launch import LaunchDescription
 from launch_ros.actions import ComposableNodeContainer
 from launch_ros.descriptions import ComposableNode
 
+
 def generate_launch_description():
     usb_path = os.getenv('GPS_USB_PATH_ROVER', 'virtual')
 
@@ -14,8 +15,8 @@ def generate_launch_description():
             executable='component_container',
             composable_node_descriptions=[
                 ComposableNode(
-                    package='ublox_dgnss',
-                    plugin='ublox_dgnss::UbloxDgnssDrv',
+                    package='ublox_dgnss_node',
+                    plugin='ublox_dgnss::UbloxDGNSSNode',
                     name='ublox_dgnss',
                     namespace='rover',
                     parameters=[{
