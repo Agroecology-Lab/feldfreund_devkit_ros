@@ -65,6 +65,8 @@ RUN apt-get update && \
       libglx-mesa0 \
       libegl-mesa0 \
       nano \
+      htop \
+      libxcb-shape0 \                                                                           
       libgles2 && \
     apt-get clean && rm -rf /var/lib/apt/lists/*
 
