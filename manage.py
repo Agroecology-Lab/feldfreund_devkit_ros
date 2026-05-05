@@ -96,7 +96,6 @@ class DevkitManager:
                 # interface dir — check parent device
                 parts = entry.name.split(':')
                 if len(parts) == 2:
-                    dev_path = cdc_path / parts[0]
                     vendor_file = Path(f'/sys/bus/usb/devices/{parts[0]}/idVendor')
             try:
                 if vendor_file.exists() and vendor_file.read_text().strip() == '1546':
@@ -114,6 +113,27 @@ class DevkitManager:
         for iface in ifaces:
             subprocess.run(['sudo', 'sh', '-c', f'echo "{iface}" > /sys/bus/usb/drivers/cdc_acm/unbind'],
                            stderr=subprocess.DEVNULL)
+
+    def _usb_reset_f9p(self, usb_path: str):
+        """
+        Hard-resets the F9P via USB. Clears any stale libusb state or partial
+        config writes from a previous session, preventing heap corruption in
+        the ublox_dgnss VALGET write-back loop.
+        Requires: sudo apt install usbutils  (provides usbreset)
+        """
+        if not usb_path or usb_path == 'virtual':
+            return
+        if subprocess.run(['which', 'usbreset'], capture_output=True).returncode != 0:
+            self._log("usbreset not found — skipping F9P USB reset. "
+                      "Install with: sudo apt install usbutils", "WARN")
+            return
+        self._log(f"USB reset of F9P at {usb_path}...")
+        result = subprocess.run(['sudo', 'usbreset', usb_path], capture_output=True, text=True)
+        if result.returncode == 0:
+            self._log("F9P USB reset complete.")
+            time.sleep(1.0)  # Allow device to re-enumerate before libusb claims it
+        else:
+            self._log(f"USB reset failed (non-fatal): {result.stderr.strip()}", "WARN")
 
     def run(self, extra_args: List[str]):
         """Runs the stack."""
@@ -145,11 +165,17 @@ class DevkitManager:
             if ifaces_to_unbind:
                 self._log("Unbinding cdc_acm so libusb can claim GPS...")
                 self._cdc_acm_unbind(ifaces_to_unbind)
+                time.sleep(0.5)  # Let kernel finish releasing the interface
 
         cfg = self._get_env_config()
         r_port = cfg.get('GPS_PORT_ROVER', 'virtual')
         mcu_port = cfg.get('MCU_PORT', 'virtual')
         is_sim = 'true' if (r_port == 'virtual' and mcu_port == 'virtual') else 'false'
+
+        # USB reset F9P before launch to clear stale libusb state.
+        # Prevents heap corruption in ublox_dgnss VALGET write-back on warm restarts.
+        if is_sim == 'false':
+            self._usb_reset_f9p(cfg.get('GPS_USB_PATH_ROVER', 'virtual'))
 
         # Wake MCU if hardware is present
         if is_sim == 'false' and Path(mcu_port).exists():
