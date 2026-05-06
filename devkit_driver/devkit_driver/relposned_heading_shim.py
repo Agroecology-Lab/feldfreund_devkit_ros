@@ -1,5 +1,3 @@
-bash
-cat > /tmp/relposned_heading_shim.py << 'PYEOF'
 #!/usr/bin/env python3
 """
 relposned_heading_shim.py
@@ -118,9 +116,3 @@ def main(args=None):
 
 if __name__ == '__main__':
     main()
-PYEOF
-echo "written ok"
-
-Output
-written ok
-Done
