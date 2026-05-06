@@ -1,11 +1,11 @@
-#!/usr/bin/env python3
 # pylint: disable=duplicate-code
 """
 ui_node.py — Sowbot web cockpit on :80
 
 Tabs
-  Navigate  — topo map, node picker, GO/CANCEL, joystick, drop node, track mode (DEFAULT)
-  Control   — telemetry, safety, ESP, GPS map
+  Nav      — joystick, e-stop, pose, track mode, drop node, topo map + nav sidebar (DEFAULT)
+  Mission  — fields2cover coverage planning, row queue builder, run mission
+  System   — telemetry, safety, ESP, GPS leaflet map
 
 Node drop workflow:
   1. Validate name + pose
