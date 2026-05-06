@@ -3,39 +3,29 @@
 relposned_heading_shim.py
 ─────────────────────────
 Converts ublox_dgnss NAV-RELPOSNED → sensor_msgs/Imu for FusionCore.
-
 Subscribes : /rover/ubx_nav_rel_pos_ned  (ublox_ubx_msgs/UBXNavRelPosNED)
 Publishes  : /gnss/heading               (sensor_msgs/Imu)
-
 FusionCore subscribes to gnss.heading_topic as sensor_msgs/Imu, extracting
 yaw from the orientation quaternion. orientation_covariance[8] carries σ²
 of the yaw estimate. All other fields (linear_acceleration, angular_velocity,
 their covariances, roll, pitch) are left zero — this message carries heading
 only.
-
-Only publishes when relPosValid (bit 2) AND relPosHeadingValid (bit 10) flags
-are both set, and the antenna baseline passes the minimum length check.
-
+Only publishes when rel_pos_valid AND rel_pos_heading_valid are both set,
+and the antenna baseline passes the minimum length check.
 NAV-RELPOSNED heading is True North referenced, degrees × 1e-5.
 ROS convention: ENU yaw.  NED → ENU: yaw_ENU = π/2 - heading_NED_rad
 """
-
 import math
 import rclpy
 from rclpy.node import Node
 from ublox_ubx_msgs.msg import UBXNavRelPosNED
 from sensor_msgs.msg import Imu
 
-# NAV-RELPOSNED flags bitmask (UBX protocol ICD §3.18.15)
-_FLAG_REL_POS_VALID = (1 << 2)
-_FLAG_HEADING_VALID = (1 << 10)
-
-# Minimum antenna separation — below this the heading geometry is unreliable
+# Minimum antenna separation in metres — below this the heading geometry is unreliable
 _MIN_BASELINE_M = 0.3
 
 
 class RelPosnedHeadingShim(Node):
-
     def __init__(self):
         super().__init__('relposned_heading_shim')
         self._pub = self.create_publisher(Imu, '/gnss/heading', 10)
@@ -48,21 +38,18 @@ class RelPosnedHeadingShim(Node):
         self.get_logger().info('relposned_heading_shim ready')
 
     def _cb(self, msg: UBXNavRelPosNED) -> None:
-        flags = msg.flags
-
         # Both validity flags must be set before trusting the heading
-        if not (flags & _FLAG_REL_POS_VALID) or not (flags & _FLAG_HEADING_VALID):
+        if not msg.rel_pos_valid or not msg.rel_pos_heading_valid:
             self._reject_count += 1
             return
 
-        # rel_pos_length is in metres in the ublox_dgnss ROS message
-        if msg.rel_pos_length < _MIN_BASELINE_M:
+        # rel_pos_length is in cm in the ublox_dgnss ROS message
+        if (msg.rel_pos_length / 100.0) < _MIN_BASELINE_M:
             self._reject_count += 1
             return
 
         # rel_pos_heading: degrees × 1e-5, True North, NED convention
         heading_rad = math.radians(msg.rel_pos_heading * 1e-5)
-
         # Convert NED → ENU: yaw_ENU = π/2 − heading_NED
         yaw_enu = math.pi / 2.0 - heading_rad
 
@@ -73,14 +60,13 @@ class RelPosnedHeadingShim(Node):
         out = Imu()
         out.header.stamp    = self.get_clock().now().to_msg()
         out.header.frame_id = 'base_link'
-
         out.orientation.x = 0.0
         out.orientation.y = 0.0
         out.orientation.z = qz
         out.orientation.w = qw
 
-        # rel_pos_head_acc: degrees × 1e-5 accuracy estimate → σ²
-        acc_rad  = math.radians(msg.rel_pos_head_acc * 1e-5)
+        # acc_heading: degrees × 1e-5 accuracy estimate → σ²
+        acc_rad  = math.radians(msg.acc_heading * 1e-5)
         variance = acc_rad ** 2
 
         # orientation_covariance is row-major 3×3; index [8] = yaw variance
