@@ -170,6 +170,9 @@ RUN for i in 1 2 3 4 5; do \
       (echo "ublox_dgnss attempt $i failed, retrying in 15s..." && sleep 15); \
     done
 
+RUN sed -i 's/default_value="Test Rover"/default_value=""/' \
+      src/ublox_dgnss/ublox_dgnss/launch/ublox_mb+r_rover.launch
+
 RUN for i in 1 2 3 4 5; do \
       GIT_TERMINAL_PROMPT=0 git clone --depth 1 -b aoc_refactor \
         https://github.com/LCAS/topological_navigation src/topological_navigation && break || \
