@@ -171,7 +171,7 @@ RUN for i in 1 2 3 4 5; do \
     done
 
 RUN sed -i 's/default_value="Test Rover"/default_value=""/' \
-      src/ublox_dgnss/ublox_dgnss/launch/ublox_mb+r_rover.launch
+      src/ublox_dgnss/ublox_dgnss/launch/ublox_mb+r_rover.launch.py
 
 RUN for i in 1 2 3 4 5; do \
       GIT_TERMINAL_PROMPT=0 git clone --depth 1 -b aoc_refactor \
