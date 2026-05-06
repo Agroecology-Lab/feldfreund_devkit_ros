@@ -61,9 +61,9 @@ RUN apt-get update && \
       curl gnupg2 \
       libusb-1.0-0-dev \
       usbutils \
-      libgl1-mesa-dri \
-      libglx-mesa0 \
-      libegl-mesa0 \
+      libgl1 \
+
+      libegl1 \
       nano \
       htop \
       libxcb-shape0 \                                                                           
