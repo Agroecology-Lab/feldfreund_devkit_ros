@@ -2,24 +2,29 @@
 """
 relposned_heading_shim.py
 ─────────────────────────
-Converts ublox_dgnss NAV-RELPOSNED → compass_msgs/Compass for FusionCore.
+Converts ublox_dgnss NAV-RELPOSNED → sensor_msgs/Imu for FusionCore.
 
 Subscribes : /rover/ubx_nav_rel_pos_ned  (ublox_ubx_msgs/UBXNavRelPosNED)
-Publishes  : /gnss/heading               (compass_msgs/Compass)
+Publishes  : /gnss/heading               (sensor_msgs/Imu)
+
+FusionCore subscribes to gnss.heading_topic as sensor_msgs/Imu, extracting
+yaw from the orientation quaternion. orientation_covariance[8] carries σ²
+of the yaw estimate. All other fields (linear_acceleration, angular_velocity,
+their covariances, roll, pitch) are left zero — this message carries heading
+only.
 
 Only publishes when relPosValid (bit 2) AND relPosHeadingValid (bit 10) flags
 are both set, and the antenna baseline passes the minimum length check.
 
 NAV-RELPOSNED heading is True North referenced, degrees × 1e-5.
-FusionCore compass_msgs/Compass bearing is radians, ENU convention.
-NED → ENU: yaw_ENU = π/2 - heading_NED_rad
+ROS convention: ENU yaw.  NED → ENU: yaw_ENU = π/2 - heading_NED_rad
 """
 
 import math
 import rclpy
 from rclpy.node import Node
 from ublox_ubx_msgs.msg import UBXNavRelPosNED
-from compass_msgs.msg import Compass
+from sensor_msgs.msg import Imu
 
 # NAV-RELPOSNED flags bitmask (UBX protocol ICD §3.18.15)
 _FLAG_REL_POS_VALID     = (1 << 2)
@@ -33,7 +38,7 @@ class RelPosnedHeadingShim(Node):
 
     def __init__(self):
         super().__init__('relposned_heading_shim')
-        self._pub = self.create_publisher(Compass, '/gnss/heading', 10)
+        self._pub = self.create_publisher(Imu, '/gnss/heading', 10)
         self._sub = self.create_subscription(
             UBXNavRelPosNED, '/rover/ubx_nav_rel_pos_ned',
             self._cb, 10)
@@ -59,16 +64,32 @@ class RelPosnedHeadingShim(Node):
         heading_rad = math.radians(msg.rel_pos_heading * 1e-5)
 
         # Convert NED → ENU: yaw_ENU = π/2 − heading_NED
-        bearing_enu = math.pi / 2.0 - heading_rad
+        yaw_enu = math.pi / 2.0 - heading_rad
 
-        out = Compass()
+        # Pack yaw into quaternion (roll=0, pitch=0)
+        qz = math.sin(yaw_enu / 2.0)
+        qw = math.cos(yaw_enu / 2.0)
+
+        out = Imu()
         out.header.stamp    = self.get_clock().now().to_msg()
         out.header.frame_id = 'base_link'
-        out.bearing         = bearing_enu
 
-        # rel_pos_head_acc: degrees × 1e-5 accuracy estimate
-        acc_rad      = math.radians(msg.rel_pos_head_acc * 1e-5)
-        out.variance = acc_rad ** 2
+        out.orientation.x = 0.0
+        out.orientation.y = 0.0
+        out.orientation.z = qz
+        out.orientation.w = qw
+
+        # rel_pos_head_acc: degrees × 1e-5 accuracy estimate → variance
+        acc_rad = math.radians(msg.rel_pos_head_acc * 1e-5)
+        variance = acc_rad ** 2
+
+        # orientation_covariance is row-major 3×3; [8] = yaw variance
+        out.orientation_covariance = [-1.0] * 9
+        out.orientation_covariance[8] = variance
+
+        # Angular velocity and linear acceleration unused (heading only)
+        out.angular_velocity_covariance[0]    = -1.0
+        out.linear_acceleration_covariance[0] = -1.0
 
         self._pub.publish(out)
         self._pub_count += 1
