@@ -25,20 +25,17 @@ class DevkitManager:
         sys.exit(0)
 
     def sync_workspace(self):
-        """Standardizes the workspace by mirroring EVERYTHING from src/ to root."""
+        """Standardizes the workspace by mirroring everything from src/ to root for Docker context."""
         if not self.src_dir.exists():
             self._log("src/ directory not found!", "ERROR")
             return
 
-        # 1. Identify everything currently in src/
         current_packages = [d.name for d in self.src_dir.iterdir() if d.is_dir() and not d.name.startswith('.')]
 
-        # 2. Sync each one
         for pkg in current_packages:
             pkg_src = self.src_dir / pkg
             pkg_root = self.root_dir / pkg
 
-            # Remove stale symlinks or folders at the root level (the Docker context area)
             if pkg_root.exists():
                 if pkg_root.is_symlink():
                     pkg_root.unlink()
@@ -48,12 +45,10 @@ class DevkitManager:
             self._log(f"Syncing {pkg} to build context...")
             shutil.copytree(pkg_src, pkg_root)
 
-        # 3. Cleanup: Remove folders at root that no longer exist in src/
-        # Protection: Don't delete standard project folders OR persistent data dirs
+        # Protection: Standard project folders and persistent data must survive sync
         PROTECTED = {
             'src', 'docker', 'build', 'install', 'log',
-            '.git', '__pycache__',
-            'maps',   # persistent map files — must survive sync
+            '.git', '__pycache__', 'maps',
         }
 
         for item in self.root_dir.iterdir():
@@ -74,7 +69,8 @@ class DevkitManager:
                 shutil.rmtree(self.root_dir / d, ignore_errors=True)
 
         if subprocess.run(build_cmd).returncode != 0:
-            self._log("Build failed.", "ERROR"); sys.exit(1)
+            self._log("Build failed.", "ERROR")
+            sys.exit(1)
 
     def _get_env_config(self) -> Dict[str, str]:
         env_file = self.root_dir / '.env'
@@ -83,104 +79,90 @@ class DevkitManager:
                 if '=' in line and not line.startswith('#') for k, v in [line.split('=', 1)]}
 
     def _find_ublox_interfaces(self) -> List[str]:
-        """Returns sysfs interface names (e.g. ['1-2:1.0', '1-2:1.1']) for any bound ublox cdc_acm device."""
+        """Returns sysfs interface names for bound ublox cdc_acm devices."""
         ifaces = []
         cdc_path = Path('/sys/bus/usb/drivers/cdc_acm')
-        if not cdc_path.exists():
-            return ifaces
+        if not cdc_path.exists(): return ifaces
+        
         for entry in cdc_path.iterdir():
-            if not entry.is_symlink():
-                continue
+            if not entry.is_symlink(): continue
             vendor_file = entry / 'device' / 'idVendor'
             if not vendor_file.exists():
-                # interface dir — check parent device
                 parts = entry.name.split(':')
                 if len(parts) == 2:
                     vendor_file = Path(f'/sys/bus/usb/devices/{parts[0]}/idVendor')
             try:
                 if vendor_file.exists() and vendor_file.read_text().strip() == '1546':
                     ifaces.append(entry.name)
-            except Exception:
-                pass
+            except Exception: pass
         return ifaces
 
     def _cdc_acm_bind(self, ifaces: List[str]):
         for iface in ifaces:
-            subprocess.run(['sudo', 'sh', '-c', f'echo "{iface}" > /sys/bus/usb/drivers/cdc_acm/bind'],
-                           stderr=subprocess.DEVNULL)
+            subprocess.run(['sudo', 'sh', '-c', f'echo "{iface}" > /sys/bus/usb/drivers/cdc_acm/bind'], stderr=subprocess.DEVNULL)
 
     def _cdc_acm_unbind(self, ifaces: List[str]):
         for iface in ifaces:
-            subprocess.run(['sudo', 'sh', '-c', f'echo "{iface}" > /sys/bus/usb/drivers/cdc_acm/unbind'],
-                           stderr=subprocess.DEVNULL)
+            subprocess.run(['sudo', 'sh', '-c', f'echo "{iface}" > /sys/bus/usb/drivers/cdc_acm/unbind'], stderr=subprocess.DEVNULL)
 
     def _usb_reset_f9p(self, usb_path: str):
-        """
-        Hard-resets the F9P via USB. Clears any stale libusb state or partial
-        config writes from a previous session, preventing heap corruption in
-        the ublox_dgnss VALGET write-back loop.
-        Requires: sudo apt install usbutils  (provides usbreset)
-        """
-        if not usb_path or usb_path == 'virtual':
-            return
+        """Hard-resets F9P to clear stale libusb state."""
+        if not usb_path or usb_path == 'virtual': return
         if subprocess.run(['which', 'usbreset'], capture_output=True).returncode != 0:
-            self._log("usbreset not found — skipping F9P USB reset. "
-                      "Install with: sudo apt install usbutils", "WARN")
+            self._log("usbreset not found. Install with: sudo apt install usbutils", "WARN")
             return
         self._log(f"USB reset of F9P at {usb_path}...")
         result = subprocess.run(['sudo', 'usbreset', usb_path], capture_output=True, text=True)
         if result.returncode == 0:
             self._log("F9P USB reset complete.")
-            time.sleep(1.0)  # Allow device to re-enumerate before libusb claims it
+            time.sleep(1.0) 
         else:
-            self._log(f"USB reset failed (non-fatal): {result.stderr.strip()}", "WARN")
+            self._log(f"USB reset failed: {result.stderr.strip()}", "WARN")
 
     def run(self, extra_args: List[str]):
-        """Runs the stack."""
+        """Runs the ROS 2 stack within Docker."""
+        env_file = self.root_dir / '.env'
+        
         if (self.root_dir / 'fixusb.py').exists():
-            # Bind cdc_acm so fixusb.py can detect GPS via serial port enumeration,
-            # then unbind so libusb (ublox_dgnss) can claim the device directly.
-            unbound_ifaces = []
+            # Prep for fixusb.py: Bind so it can detect serial ports
             bound_before = self._find_ublox_interfaces()
             if not bound_before:
-                # Try to find all cdc_acm interfaces for ublox by scanning sysfs devices
                 ublox_ifaces = []
                 for dev in Path('/sys/bus/usb/devices').iterdir():
-                    vendor_file = dev / 'idVendor'
                     try:
-                        if vendor_file.exists() and vendor_file.read_text().strip() == '1546':
-                            dev_name = dev.name
-                            ublox_ifaces = [f'{dev_name}:1.0', f'{dev_name}:1.1']
+                        if (dev / 'idVendor').read_text().strip() == '1546':
+                            ublox_ifaces = [f'{dev.name}:1.0', f'{dev.name}:1.1']
                             break
-                    except Exception:
-                        pass
+                    except Exception: pass
                 if ublox_ifaces:
                     self._log("Binding cdc_acm for GPS detection...")
                     self._cdc_acm_bind(ublox_ifaces)
-                    unbound_ifaces = ublox_ifaces
 
             subprocess.run(['sudo', 'python3', 'fixusb.py'], check=True)
 
+            # Fix permissions: restore ownership of .env to the actual user
+            real_user = os.environ.get('SUDO_USER') or os.environ.get('USER') or os.getlogin()
+            if env_file.exists():
+                subprocess.run(['sudo', 'chown', f'{real_user}:', str(env_file)], capture_output=True)
+                self._log(f"Restored {env_file.name} ownership to {real_user}")
+
+            # Cleanup for libusb: Unbind so ublox_dgnss can claim the device
             ifaces_to_unbind = self._find_ublox_interfaces()
             if ifaces_to_unbind:
-                self._log("Unbinding cdc_acm so libusb can claim GPS...")
+                self._log("Unbinding cdc_acm for libusb access...")
                 self._cdc_acm_unbind(ifaces_to_unbind)
-                time.sleep(0.5)  # Let kernel finish releasing the interface
+                time.sleep(0.5)
 
         cfg = self._get_env_config()
         r_port = cfg.get('GPS_PORT_ROVER', 'virtual')
         mcu_port = cfg.get('MCU_PORT', 'virtual')
         is_sim = 'true' if (r_port == 'virtual' and mcu_port == 'virtual') else 'false'
 
-        # USB reset F9P before launch to clear stale libusb state.
-        # Prevents heap corruption in ublox_dgnss VALGET write-back on warm restarts.
         if is_sim == 'false':
             self._usb_reset_f9p(cfg.get('GPS_USB_PATH_ROVER', 'virtual'))
-
-        # Wake MCU if hardware is present
-        if is_sim == 'false' and Path(mcu_port).exists():
-            self._log(f"Waking MCU on {mcu_port}")
-            os.system(f"stty -F {mcu_port} 115200 && (echo 's' > {mcu_port} &)")
+            if Path(mcu_port).exists():
+                self._log(f"Waking MCU on {mcu_port}")
+                os.system(f"stty -F {mcu_port} 115200 && (echo 's' > {mcu_port} &)")
 
         ros_command = (
             "source /opt/ros/jazzy/setup.bash && "
@@ -189,14 +171,8 @@ class DevkitManager:
             " ".join(extra_args)
         )
 
-        # Allow Docker to connect to host X server
         subprocess.run(['xhost', '+local:docker'], capture_output=True)
-
-        # Ensure maps directory exists on host before mounting.
-        # Must be created by the user process — if Docker creates it, it will be
-        # owned by root and the container will fail to write map files.
-        maps_dir = self.root_dir / 'maps'
-        maps_dir.mkdir(exist_ok=True)
+        (self.root_dir / 'maps').mkdir(exist_ok=True)
 
         docker_cmd = [
             'docker', 'run', '-it', '--rm', '--name', self.container_name, '--net=host', '--privileged',
@@ -205,15 +181,14 @@ class DevkitManager:
             '--env', f'DISPLAY={os.environ.get("DISPLAY", ":0")}',
             '--env', 'QT_X11_NO_MITSHM=1',
             '-v', '/tmp/.X11-unix:/tmp/.X11-unix:rw',
-            '--env-file', str(self.root_dir / '.env') if (self.root_dir / '.env').exists() else '/dev/null',
+            '--env-file', str(env_file) if env_file.exists() else '/dev/null',
             '-v', '/dev:/dev',
-            '-v', f'{self.root_dir}/maps:/workspace/maps',  # persist maps across container restarts
+            '-v', f'{self.root_dir}/maps:/workspace/maps',
             self.image_name, 'bash', '-c', ros_command,
         ]
 
         self._log(f"Runtime active. Sim: {is_sim.upper()}")
         subprocess.run(docker_cmd)
-
 
 if __name__ == '__main__':
     manager = DevkitManager()
