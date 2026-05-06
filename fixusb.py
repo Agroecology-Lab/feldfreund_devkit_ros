@@ -173,6 +173,7 @@ def scan_and_export():
         f.write(f'USER_ID={os.getuid()}\n')
         f.write(f'GROUP_ID={os.getgid()}\n')
         f.write(f'IS_JETSON={"true" if is_jetson else "false"}\n')
+        f.write('TMAP2_FILE=/workspace/maps/mixed_test_map\n')
 
     print(f'\nConfiguration Exported to .env')
     print(f'Safety Ack: {safety_ack} | MCU: {mcu_p}')
