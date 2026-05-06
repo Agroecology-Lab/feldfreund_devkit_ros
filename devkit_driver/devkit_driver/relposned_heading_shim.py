@@ -1,3 +1,5 @@
+bash
+cat > /tmp/relposned_heading_shim.py << 'PYEOF'
 #!/usr/bin/env python3
 """
 relposned_heading_shim.py
@@ -27,8 +29,8 @@ from ublox_ubx_msgs.msg import UBXNavRelPosNED
 from sensor_msgs.msg import Imu
 
 # NAV-RELPOSNED flags bitmask (UBX protocol ICD §3.18.15)
-_FLAG_REL_POS_VALID     = (1 << 2)
-_FLAG_HEADING_VALID     = (1 << 10)
+_FLAG_REL_POS_VALID = (1 << 2)
+_FLAG_HEADING_VALID = (1 << 10)
 
 # Minimum antenna separation — below this the heading geometry is unreliable
 _MIN_BASELINE_M = 0.3
@@ -66,7 +68,7 @@ class RelPosnedHeadingShim(Node):
         # Convert NED → ENU: yaw_ENU = π/2 − heading_NED
         yaw_enu = math.pi / 2.0 - heading_rad
 
-        # Pack yaw into quaternion (roll=0, pitch=0)
+        # Pack yaw-only into quaternion (roll=0, pitch=0)
         qz = math.sin(yaw_enu / 2.0)
         qw = math.cos(yaw_enu / 2.0)
 
@@ -79,12 +81,12 @@ class RelPosnedHeadingShim(Node):
         out.orientation.z = qz
         out.orientation.w = qw
 
-        # rel_pos_head_acc: degrees × 1e-5 accuracy estimate → variance
-        acc_rad = math.radians(msg.rel_pos_head_acc * 1e-5)
+        # rel_pos_head_acc: degrees × 1e-5 accuracy estimate → σ²
+        acc_rad  = math.radians(msg.rel_pos_head_acc * 1e-5)
         variance = acc_rad ** 2
 
-        # orientation_covariance is row-major 3×3; [8] = yaw variance
-        out.orientation_covariance = [-1.0] * 9
+        # orientation_covariance is row-major 3×3; index [8] = yaw variance
+        out.orientation_covariance    = [-1.0] * 9
         out.orientation_covariance[8] = variance
 
         # Angular velocity and linear acceleration unused (heading only)
@@ -116,3 +118,9 @@ def main(args=None):
 
 if __name__ == '__main__':
     main()
+PYEOF
+echo "written ok"
+
+Output
+written ok
+Done
