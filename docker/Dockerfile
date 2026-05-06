@@ -62,7 +62,6 @@ RUN apt-get update && \
       libusb-1.0-0-dev \
       usbutils \
       libgl1 \
-
       libegl1 \
       nano \
       htop \
