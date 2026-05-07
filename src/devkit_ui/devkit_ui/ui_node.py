@@ -1,18 +1,6 @@
 # pylint: disable=duplicate-code
 """
 ui_node.py — Sowbot web cockpit on :80
-
-Tabs
-  Nav      — joystick, e-stop, pose, track mode, drop node, topo map + nav sidebar (DEFAULT)
-  Mission  — fields2cover coverage planning, row queue builder, run mission
-  System   — telemetry, safety, ESP, GPS leaflet map
-
-Node drop workflow:
-  1. Validate name + pose
-  2. Add node to _topo_doc in memory
-  3. Write updated YAML to /workspace/maps/mixed_test_map
-  4. Call switch_topological_map so manager reloads the file
-  5. On switch failure, fall back to publishing JSON directly to the topic.
 """
 
 import json
@@ -70,8 +58,6 @@ TMAP_QOS = QoSProfile(
 
 _ROW_ACTION = 'limbic_row_follow'
 _NAV_ACTION = 'navigate_to_pose'
-
-# Valid node name: letters, digits, underscores only
 _NAME_RE = re.compile(r'^[A-Z0-9_]+$')
 
 # ── Global CSS ────────────────────────────────────────────────────────────────
@@ -82,7 +68,6 @@ _GLOBAL_CSS = """
   --bg:        #f6f8fa;
   --bg-card:   #ffffff;
   --border:    #d0d7de;
-  --border-hi: #8c959f;
   --txt:       #24292f;
   --txt-dim:   #57606a;
   --txt-muted: #8c959f;
@@ -103,50 +88,41 @@ body, .nicegui-content { background: var(--bg) !important; color: var(--txt); }
 .q-tab--active .q-tab__label { color: var(--blue) !important; font-weight: 600; }
 .q-tab-panels { background: var(--bg) !important; }
 
-/* Section label */
 .sec-label {
   font-size: 10px; font-weight: 600; letter-spacing: 0.08em;
   text-transform: uppercase; color: var(--txt-muted);
   font-family: 'Courier New', monospace; margin-bottom: 2px;
 }
+.dot-ok   { display:inline-block;width:7px;height:7px;border-radius:50%;background:#1a7f37;margin-right:6px; }
+.dot-warn { display:inline-block;width:7px;height:7px;border-radius:50%;background:#9a6700;margin-right:6px; }
+.dot-off  { display:inline-block;width:7px;height:7px;border-radius:50%;background:#d0d7de;margin-right:6px; }
 
-/* Indicator dot */
-.dot-ok   { display:inline-block; width:7px; height:7px; border-radius:50%;
-            background:#1a7f37; margin-right:6px; }
-.dot-warn { display:inline-block; width:7px; height:7px; border-radius:50%;
-            background:#9a6700; margin-right:6px; }
-.dot-off  { display:inline-block; width:7px; height:7px; border-radius:50%;
-            background:#d0d7de; margin-right:6px; }
-
-/* Nav node list */
 .node-item {
-  display: block; padding: 4px 8px; border-radius: 4px;
-  font-family: 'Courier New', monospace; font-size: 11px;
-  cursor: pointer; border-left: 3px solid transparent;
-  color: var(--txt-dim); transition: background 0.1s;
+  display:block; padding:4px 8px; border-radius:4px;
+  font-family:'Courier New',monospace; font-size:11px;
+  cursor:pointer; border-left:3px solid transparent;
+  color:var(--txt-dim); transition:background 0.1s;
 }
-.node-item:hover { background: #f6f8fa; color: var(--txt); }
-.node-item.sel   { background: #fff8c5; color: var(--amber);
-                   border-left-color: var(--amber); }
-.node-item.row   { color: var(--blue); border-left-color: #d8e8fd; }
-.node-item.sel.row { background: #fff8c5; color: var(--amber);
-                     border-left-color: var(--amber); }
+.node-item:hover { background:#f6f8fa; color:var(--txt); }
+.node-item.sel   { background:#fff8c5; color:var(--amber); border-left-color:var(--amber); }
+.node-item.row   { color:var(--blue); border-left-color:#d8e8fd; }
+.node-item.sel.row { background:#fff8c5; color:var(--amber); border-left-color:var(--amber); }
 
-/* Map SVG hover */
-.topo-node:hover { filter: brightness(0.85); cursor: pointer; }
+.topo-node:hover { filter:brightness(0.85); cursor:pointer; }
 
-/* Status pill */
-.pill {
-  display: inline-block; padding: 1px 8px; border-radius: 999px;
-  font-size: 11px; font-family: 'Courier New', monospace; font-weight: 600;
+.nav-sidebar {
+  width:220px; flex-shrink:0;
+  display:flex; flex-direction:column; gap:6px; align-self:stretch;
 }
-.pill-ok   { background: #dafbe1; color: #1a7f37; border: 1px solid #aceebb; }
-.pill-warn { background: #fff8c5; color: #9a6700; border: 1px solid #e3b341; }
-.pill-off  { background: #f6f8fa; color: #8c959f; border: 1px solid #d0d7de; }
+
+.estop-btn {
+  min-width:120px !important; min-height:52px !important;
+  font-size:15px !important; font-weight:700 !important;
+}
 </style>
 """
 
-# ── live map parser ───────────────────────────────────────────────────────────
+# ── map parser ────────────────────────────────────────────────────────────────
 
 def _parse_topo_json(json_str: str) -> tuple[dict[str, dict], dict]:
     doc = json.loads(json_str)
@@ -162,12 +138,8 @@ def _parse_topo_json(json_str: str) -> tuple[dict[str, dict], dict]:
                     'gps_lat', 'gps_lon', 'gps_fix_type', 'gps_hdop'):
             if key in props and key not in meta:
                 meta[key] = props[key]
-        nodes[name] = {
-            'x':     float(pos['x']),
-            'y':     float(pos['y']),
-            'edges': edges,
-            'meta':  meta,
-        }
+        nodes[name] = {'x': float(pos['x']), 'y': float(pos['y']),
+                       'edges': edges, 'meta': meta}
     return nodes, doc
 
 
@@ -182,10 +154,10 @@ def _demo_nodes() -> dict[str, dict]:
     }
 
 
-# ── SVG map renderer ──────────────────────────────────────────────────────────
+# ── SVG renderer ──────────────────────────────────────────────────────────────
 
-_SVG_W, _SVG_H = 720, 340
-_MARGIN, _NODE_R = 48, 17
+_SVG_W, _SVG_H = 900, 480
+_MARGIN, _NODE_R = 56, 17
 
 
 def _build_svg(nodes: dict, selected: Optional[str], current: Optional[str]) -> str:
@@ -193,24 +165,20 @@ def _build_svg(nodes: dict, selected: Optional[str], current: Optional[str]) -> 
         return (f'<svg width="100%" viewBox="0 0 {_SVG_W} {_SVG_H}" '
                 f'style="background:#f6f8fa;border-radius:4px;border:1px solid #d0d7de">'
                 f'<text x="{_SVG_W//2}" y="{_SVG_H//2}" text-anchor="middle" '
-                f'fill="#8c959f" font-family="Courier New" font-size="13">'
-                f'No map loaded</text></svg>')
+                f'fill="#8c959f" font-family="Courier New" font-size="13">No map loaded</text>'
+                f'</svg>')
 
-    xs    = [n['x'] for n in nodes.values()]
-    ys    = [n['y'] for n in nodes.values()]
-    dx    = (max(xs) - min(xs)) or 1.0
-    dy    = (max(ys) - min(ys)) or 1.0
-    x_min = min(xs)
-    y_min = min(ys)
+    xs = [n['x'] for n in nodes.values()]
+    ys = [n['y'] for n in nodes.values()]
+    dx = (max(xs) - min(xs)) or 1.0
+    dy = (max(ys) - min(ys)) or 1.0
+    x_min, y_min = min(xs), min(ys)
 
     def tx(x): return _MARGIN + (x - x_min) / dx * (_SVG_W - 2 * _MARGIN)
     def ty(y): return _SVG_H - _MARGIN - (y - y_min) / dy * (_SVG_H - 2 * _MARGIN)
 
-    parts: list[str] = [
-        f'<rect width="{_SVG_W}" height="{_SVG_H}" fill="#f6f8fa" rx="4"/>',
-    ]
+    parts: list[str] = [f'<rect width="{_SVG_W}" height="{_SVG_H}" fill="#f6f8fa" rx="4"/>']
 
-    # Edges
     drawn: set = set()
     for name, nd in nodes.items():
         for tgt in nd['edges']:
@@ -220,44 +188,35 @@ def _build_svg(nodes: dict, selected: Optional[str], current: Optional[str]) -> 
             drawn.add(key)
             is_row_edge = (nd.get('meta', {}).get('row_id') is not None
                            or nodes[tgt].get('meta', {}).get('row_id') is not None)
-            stroke = '#d8e8fd' if is_row_edge else '#d0d7de'
-            sw     = 2 if is_row_edge else 1
             parts.append(
                 f'<line x1="{tx(nd["x"]):.1f}" y1="{ty(nd["y"]):.1f}" '
                 f'x2="{tx(nodes[tgt]["x"]):.1f}" y2="{ty(nodes[tgt]["y"]):.1f}" '
-                f'stroke="{stroke}" stroke-width="{sw}" stroke-linecap="round"/>')
+                f'stroke="{"#d8e8fd" if is_row_edge else "#d0d7de"}" '
+                f'stroke-width="{"2" if is_row_edge else "1"}" stroke-linecap="round"/>')
 
-    # Nodes
     for name, nd in nodes.items():
-        cx, cy  = tx(nd['x']), ty(nd['y'])
-        is_cur  = (name == current)
-        is_sel  = (name == selected)
-        is_row  = nd.get('meta', {}).get('row_id') is not None
-        is_drop = bool(nd.get('meta', {}).get('dropped_by'))
+        cx, cy = tx(nd['x']), ty(nd['y'])
+        is_cur = name == current
+        is_sel = name == selected
+        is_row = nd.get('meta', {}).get('row_id') is not None
 
-        if is_cur:
-            fill, stroke, sw = '#dafbe1', '#1a7f37', 2
-        elif is_sel:
-            fill, stroke, sw = '#fff8c5', '#9a6700', 2
-        elif is_row:
-            fill, stroke, sw = '#d8e8fd', '#0969da', 1
-        elif is_drop:
-            fill, stroke, sw = '#f6f8fa', '#8c959f', 1
-        else:
-            fill, stroke, sw = '#ffffff', '#d0d7de', 1
+        if is_cur:   fill, stroke, sw = '#dafbe1', '#1a7f37', 2
+        elif is_sel: fill, stroke, sw = '#fff8c5', '#9a6700', 2
+        elif is_row: fill, stroke, sw = '#d8e8fd', '#0969da', 1
+        elif nd.get('meta', {}).get('dropped_by'): fill, stroke, sw = '#f6f8fa', '#8c959f', 1
+        else:        fill, stroke, sw = '#ffffff', '#d0d7de', 1
 
-        label_col = '#1a7f37' if is_cur else ('#9a6700' if is_sel else
-                    ('#0969da' if is_row else '#57606a'))
+        label_col = ('#1a7f37' if is_cur else '#9a6700' if is_sel
+                     else '#0969da' if is_row else '#57606a')
 
         if is_cur:
             parts.append(
-                f'<circle cx="{cx:.1f}" cy="{cy:.1f}" r="{_NODE_R + 6}" '
+                f'<circle cx="{cx:.1f}" cy="{cy:.1f}" r="{_NODE_R+6}" '
                 f'fill="none" stroke="#1a7f37" stroke-width="1" opacity="0.4">'
                 f'<animate attributeName="r" values="{_NODE_R+6};{_NODE_R+13}" '
                 f'dur="2s" repeatCount="indefinite"/>'
                 f'<animate attributeName="opacity" values="0.4;0" '
-                f'dur="2s" repeatCount="indefinite"/>'
-                f'</animate></circle>')
+                f'dur="2s" repeatCount="indefinite"/></circle>')
 
         parts.append(
             f'<circle class="topo-node" data-node="{name}" '
@@ -265,74 +224,67 @@ def _build_svg(nodes: dict, selected: Optional[str], current: Optional[str]) -> 
             f'fill="{fill}" stroke="{stroke}" stroke-width="{sw}"/>')
 
         if is_row:
-            role_letter = nd['meta'].get('row_role', '?')[0].upper()
-            row_id      = nd['meta'].get('row_id', '')
             parts.append(
-                f'<text x="{cx:.1f}" y="{cy + 4:.1f}" '
-                f'text-anchor="middle" fill="#0969da" '
+                f'<text x="{cx:.1f}" y="{cy+4:.1f}" text-anchor="middle" fill="#0969da" '
                 f'font-family="Courier New" font-size="8" font-weight="700" '
-                f'style="pointer-events:none">{role_letter}{row_id}</text>')
+                f'style="pointer-events:none">'
+                f'{nd["meta"].get("row_role","?")[0].upper()}{nd["meta"].get("row_id","")}'
+                f'</text>')
 
         parts.append(
-            f'<text x="{cx:.1f}" y="{cy + _NODE_R + 12:.1f}" '
-            f'text-anchor="middle" fill="{label_col}" '
-            f'font-family="Courier New" font-size="9" '
+            f'<text x="{cx:.1f}" y="{cy+_NODE_R+12:.1f}" text-anchor="middle" '
+            f'fill="{label_col}" font-family="Courier New" font-size="9" '
             f'style="pointer-events:none">{name}</text>')
 
     return (f'<svg id="topo-map" width="100%" viewBox="0 0 {_SVG_W} {_SVG_H}" '
             f'xmlns="http://www.w3.org/2000/svg">{"".join(parts)}</svg>')
 
 
-# ── main node ─────────────────────────────────────────────────────────────────
+# ── ROS node ──────────────────────────────────────────────────────────────────
 
 class NiceGuiNode(Node):
 
     def __init__(self) -> None:
         super().__init__('nicegui')
 
-        self.cmd_vel_publisher       = self.create_publisher(Twist, 'cmd_vel', 1)
-        self.esp_enable_publisher    = self.create_publisher(Empty, 'esp/enable',    1)
-        self.esp_disable_publisher   = self.create_publisher(Empty, 'esp/disable',   1)
-        self.esp_reset_publisher     = self.create_publisher(Empty, 'esp/reset',     1)
-        self.esp_restart_publisher   = self.create_publisher(Empty, 'esp/restart',   1)
-        self.esp_configure_publisher = self.create_publisher(Empty, 'esp/configure', 1)
-        self.subscription = self.create_subscription(
-            GPSFix, 'gpsfix', self.store_gps, 1)
-        self.battery_subscription = self.create_subscription(
-            BatteryState, 'battery_state', self.store_battery, 1)
-        self.bumper_front_top_subscription = self.create_subscription(
-            Bool, 'bumper/front_top', self.update_bumper_front_top, SAFETY_QOS)
-        self.bumper_front_bottom_subscription = self.create_subscription(
-            Bool, 'bumper/front_bottom', self.update_bumper_front_bottom, SAFETY_QOS)
-        self.bumper_back_subscription = self.create_subscription(
-            Bool, 'bumper/back', self.update_bumper_back, SAFETY_QOS)
-        self.estop_publisher = self.create_publisher(Bool, 'estop/soft', SAFETY_QOS)
-        self.estop_front_subscription = self.create_subscription(
-            Bool, 'estop/front', self.update_estop_front, SAFETY_QOS)
-        self.estop_back_subscription = self.create_subscription(
-            Bool, 'estop/back', self.update_estop_back, SAFETY_QOS)
+        self.cmd_vel_publisher       = self.create_publisher(Twist,  'cmd_vel',       1)
+        self.esp_enable_publisher    = self.create_publisher(Empty,  'esp/enable',    1)
+        self.esp_disable_publisher   = self.create_publisher(Empty,  'esp/disable',   1)
+        self.esp_reset_publisher     = self.create_publisher(Empty,  'esp/reset',     1)
+        self.esp_restart_publisher   = self.create_publisher(Empty,  'esp/restart',   1)
+        self.esp_configure_publisher = self.create_publisher(Empty,  'esp/configure', 1)
+        self.estop_publisher         = self.create_publisher(Bool,   'estop/soft',    SAFETY_QOS)
+
+        self.create_subscription(GPSFix,       'gpsfix',              self.store_gps,                   1)
+        self.create_subscription(BatteryState, 'battery_state',       self.store_battery,               1)
+        self.create_subscription(Bool,         'bumper/front_top',    self.update_bumper_front_top,    SAFETY_QOS)
+        self.create_subscription(Bool,         'bumper/front_bottom', self.update_bumper_front_bottom, SAFETY_QOS)
+        self.create_subscription(Bool,         'bumper/back',         self.update_bumper_back,         SAFETY_QOS)
+        self.create_subscription(Bool,         'estop/front',         self.update_estop_front,         SAFETY_QOS)
+        self.create_subscription(Bool,         'estop/back',          self.update_estop_back,          SAFETY_QOS)
+        self.create_subscription(Odometry,     '/odometry/global',
+                                 lambda m: setattr(self, 'latest_odom', m), 10)
+        self.create_subscription(String,       '/current_node',
+                                 lambda m: setattr(self, 'topo_current', m.data), 10)
 
         self._topo_doc:  dict            = {}
         self.topo_nodes: dict[str, dict] = _demo_nodes()
         self.topo_demo:  bool            = True
-
-        self.create_subscription(
-            String, '/topological_map_2', self._on_topo_map, TMAP_QOS)
-        self._topo_map_pub = self.create_publisher(
-            String, '/topological_map_2', TMAP_QOS)
+        self.create_subscription(String, '/topological_map_2', self._on_topo_map, TMAP_QOS)
+        self._topo_map_pub = self.create_publisher(String, '/topological_map_2', TMAP_QOS)
 
         if _TOPO_SRV_OK:
-            self._write_map_cli = self.create_client(
-                WriteTopologicalMap,
+            self._write_map_cli  = self.create_client(WriteTopologicalMap,
                 '/topological_map_manager2/write_topological_map')
-            self._switch_map_cli = self.create_client(
-                WriteTopologicalMap,
+            self._switch_map_cli = self.create_client(WriteTopologicalMap,
                 '/topological_map_manager2/switch_topological_map')
 
-        self.latest_odom: Optional[Odometry] = None
-        self.create_subscription(
-            Odometry, '/odometry/global',
-            lambda m: setattr(self, 'latest_odom', m), 10)
+        if _ACTION_OK:
+            self._nav_ac = ActionClient(self, GotoNode, 'topological_navigation')
+
+        self.latest_odom:    Optional[Odometry]     = None
+        self.latest_gps:     Optional[GPSFix]       = None
+        self.latest_battery: Optional[BatteryState] = None
 
         self.bumper_front_top_active    = False
         self.bumper_front_bottom_active = False
@@ -342,36 +294,27 @@ class NiceGuiNode(Node):
         self.estop_back_active          = False
         self.linear_velocity            = 0.0
         self.angular_velocity           = 0.0
-        self.latest_gps: Optional[GPSFix]           = None
-        self.latest_battery: Optional[BatteryState] = None
 
         self.topo_selected:   Optional[str] = None
         self.topo_current:    str           = '—'
         self.topo_nav_status: str           = 'Idle'
         self.topo_navigating: bool          = False
-        self._nav_goal_handle              = None
+        self._nav_goal_handle               = None
         self.drop_status:     str           = ''
 
-        self._track_timer:    Optional[object] = None
-        self._track_counter:  int              = 0
-        self._track_prefix:   str              = ''
-        self._track_row_id:   Optional[int]    = None
-        self._track_is_row:   bool             = False
-        self._track_first:    bool             = True
-        self.track_status:    str              = ''
-
-        self.create_subscription(
-            String, '/current_node',
-            lambda m: setattr(self, 'topo_current', m.data), 10)
-
-        if _ACTION_OK:
-            self._nav_ac = ActionClient(self, GotoNode, 'topological_navigation')
+        self._track_timer:   Optional[object] = None
+        self._track_counter: int              = 0
+        self._track_prefix:  str              = ''
+        self._track_row_id:  Optional[int]    = None
+        self._track_is_row:  bool             = False
+        self._track_first:   bool             = True
+        self.track_status:   str              = ''
 
         @ui.page('/')
         def page():
             self.content()
 
-    # ── live map callback ─────────────────────────────────────────────────────
+    # ── map callback ──────────────────────────────────────────────────────────
 
     def _on_topo_map(self, msg: String) -> None:
         try:
@@ -382,29 +325,24 @@ class NiceGuiNode(Node):
         except Exception as e:
             self.get_logger().warn(f'Failed to parse /topological_map_2: {e}')
 
-    # ── topo nav actions ──────────────────────────────────────────────────────
+    # ── nav actions ───────────────────────────────────────────────────────────
 
     def send_nav_goal(self, target: str) -> None:
         if not _ACTION_OK:
-            self.topo_nav_status = 'action server unavailable'
-            return
+            self.topo_nav_status = 'action server unavailable'; return
         if not self._nav_ac.wait_for_server(timeout_sec=0.0):
-            self.topo_nav_status = 'action server not ready'
-            return
+            self.topo_nav_status = 'action server not ready'; return
         goal = GotoNode.Goal()
         goal.target = target
         self.topo_nav_status = f'→ {target}'
         self.topo_navigating = True
-        future = self._nav_ac.send_goal_async(
-            goal, feedback_callback=self._nav_feedback)
+        future = self._nav_ac.send_goal_async(goal, feedback_callback=self._nav_feedback)
         future.add_done_callback(self._nav_accepted)
 
     def _nav_accepted(self, future) -> None:
         gh = future.result()
         if not gh.accepted:
-            self.topo_nav_status = 'goal rejected'
-            self.topo_navigating = False
-            return
+            self.topo_nav_status = 'goal rejected'; self.topo_navigating = False; return
         self._nav_goal_handle = gh
         gh.get_result_async().add_done_callback(self._nav_result)
 
@@ -430,107 +368,73 @@ class NiceGuiNode(Node):
 
     def drop_topo_node(self, name: str, row_id: Optional[int],
                        row_role: Optional[str]) -> None:
-        # Sanitise: upper, spaces→underscore, strip invalid chars
         name = re.sub(r'[^A-Z0-9_]', '', name.strip().upper().replace(' ', '_'))
         if not name:
-            self.drop_status = 'ERROR: node name required (letters/digits/underscores)'
-            return
+            self.drop_status = 'ERROR: node name required'; return
         if not _NAME_RE.match(name):
-            self.drop_status = f'ERROR: invalid name "{name}" — use A-Z 0-9 _ only'
-            return
+            self.drop_status = f'ERROR: invalid name "{name}"'; return
         if name in self.topo_nodes:
-            self.drop_status = f'ERROR: {name} already exists'
-            return
+            self.drop_status = f'ERROR: {name} already exists'; return
         if self.latest_odom is None:
-            self.drop_status = 'ERROR: no odometry — waiting for /odometry/global'
-            return
+            self.drop_status = 'ERROR: no odometry'; return
         if not self._topo_doc:
-            self.drop_status = 'ERROR: map not loaded'
-            return
+            self.drop_status = 'ERROR: map not loaded'; return
 
         x = round(self.latest_odom.pose.pose.position.x, 3)
         y = round(self.latest_odom.pose.pose.position.y, 3)
-
         connect_to = (self.topo_current
-                      if self.topo_current not in ('—', 'none', 'None', '', None)
-                      else None)
+                      if self.topo_current not in ('—', 'none', 'None', '', None) else None)
         map_name  = self._topo_doc.get('name', 'mixed_test_map')
-        nav_frame = self._topo_doc.get('transformation', {}).get(
-                        'topo_frame_id', 'map')
+        nav_frame = self._topo_doc.get('transformation', {}).get('topo_frame_id', 'map')
+        is_row    = row_id is not None
 
-        is_row = row_id is not None
-        if is_row:
-            edge_action, xy_tol, yaw_tol, vert_r = _ROW_ACTION, 0.1, 0.05, 0.5
-        else:
-            edge_action, xy_tol, yaw_tol, vert_r = _NAV_ACTION, 0.3, 0.1, 1.0
+        if is_row: edge_action, xy_tol, yaw_tol, vert_r = _ROW_ACTION, 0.1, 0.05, 0.5
+        else:      edge_action, xy_tol, yaw_tol, vert_r = _NAV_ACTION, 0.3, 0.1,  1.0
 
         gps = self.latest_gps
         gps_meta: dict = {}
         if gps is not None and gps.status.status >= 0:
-            gps_meta = {
-                'gps_lat':      round(gps.latitude,  7),
-                'gps_lon':      round(gps.longitude, 7),
-                'gps_fix_type': int(gps.status.status),
-                'gps_hdop':     round(float(gps.hdop), 2) if gps.hdop else None,
-            }
+            gps_meta = {'gps_lat': round(gps.latitude, 7), 'gps_lon': round(gps.longitude, 7),
+                        'gps_fix_type': int(gps.status.status),
+                        'gps_hdop': round(float(gps.hdop), 2) if gps.hdop else None}
 
-        row_meta: dict = {}
-        if is_row:
-            row_meta = {'row_id': row_id, 'row_role': row_role or 'entry'}
-
+        row_meta: dict = {'row_id': row_id, 'row_role': row_role or 'entry'} if is_row else {}
         timestamp = datetime.now(timezone.utc).strftime('%d-%m-%Y_%H-%M-%S')
-
         node_meta_disk = {'map': map_name, 'node': name, 'pointset': map_name}
         node_meta_ui   = {**node_meta_disk, 'dropped_by': 'webui',
                           'timestamp': timestamp, **gps_meta, **row_meta}
-        node_properties_disk = {
-            'xy_goal_tolerance': xy_tol, 'yaw_goal_tolerance': yaw_tol,
-            'dropped_by': 'webui', 'timestamp': timestamp, **gps_meta, **row_meta,
-        }
+        node_properties_disk = {'xy_goal_tolerance': xy_tol, 'yaw_goal_tolerance': yaw_tol,
+                                 'dropped_by': 'webui', 'timestamp': timestamp,
+                                 **gps_meta, **row_meta}
 
         def _make_node_dict(meta: dict, props: dict) -> dict:
-            return {
-                'meta': meta,
-                'node': {
-                    'edges': ([{'action': edge_action,
-                                'edge_id': f'{name}_{connect_to}',
-                                'node': connect_to}] if connect_to else []),
-                    'name':      name,
-                    'nav_frame': nav_frame,
-                    'pose': {
-                        'orientation': {'w': 1.0, 'x': 0.0, 'y': 0.0, 'z': 0.0},
-                        'position':    {'x': x,   'y': y,   'z': 0.0},
-                    },
-                    'properties': props,
-                    'verts': [
-                        {'x': -vert_r, 'y': -vert_r}, {'x': vert_r, 'y': -vert_r},
-                        {'x':  vert_r, 'y':  vert_r}, {'x': -vert_r, 'y':  vert_r},
-                    ],
-                },
-            }
+            return {'meta': meta, 'node': {
+                'edges': ([{'action': edge_action, 'edge_id': f'{name}_{connect_to}',
+                             'node': connect_to}] if connect_to else []),
+                'name': name, 'nav_frame': nav_frame,
+                'pose': {'orientation': {'w': 1.0, 'x': 0.0, 'y': 0.0, 'z': 0.0},
+                         'position':    {'x': x,   'y': y,   'z': 0.0}},
+                'properties': props,
+                'verts': [{'x': -vert_r, 'y': -vert_r}, {'x': vert_r, 'y': -vert_r},
+                           {'x':  vert_r, 'y':  vert_r}, {'x': -vert_r, 'y':  vert_r}],
+            }}
 
-        new_entry  = _make_node_dict(node_meta_ui,
-                                     {'xy_goal_tolerance': xy_tol,
-                                      'yaw_goal_tolerance': yaw_tol})
-        new_nodes  = dict(self.topo_nodes)
+        new_entry = _make_node_dict(node_meta_ui, {'xy_goal_tolerance': xy_tol,
+                                                    'yaw_goal_tolerance': yaw_tol})
+        new_nodes = dict(self.topo_nodes)
         new_nodes[name] = {'x': x, 'y': y,
                            'edges': [connect_to] if connect_to else [],
                            'meta': node_meta_ui}
-
         if connect_to:
             if connect_to in new_nodes:
                 rev = list(new_nodes[connect_to]['edges'])
-                if name not in rev:
-                    rev.append(name)
+                if name not in rev: rev.append(name)
                 new_nodes[connect_to] = {**new_nodes[connect_to], 'edges': rev}
             for entry in self._topo_doc.get('nodes', []):
                 n = entry.get('node', {})
                 if n.get('name') == connect_to:
-                    n.setdefault('edges', []).append({
-                        'action': edge_action,
-                        'edge_id': f'{connect_to}_{name}',
-                        'node': name,
-                    })
+                    n.setdefault('edges', []).append(
+                        {'action': edge_action, 'edge_id': f'{connect_to}_{name}', 'node': name})
                     break
 
         self._topo_doc.setdefault('nodes', []).append(new_entry)
@@ -539,45 +443,34 @@ class NiceGuiNode(Node):
         conn_str = f' → {connect_to}' if connect_to else ''
         gps_str  = (f' [{gps_meta["gps_lat"]:.5f},{gps_meta["gps_lon"]:.5f}]'
                     if gps_meta else '')
-        row_str  = (f' row={row_id}/{row_role}' if is_row else '')
+        row_str  = f' row={row_id}/{row_role}' if is_row else ''
         self.drop_status = f'{name}{conn_str} at ({x}, {y}){row_str}{gps_str} — writing…'
 
         def _publish_and_persist():
             try:
-                import copy
-                import yaml as _yaml
-
+                import copy, yaml as _yaml
                 map_file      = f'/workspace/maps/{map_name}'
-                installed_src = (
-                    '/workspace/install/topological_navigation/share/'
-                    'topological_navigation/config/mixed_actions_map.yaml')
-
+                installed_src = ('/workspace/install/topological_navigation/share/'
+                                 'topological_navigation/config/mixed_actions_map.yaml')
                 if os.path.exists(map_file):
-                    with open(map_file) as f:
-                        file_doc = _yaml.safe_load(f)
+                    with open(map_file) as f: file_doc = _yaml.safe_load(f)
                 elif os.path.exists(installed_src):
-                    with open(installed_src) as f:
-                        file_doc = _yaml.safe_load(f)
-                    self.get_logger().info(
-                        'mixed_test_map not found — seeding from installed source')
+                    with open(installed_src) as f: file_doc = _yaml.safe_load(f)
+                    self.get_logger().info('Seeding from installed source')
                 else:
                     file_doc = copy.deepcopy(self._topo_doc)
-                    self.get_logger().warn('No YAML source — using JSON round-trip fallback')
+                    self.get_logger().warn('No YAML source — JSON fallback')
 
-                disk_entry = _make_node_dict(node_meta_disk, node_properties_disk)
-                file_doc.setdefault('nodes', []).append(disk_entry)
-
+                file_doc.setdefault('nodes', []).append(
+                    _make_node_dict(node_meta_disk, node_properties_disk))
                 if connect_to:
                     for entry in file_doc.get('nodes', []):
                         n = entry.get('node', {})
                         if n.get('name') == connect_to:
-                            n.setdefault('edges', []).append({
-                                'action': edge_action,
-                                'edge_id': f'{connect_to}_{name}',
-                                'node': name,
-                            })
+                            n.setdefault('edges', []).append(
+                                {'action': edge_action,
+                                 'edge_id': f'{connect_to}_{name}', 'node': name})
                             break
-
                 with open(map_file, 'w') as f:
                     _yaml.dump(file_doc, f, default_flow_style=False,
                                allow_unicode=True, sort_keys=False)
@@ -586,40 +479,31 @@ class NiceGuiNode(Node):
                                     f'{row_str}{gps_str} — reloading…')
 
                 def _call(client, req, timeout=5.0):
-                    ev = threading.Event()
-                    res = [None]
+                    ev = threading.Event(); res = [None]
                     def _cb(f): res[0] = f.result(); ev.set()
                     client.call_async(req).add_done_callback(_cb)
-                    ev.wait(timeout=timeout)
-                    return res[0]
+                    ev.wait(timeout=timeout); return res[0]
 
                 if _TOPO_SRV_OK:
-                    sw          = WriteTopologicalMap.Request()
-                    sw.filename = f'/workspace/maps/{map_name}'
-                    sw.no_alias = True
+                    sw = WriteTopologicalMap.Request()
+                    sw.filename = f'/workspace/maps/{map_name}'; sw.no_alias = True
                     sr = _call(self._switch_map_cli, sw)
                     if sr and sr.success:
-                        self.drop_status = (f'{name}{conn_str} at ({x}, {y})'
+                        self.drop_status = (f'{name}{conn_str} at ({x},{y})'
                                             f'{row_str}{gps_str} — live')
                     else:
-                        msg      = String()
-                        msg.data = json.dumps(self._topo_doc, ensure_ascii=False)
+                        msg = String(); msg.data = json.dumps(self._topo_doc, ensure_ascii=False)
                         self._topo_map_pub.publish(msg)
                         err = sr.message if sr else 'timeout'
-                        self.drop_status = (f'{name}{conn_str} saved '
-                                            f'(switch failed: {err})')
-                        self.get_logger().warn(
-                            f'switch_topological_map failed ({err}); published JSON directly')
+                        self.drop_status = f'{name}{conn_str} saved (switch failed: {err})'
+                        self.get_logger().warn(f'switch_topological_map failed ({err})')
                 else:
-                    msg      = String()
-                    msg.data = json.dumps(self._topo_doc, ensure_ascii=False)
+                    msg = String(); msg.data = json.dumps(self._topo_doc, ensure_ascii=False)
                     self._topo_map_pub.publish(msg)
-                    self.drop_status = (f'{name}{conn_str} at ({x}, {y})'
+                    self.drop_status = (f'{name}{conn_str} at ({x},{y})'
                                         f'{row_str}{gps_str} — live (no srv)')
-
                 self.get_logger().info(
-                    f'Node dropped: {name} at ({x:.3f}, {y:.3f})'
-                    f'{conn_str}{row_str}{gps_str}')
+                    f'Node dropped: {name} at ({x:.3f},{y:.3f}){conn_str}{row_str}{gps_str}')
             except Exception as e:
                 self.drop_status = f'ERROR: {e}'
                 self.get_logger().error(f'drop_topo_node failed: {e}')
@@ -632,50 +516,35 @@ class NiceGuiNode(Node):
                     row_id: Optional[int], row_role: Optional[str]) -> None:
         prefix = re.sub(r'[^A-Z0-9_]', '', prefix.strip().upper().replace(' ', '_'))
         if not prefix:
-            self.track_status = 'ERROR: prefix required'
-            return
+            self.track_status = 'ERROR: prefix required'; return
         if self._track_timer is not None:
-            self.track_status = 'ERROR: already running'
-            return
-
-        existing = [
-            n for n in self.topo_nodes
-            if n.startswith(prefix + '_') and n[len(prefix) + 1:].isdigit()
-        ]
-        self._track_counter = (
-            max(int(n[len(prefix) + 1:]) for n in existing) if existing else 0)
-
-        # Store tracking state for stop_track to use
-        self._track_prefix  = prefix
-        self._track_row_id  = row_id
-        self._track_is_row  = row_id is not None
-        self._track_first   = True   # next drop is the entry node
+            self.track_status = 'ERROR: already running'; return
+        existing = [n for n in self.topo_nodes
+                    if n.startswith(prefix + '_') and n[len(prefix)+1:].isdigit()]
+        self._track_counter = (max(int(n[len(prefix)+1:]) for n in existing)
+                               if existing else 0)
+        self._track_prefix = prefix
+        self._track_row_id = row_id
+        self._track_is_row = row_id is not None
+        self._track_first  = True
 
         def _drop() -> None:
             self._track_counter += 1
             node_name = f'{prefix}_{self._track_counter}'
-
             if self._track_is_row:
-                # First drop → entry, all subsequent → middle
-                # Exit is patched by stop_track on the last node
                 role = 'entry' if self._track_first else 'middle'
                 self._track_first = False
             else:
-                role = row_role  # non-row track: pass through as-is
-
+                role = row_role
             self.drop_topo_node(node_name, row_id, role)
-            self.track_status = (f'recording  {node_name}'
-                                 f'  (#{self._track_counter})')
+            self.track_status = f'recording  {node_name}  (#{self._track_counter})'
 
         _drop()
         self._track_timer = self.create_timer(interval, _drop)
 
     def stop_track(self) -> None:
         if self._track_timer is not None:
-            self._track_timer.cancel()
-            self._track_timer = None
-
-        # Patch last node to 'exit' if this was a row track
+            self._track_timer.cancel(); self._track_timer = None
         if self._track_is_row and self._track_counter > 0:
             last_name = f'{self._track_prefix}_{self._track_counter}'
             self._patch_node_role(last_name, 'exit')
@@ -683,60 +552,40 @@ class NiceGuiNode(Node):
                                  f'  (#{self._track_counter} nodes)')
         else:
             self.track_status = f'stopped at #{self._track_counter}'
-
-        self._track_counter = 0
-        self._track_prefix  = ''
-        self._track_row_id  = None
-        self._track_is_row  = False
-        self._track_first   = True
+        self._track_counter = 0; self._track_prefix = ''
+        self._track_row_id  = None; self._track_is_row = False; self._track_first = True
 
     def _patch_node_role(self, node_name: str, role: str) -> None:
-        """Patch row_role on an already-dropped node in memory and on disk."""
         import yaml as _yaml
-
-        # Patch in-memory UI nodes
         if node_name in self.topo_nodes:
             nd = dict(self.topo_nodes[node_name])
             nd['meta'] = {**nd.get('meta', {}), 'row_role': role}
-            new_nodes = dict(self.topo_nodes)
-            new_nodes[node_name] = nd
+            new_nodes = dict(self.topo_nodes); new_nodes[node_name] = nd
             self.topo_nodes = new_nodes
-
-        # Patch in-memory topo doc
         for entry in self._topo_doc.get('nodes', []):
             n = entry.get('node', {})
             if n.get('name') == node_name:
                 entry.get('meta', {})['row_role'] = role
-                n.get('properties', {})['row_role'] = role
-                break
-
-        # Patch on disk
+                n.get('properties', {})['row_role'] = role; break
         map_name = self._topo_doc.get('name', 'mixed_test_map')
         map_file = f'/workspace/maps/{map_name}'
-
         def _write():
             try:
-                if not os.path.exists(map_file):
-                    return
-                with open(map_file) as f:
-                    doc = _yaml.safe_load(f)
+                if not os.path.exists(map_file): return
+                with open(map_file) as f: doc = _yaml.safe_load(f)
                 for entry in doc.get('nodes', []):
                     n = entry.get('node', {})
                     if n.get('name') == node_name:
                         entry.get('meta', {})['row_role'] = role
-                        n.get('properties', {})['row_role'] = role
-                        break
+                        n.get('properties', {})['row_role'] = role; break
                 with open(map_file, 'w') as f:
                     _yaml.dump(doc, f, default_flow_style=False,
                                allow_unicode=True, sort_keys=False)
-                self.get_logger().info(
-                    f'Patched {node_name} row_role → {role}')
             except Exception as e:
                 self.get_logger().error(f'_patch_node_role failed: {e}')
-
         threading.Thread(target=_write, daemon=True).start()
 
-    # ── UI ────────────────────────────────────────────────────────────────────
+    # ── UI shell ──────────────────────────────────────────────────────────────
 
     def content(self) -> None:
         ui.add_head_html(_GLOBAL_CSS)
@@ -744,139 +593,156 @@ class NiceGuiNode(Node):
             tab_nav     = ui.tab('Nav',     icon='route')
             tab_mission = ui.tab('Mission', icon='checklist')
             tab_system  = ui.tab('System',  icon='settings')
-
         with ui.tab_panels(tabs, value=tab_nav).classes('w-full'):
-            with ui.tab_panel(tab_nav):
-                self._nav_content()
-            with ui.tab_panel(tab_mission):
-                self._mission_content()
-            with ui.tab_panel(tab_system):
-                self._system_content()
+            with ui.tab_panel(tab_nav):     self._nav_content()
+            with ui.tab_panel(tab_mission): self._mission_content()
+            with ui.tab_panel(tab_system):  self._system_content()
 
     # ── Nav tab ───────────────────────────────────────────────────────────────
-    # Layout: top strip (joy + estop + pose + track + drop)
-    #         bottom row: topo map (flex) | nav sidebar (fixed 200px)
+    #
+    #  ┌─────────────────────────────────────────────────────┐  ┌──────────┐
+    #  │  [Joystick | E-Stop+pose]  │  Node Map (flex)       │  │ Sidebar  │
+    #  ├────────────────────────────┴───────────────────────-┤  │ full ht  │
+    #  │  Track (flex-1)   │   Drop Node (flex-1)            │  │          │
+    #  └─────────────────────────────────────────────────────┘  └──────────┘
 
     def _nav_content(self) -> None:
 
-        # ── Top strip ─────────────────────────────────────────────────────────
-        with ui.row().classes('w-full gap-3 items-start mb-3'):
+        with ui.row().classes('w-full gap-3 items-stretch'):
 
-            # Joystick + E-Stop + pose
-            with ui.card().style('padding:10px 16px'):
-                with ui.row().classes('items-center gap-4'):
-                    ui.joystick(color='#1a7f37', size=44,
+            # ── Main column ───────────────────────────────────────────────────
+            with ui.column().classes('flex-1 gap-3').style('min-width:0'):
+
+                # Row 1 — joystick card + node map
+                with ui.row().classes('w-full gap-3 items-stretch'):
+
+                    # Joystick card: joy on left, e-stop+pose on right
+                    with ui.card().style('padding:16px 20px;flex-shrink:0'):
+                        ui.html('<div class="sec-label mb-3">Joystick</div>')
+                        with ui.row().classes('items-center gap-6'):
+                            ui.joystick(
+                                color='#1a7f37', size=130,
                                 on_move=lambda e: self.send_speed(float(e.y), float(e.x)),
-                                on_end=lambda _: self.send_speed(0.0, 0.0))
-                    with ui.column().classes('gap-1'):
-                        def update_estop(e: ClickEventArguments) -> None:
-                            assert isinstance(e.sender, ui.button)
-                            self.toggle_estop()
-                            if self.soft_estop_active:
-                                e.sender.props('color=negative')
-                                e.sender.text = 'STOPPED'
-                            else:
-                                e.sender.props('color=primary')
-                                e.sender.text = 'E-Stop'
-                        ui.button('E-Stop', on_click=update_estop).props(
-                            'color=primary outline no-caps').classes('w-24')
-                        pose_lbl = ui.label('—').classes('text-xs font-mono').style(
-                            'color:#57606a')
+                                on_end=lambda _: self.send_speed(0.0, 0.0),
+                            )
+                            with ui.column().classes('gap-3 items-center'):
+                                def update_estop(e: ClickEventArguments) -> None:
+                                    assert isinstance(e.sender, ui.button)
+                                    self.toggle_estop()
+                                    if self.soft_estop_active:
+                                        e.sender.props('color=negative')
+                                        e.sender.text = 'STOPPED'
+                                    else:
+                                        e.sender.props('color=primary')
+                                        e.sender.text = 'E-Stop'
+                                ui.button('E-Stop', on_click=update_estop).props(
+                                    'color=primary outline no-caps').classes('estop-btn')
+                                pose_lbl = ui.label('—').classes('text-xs font-mono').style(
+                                    'color:#57606a;text-align:center;'
+                                    'max-width:130px;white-space:pre-line')
 
-            # Track Mode
-            with ui.card().classes('flex-1').style('padding:10px 14px'):
-                with ui.row().classes('items-baseline gap-2 mb-1'):
-                    ui.label('Track').classes('font-semibold')
-                    ui.label('auto-drop every N s').classes('text-xs').style('color:#8c959f')
-                with ui.row().classes('items-center gap-2 w-full'):
-                    track_prefix = ui.input(
-                        placeholder='Prefix e.g. ROW_A', label='Prefix',
-                    ).classes('flex-1')
-                    track_interval = ui.number(
-                        label='s', value=5, min=2, max=30, step=1, precision=0,
-                    ).classes('w-16')
-                with ui.row().classes('items-center gap-2 w-full mt-1'):
-                    track_row_id = ui.number(
-                        label='Row ID', placeholder='blank=standard',
-                        min=1, step=1, precision=0,
-                    ).classes('w-28')
-                    track_row_role = ui.toggle(
-                        {'entry': 'Entry', 'exit': 'Exit'}, value='entry',
-                    ).props('dense')
-                    track_row_hint = ui.label('').classes('text-xs font-mono').style(
-                        'color:#8c959f')
-                with ui.row().classes('items-center gap-2 mt-1'):
-                    track_start_btn = ui.button('Start', on_click=lambda: self.start_track(
-                        track_prefix.value,
-                        float(track_interval.value or 5),
-                        int(track_row_id.value) if track_row_id.value else None,
-                        track_row_role.value,
-                    )).props('color=positive no-caps dense')
-                    track_stop_btn = ui.button('Stop', on_click=self.stop_track).props(
-                        'color=negative no-caps dense')
-                    track_status_lbl = ui.label('').classes('text-xs font-mono ml-1').style(
-                        'color:#57606a')
+                    # Node map
+                    with ui.card().classes('flex-1').style('padding:12px;min-width:0'):
+                        ui.html('<div class="sec-label mb-2">Node Map</div>')
+                        map_html = ui.html(_build_svg(self.topo_nodes, None, None))
 
-            # Drop Node
-            with ui.card().classes('flex-1').style('padding:10px 14px'):
-                with ui.row().classes('items-baseline gap-2 mb-1'):
-                    ui.label('Drop Node').classes('font-semibold')
-                    ui.label('pins at current pose').classes('text-xs').style('color:#8c959f')
-                with ui.row().classes('items-center gap-2 w-full'):
-                    name_input = ui.input(
-                        placeholder='e.g. ROW_D_IN', label='Name',
-                    ).classes('flex-1')
-                with ui.row().classes('items-center gap-2 w-full mt-1'):
-                    row_id_input = ui.number(
-                        label='Row ID', placeholder='blank=standard',
-                        min=1, step=1, precision=0,
-                    ).classes('w-28')
-                    row_role_toggle = ui.toggle(
-                        {'entry': 'Entry', 'exit': 'Exit'}, value='entry',
-                    ).props('dense')
-                    row_hint = ui.label('').classes('text-xs font-mono').style('color:#8c959f')
-                with ui.row().classes('items-center gap-2 mt-1'):
-                    cur_drop_lbl = ui.label('').classes('text-xs font-mono').style(
-                        'color:#8c959f')
-                    ui.button('Drop', on_click=lambda: self.drop_topo_node(
-                        name_input.value,
-                        int(row_id_input.value) if row_id_input.value else None,
-                        row_role_toggle.value,
-                    )).classes('ml-auto').props('color=positive no-caps dense')
-                drop_status_lbl = ui.label('').classes('text-xs font-mono mt-1')
+                # Row 2 — Track + Drop Node
+                with ui.row().classes('w-full gap-3 items-start'):
 
-        # ── Bottom: topo map + nav sidebar side by side ───────────────────────
-        with ui.row().classes('w-full gap-3 items-start'):
+                    # Track
+                    with ui.card().classes('flex-1').style('padding:12px 14px'):
+                        with ui.row().classes('items-baseline gap-2 mb-2'):
+                            ui.label('Track').classes('font-semibold')
+                            ui.label('auto-drop every N s').classes('text-xs').style(
+                                'color:#8c959f')
+                        with ui.row().classes('items-center gap-2 w-full'):
+                            track_prefix = ui.input(
+                                placeholder='Prefix e.g. ROW_A', label='Prefix',
+                            ).classes('flex-1')
+                            track_interval = ui.number(
+                                label='s', value=5, min=2, max=30, step=1, precision=0,
+                            ).classes('w-16')
+                        with ui.row().classes('items-center gap-2 w-full mt-1'):
+                            track_row_id = ui.number(
+                                label='Row ID', placeholder='blank=standard',
+                                min=1, step=1, precision=0,
+                            ).classes('w-28')
+                            track_row_role = ui.toggle(
+                                {'entry': 'Entry', 'exit': 'Exit'}, value='entry',
+                            ).props('dense')
+                            track_row_hint = ui.label('').classes('text-xs font-mono').style(
+                                'color:#8c959f')
+                        with ui.row().classes('items-center gap-2 mt-2'):
+                            track_start_btn = ui.button(
+                                'Start',
+                                on_click=lambda: self.start_track(
+                                    track_prefix.value,
+                                    float(track_interval.value or 5),
+                                    int(track_row_id.value) if track_row_id.value else None,
+                                    track_row_role.value,
+                                ),
+                            ).props('color=positive no-caps dense')
+                            track_stop_btn = ui.button(
+                                'Stop', on_click=self.stop_track,
+                            ).props('color=negative no-caps dense')
+                            track_status_lbl = ui.label('').classes(
+                                'text-xs font-mono ml-1').style('color:#57606a')
 
-            # Topo map
-            with ui.column().classes('flex-1 gap-2').style('min-width:0'):
-                with ui.row().classes('items-center gap-2 mb-1'):
-                    map_pill    = ui.html('')
-                    action_pill = ui.html('')
-                with ui.card().style('padding:8px'):
-                    map_html = ui.html(_build_svg(self.topo_nodes, None, None))
+                    # Drop Node
+                    with ui.card().classes('flex-1').style('padding:12px 14px'):
+                        with ui.row().classes('items-baseline gap-2 mb-2'):
+                            ui.label('Drop Node').classes('font-semibold')
+                            ui.label('pins at current pose').classes('text-xs').style(
+                                'color:#8c959f')
+                        with ui.row().classes('items-center gap-2 w-full'):
+                            name_input = ui.input(
+                                placeholder='e.g. ROW_D_IN', label='Name',
+                            ).classes('flex-1')
+                        with ui.row().classes('items-center gap-2 w-full mt-1'):
+                            row_id_input = ui.number(
+                                label='Row ID', placeholder='blank=standard',
+                                min=1, step=1, precision=0,
+                            ).classes('w-28')
+                            row_role_toggle = ui.toggle(
+                                {'entry': 'Entry', 'exit': 'Exit'}, value='entry',
+                            ).props('dense')
+                            row_hint = ui.label('').classes('text-xs font-mono').style(
+                                'color:#8c959f')
+                        with ui.row().classes('items-center gap-2 mt-2'):
+                            cur_drop_lbl = ui.label('').classes('text-xs font-mono').style(
+                                'color:#8c959f')
+                            ui.button(
+                                'Drop',
+                                on_click=lambda: self.drop_topo_node(
+                                    name_input.value,
+                                    int(row_id_input.value) if row_id_input.value else None,
+                                    row_role_toggle.value,
+                                ),
+                            ).classes('ml-auto').props('color=positive no-caps dense')
+                        drop_status_lbl = ui.label('').classes('text-xs font-mono mt-1')
 
-            # Nav sidebar
-            with ui.card().style('width:200px;padding:12px;flex-shrink:0;'
-                                  'display:flex;flex-direction:column;gap:8px'):
+            # ── Sidebar ───────────────────────────────────────────────────────
+            with ui.card().classes('nav-sidebar').style('padding:14px'):
                 ui.html('<div class="sec-label">Current node</div>')
                 cur_lbl = ui.label('—').classes('text-sm font-mono font-bold')
 
-                ui.html('<div class="sec-label mt-2">Destination</div>')
+                ui.html('<div class="sec-label mt-3">Destination</div>')
                 sel_lbl = ui.label('—').classes('text-sm font-mono').style('color:#8c959f')
 
-                ui.html('<div class="sec-label mt-2">Status</div>')
+                ui.html('<div class="sec-label mt-3">Status</div>')
                 stat_lbl = ui.label('idle').classes('text-xs font-mono').style('color:#57606a')
 
-                ui.separator()
+                ui.separator().classes('my-2')
 
-                go_btn   = ui.button('Go', color='positive').classes('w-full').props('no-caps')
+                go_btn   = ui.button('Go',     color='positive').classes('w-full').props('no-caps')
                 stop_btn = ui.button('Cancel', color='negative').classes('w-full').props(
                     'no-caps flat')
 
-                ui.html('<div class="sec-label mt-2">Nodes</div>')
-                with ui.scroll_area().style('height:220px'):
+                ui.html('<div class="sec-label mt-3">Nodes</div>')
+                with ui.scroll_area().style('flex:1;min-height:0'):
                     node_col = ui.column().style('gap:1px;width:100%')
+
+        # ── wiring ────────────────────────────────────────────────────────────
 
         go_btn.on_click(
             lambda: self.send_nav_goal(self.topo_selected) if self.topo_selected else None)
@@ -902,32 +768,25 @@ class NiceGuiNode(Node):
         _prev: dict = {}
 
         def refresh_nav() -> None:
-            # Pose
+            # Pose / GPS label
             odom = self.latest_odom
             gps  = self.latest_gps
             if odom is not None:
-                px = odom.pose.pose.position.x
-                py = odom.pose.pose.position.y
-                gps_str = (f'  {gps.latitude:.5f},{gps.longitude:.5f}'
+                px, py  = odom.pose.pose.position.x, odom.pose.pose.position.y
+                gps_str = (f'\n{gps.latitude:.5f}\n{gps.longitude:.5f}'
                            if gps and gps.status.status >= 0 else '')
                 pose_lbl.set_text(f'({px:.2f}, {py:.2f}){gps_str}')
             else:
-                pose_lbl.set_text('no odometry')
+                pose_lbl.set_text('no odom')
 
-            # Drop node hints
+            # Drop hints
             cur = self.topo_current
             if cur and cur != '—':
-                cur_drop_lbl.set_text(f'→ {cur}')
-                cur_drop_lbl.style('color:#1a7f37')
+                cur_drop_lbl.set_text(f'→ {cur}'); cur_drop_lbl.style('color:#1a7f37')
             else:
-                cur_drop_lbl.set_text('no current node')
-                cur_drop_lbl.style('color:#8c959f')
-            if row_id_input.value:
-                row_hint.set_text(f'{_ROW_ACTION}')
-                row_hint.style('color:#0969da')
-            else:
-                row_hint.set_text(f'{_NAV_ACTION}')
-                row_hint.style('color:#8c959f')
+                cur_drop_lbl.set_text('no current node'); cur_drop_lbl.style('color:#8c959f')
+            row_hint.set_text(_ROW_ACTION if row_id_input.value else _NAV_ACTION)
+            row_hint.style('color:#0969da' if row_id_input.value else 'color:#8c959f')
             drop_status_lbl.set_text(self.drop_status)
             drop_status_lbl.style(
                 'color:#cf222e' if self.drop_status.startswith('ERROR') else 'color:#1a7f37')
@@ -941,7 +800,7 @@ class NiceGuiNode(Node):
                 track_row_hint.style('color:#0969da')
                 track_row_role.set_visibility(False)
             else:
-                track_row_hint.set_text(f'{_NAV_ACTION}')
+                track_row_hint.set_text(_NAV_ACTION)
                 track_row_hint.style('color:#8c959f')
                 track_row_role.set_visibility(True)
             track_status_lbl.set_text(self.track_status)
@@ -949,27 +808,14 @@ class NiceGuiNode(Node):
                 'color:#cf222e' if self.track_status.startswith('ERROR') else
                 'color:#1a7f37' if running else 'color:#57606a')
 
-            # Map + sidebar
-            snap = {
-                'sel':   self.topo_selected,
-                'cur':   self.topo_current,
-                'stat':  self.topo_nav_status,
-                'nav':   self.topo_navigating,
-                'nodes': id(self.topo_nodes),
-                'demo':  self.topo_demo,
-            }
+            # Map + sidebar — only repaint when something changed
+            snap = {'sel': self.topo_selected, 'cur': self.topo_current,
+                    'stat': self.topo_nav_status, 'nav': self.topo_navigating,
+                    'nodes': id(self.topo_nodes)}
             changed = {k for k, v in snap.items() if _prev.get(k) != v}
             if not changed:
                 return
             _prev.update(snap)
-
-            if 'demo' in changed or not _prev:
-                map_pill.set_content(
-                    f'<span class="pill {"pill-ok" if not self.topo_demo else "pill-warn"}">'
-                    f'{"live" if not self.topo_demo else "demo"}</span>')
-                action_pill.set_content(
-                    f'<span class="pill {"pill-ok" if _ACTION_OK else "pill-off"}">'
-                    f'{"action ok" if _ACTION_OK else "no action"}</span>')
 
             if changed & {'sel', 'cur', 'nodes'}:
                 map_html.set_content(
@@ -978,18 +824,17 @@ class NiceGuiNode(Node):
                 node_col.clear()
                 with node_col:
                     for nname in sorted(self.topo_nodes):
-                        nd         = self.topo_nodes[nname]
-                        is_sel     = (nname == self.topo_selected)
-                        is_row     = nd.get('meta', {}).get('row_id') is not None
-                        row_id_v   = nd.get('meta', {}).get('row_id', '')
-                        row_role_v = nd.get('meta', {}).get('row_role', '')
-                        gps_lat    = nd.get('meta', {}).get('gps_lat', '')
-                        gps_lon    = nd.get('meta', {}).get('gps_lon', '')
-                        title = (f'Row {row_id_v} {row_role_v} | {gps_lat} {gps_lon}'.strip()
-                                 if is_row else f'{gps_lat} {gps_lon}'.strip())
-                        cls = ('node-item'
-                               + (' sel' if is_sel else '')
-                               + (' row' if is_row else ''))
+                        nd       = self.topo_nodes[nname]
+                        is_row   = nd.get('meta', {}).get('row_id') is not None
+                        rid_v    = nd.get('meta', {}).get('row_id', '')
+                        rrole_v  = nd.get('meta', {}).get('row_role', '')
+                        glat     = nd.get('meta', {}).get('gps_lat', '')
+                        glon     = nd.get('meta', {}).get('gps_lon', '')
+                        title    = (f'Row {rid_v} {rrole_v} | {glat} {glon}'.strip()
+                                    if is_row else f'{glat} {glon}'.strip())
+                        cls      = ('node-item'
+                                    + (' sel' if nname == self.topo_selected else '')
+                                    + (' row' if is_row else ''))
                         n = nname
                         ui.html(
                             f'<div class="{cls}" title="{title}">'
@@ -1002,8 +847,7 @@ class NiceGuiNode(Node):
             stat_lbl.set_text(self.topo_nav_status)
             stat_lbl.style(
                 'color:#cf222e' if 'fail' in self.topo_nav_status else
-                'color:#1a7f37' if self.topo_nav_status == 'arrived' else
-                'color:#57606a')
+                'color:#1a7f37' if self.topo_nav_status == 'arrived' else 'color:#57606a')
             can_go = (bool(self.topo_selected) and not self.topo_navigating
                       and not self.soft_estop_active)
             go_btn.set_enabled(can_go)
@@ -1015,158 +859,104 @@ class NiceGuiNode(Node):
     # ── Mission tab ───────────────────────────────────────────────────────────
 
     def _mission_content(self) -> None:
-
-        # ── Fields2Cover ──────────────────────────────────────────────────────
         with ui.card().classes('w-full mb-3'):
             with ui.row().classes('items-baseline gap-2 mb-2'):
                 ui.label('Coverage Planning').classes('font-semibold')
                 ui.label('fields2cover — draw field boundary, generate row plan').classes(
                     'text-xs').style('color:#8c959f')
-
             with ui.row().classes('items-center gap-3 w-full mb-2'):
-                f2c_width = ui.number(
-                    label='Working width (m)', value=1.5, min=0.1, step=0.1, precision=2,
-                ).classes('w-40')
-                f2c_angle = ui.number(
-                    label='Row angle (°)', value=0, min=-180, max=180, step=1, precision=0,
-                ).classes('w-36')
-                f2c_row_id_start = ui.number(
-                    label='First row ID', value=1, min=1, step=1, precision=0,
-                ).classes('w-32')
-
-            # Polygon definition via GPS waypoints
+                f2c_width        = ui.number(label='Working width (m)', value=1.5,
+                                             min=0.1, step=0.1, precision=2).classes('w-40')
+                f2c_angle        = ui.number(label='Row angle (°)', value=0,
+                                             min=-180, max=180, step=1, precision=0).classes('w-36')
+                f2c_row_id_start = ui.number(label='First row ID', value=1,
+                                             min=1, step=1, precision=0).classes('w-32')
             with ui.card().style('background:#f6f8fa;border:1px dashed #d0d7de;padding:12px'):
                 ui.html('<div class="sec-label mb-2">Field boundary — GPS waypoints</div>')
-                ui.label(
-                    'Drive to each field corner and press Add Corner. '
-                    'Minimum 3 corners. Current robot pose is used.'
-                ).classes('text-xs').style('color:#8c959f')
-
+                ui.label('Drive to each corner and press Add Corner. Min 3 corners.').classes(
+                    'text-xs').style('color:#8c959f')
                 f2c_corners: list = []
                 corners_lbl = ui.label('No corners yet').classes('text-xs font-mono mt-2').style(
                     'color:#57606a')
-
                 with ui.row().classes('gap-2 mt-2'):
                     def add_corner():
-                        if self.latest_odom is None:
-                            return
+                        if self.latest_odom is None: return
                         x = round(self.latest_odom.pose.pose.position.x, 3)
                         y = round(self.latest_odom.pose.pose.position.y, 3)
                         f2c_corners.append((x, y))
-                        corners_lbl.set_text(
-                            f'{len(f2c_corners)} corners: '
+                        corners_lbl.set_text(f'{len(f2c_corners)} corners: '
                             + '  '.join(f'({c[0]:.1f},{c[1]:.1f})' for c in f2c_corners))
+                    def clear_corners():
+                        f2c_corners.clear(); corners_lbl.set_text('No corners yet')
                     ui.button('Add Corner', on_click=add_corner).props(
                         'color=primary outline no-caps dense')
-                    def clear_corners():
-                        f2c_corners.clear()
-                        corners_lbl.set_text('No corners yet')
-                    ui.button('Clear', on_click=clear_corners).props(
-                        'outline no-caps dense')
-
+                    ui.button('Clear', on_click=clear_corners).props('outline no-caps dense')
             f2c_status = ui.label('').classes('text-xs font-mono mt-2').style('color:#57606a')
-
             def generate_coverage():
                 if len(f2c_corners) < 3:
                     f2c_status.set_text('ERROR: need at least 3 corners')
-                    f2c_status.style('color:#cf222e')
-                    return
+                    f2c_status.style('color:#cf222e'); return
                 f2c_status.set_text(
-                    f'fields2cover integration not yet implemented — '
-                    f'{len(f2c_corners)} corners recorded, '
+                    f'fields2cover not yet implemented — {len(f2c_corners)} corners, '
                     f'width={f2c_width.value}m, angle={f2c_angle.value}°, '
-                    f'first row ID={int(f2c_row_id_start.value or 1)}'
-                )
+                    f'first row ID={int(f2c_row_id_start.value or 1)}')
                 f2c_status.style('color:#9a6700')
-
             ui.button('Generate Row Plan', on_click=generate_coverage).props(
                 'color=positive no-caps').classes('mt-2')
 
-        # ── Mission queue ─────────────────────────────────────────────────────
         with ui.card().classes('w-full'):
             with ui.row().classes('items-baseline gap-2 mb-3'):
                 ui.label('Mission Queue').classes('font-semibold')
                 ui.label('select rows to run today').classes('text-xs').style('color:#8c959f')
-
             with ui.row().classes('w-full gap-4 items-start'):
-
-                # Available rows (left)
                 with ui.card().classes('flex-1').style('background:#f6f8fa;padding:10px'):
                     ui.html('<div class="sec-label mb-2">Available rows</div>')
                     available_col = ui.column().style('gap:2px;width:100%')
-
-                # Queue (right)
                 with ui.card().classes('flex-1').style('background:#f6f8fa;padding:10px'):
                     ui.html('<div class="sec-label mb-2">Today\'s queue</div>')
                     queue_col = ui.column().style('gap:2px;width:100%')
                     queue_lbl = ui.label('Empty — add rows from the left').classes(
                         'text-xs').style('color:#8c959f')
-
-            mission_queue: list = []  # list of row_ids in order
-
+            mission_queue: list = []
             def _render_queue():
                 queue_col.clear()
-                if not mission_queue:
-                    queue_lbl.set_visibility(True)
-                    return
+                if not mission_queue: queue_lbl.set_visibility(True); return
                 queue_lbl.set_visibility(False)
                 with queue_col:
                     for i, rid in enumerate(mission_queue):
-                        r = i  # capture
+                        r = i
                         with ui.row().classes('items-center gap-1 w-full'):
                             ui.label(f'Row {rid}').classes('text-sm font-mono flex-1')
                             ui.button('↑', on_click=lambda _, r=r: _move(r, -1)).props(
-                                'flat dense').classes('text-xs').style(
-                                'color:#57606a').set_enabled(i > 0)
+                                'flat dense').classes('text-xs').style('color:#57606a').set_enabled(i > 0)
                             ui.button('↓', on_click=lambda _, r=r: _move(r, 1)).props(
-                                'flat dense').classes('text-xs').style(
-                                'color:#57606a').set_enabled(i < len(mission_queue) - 1)
+                                'flat dense').classes('text-xs').style('color:#57606a').set_enabled(i < len(mission_queue)-1)
                             ui.button('✕', on_click=lambda _, r=r: _remove(r)).props(
                                 'flat dense').classes('text-xs').style('color:#cf222e')
-
-            def _move(idx: int, direction: int):
-                new_idx = idx + direction
-                if 0 <= new_idx < len(mission_queue):
-                    mission_queue[idx], mission_queue[new_idx] = (
-                        mission_queue[new_idx], mission_queue[idx])
+            def _move(idx, d):
+                ni = idx+d
+                if 0 <= ni < len(mission_queue):
+                    mission_queue[idx], mission_queue[ni] = mission_queue[ni], mission_queue[idx]
                 _render_queue()
-
-            def _remove(idx: int):
-                mission_queue.pop(idx)
+            def _remove(idx): mission_queue.pop(idx); _render_queue()
+            def _add_row(row_id):
+                if row_id not in mission_queue: mission_queue.append(row_id)
                 _render_queue()
-
-            def _add_row(row_id: int):
-                if row_id not in mission_queue:
-                    mission_queue.append(row_id)
-                _render_queue()
-
-            mission_status = ui.label('').classes('text-xs font-mono mt-3').style(
-                'color:#57606a')
-
+            mission_status = ui.label('').classes('text-xs font-mono mt-3').style('color:#57606a')
             with ui.row().classes('gap-2 mt-3'):
-                mission_go_btn = ui.button('Run Mission', on_click=lambda: self._run_mission(
-                    mission_queue, mission_status,
-                )).props('color=positive no-caps')
-                mission_cancel_btn = ui.button('Cancel', on_click=self.cancel_nav_goal).props(
-                    'color=negative no-caps flat')
-
-            # Refresh available rows from map metadata
-            _mission_prev_nodes = [None]
-
-            def refresh_mission() -> None:
-                if id(self.topo_nodes) == _mission_prev_nodes[0]:
-                    return
-                _mission_prev_nodes[0] = id(self.topo_nodes)
-
-                # Find unique row IDs with entry nodes
+                ui.button('Run Mission', on_click=lambda: self._run_mission(
+                    mission_queue, mission_status)).props('color=positive no-caps')
+                ui.button('Cancel', on_click=self.cancel_nav_goal).props('color=negative no-caps flat')
+            _mprev = [None]
+            def refresh_mission():
+                if id(self.topo_nodes) == _mprev[0]: return
+                _mprev[0] = id(self.topo_nodes)
                 rows: dict[int, str] = {}
                 for nname, nd in self.topo_nodes.items():
                     meta = nd.get('meta', {})
                     rid  = meta.get('row_id')
-                    role = meta.get('row_role', '')
-                    if rid is not None and role == 'entry':
+                    if rid is not None and meta.get('row_role', '') == 'entry':
                         rows[int(rid)] = nname
-
                 available_col.clear()
                 if not rows:
                     with available_col:
@@ -1177,22 +967,15 @@ class NiceGuiNode(Node):
                             r = rid
                             with ui.row().classes('items-center gap-2 w-full'):
                                 ui.label(f'Row {rid}').classes('text-sm font-mono flex-1')
-                                ui.label(rows[rid]).classes('text-xs font-mono').style(
-                                    'color:#8c959f')
+                                ui.label(rows[rid]).classes('text-xs font-mono').style('color:#8c959f')
                                 ui.button('Add →', on_click=lambda _, r=r: _add_row(r)).props(
                                     'color=primary outline no-caps dense')
-
             ui.timer(1.0, refresh_mission)
 
     def _run_mission(self, queue: list, status_lbl) -> None:
-        """Placeholder — sequential GotoNode calls to be implemented."""
         if not queue:
-            status_lbl.set_text('ERROR: queue is empty')
-            status_lbl.style('color:#cf222e')
-            return
-        status_lbl.set_text(
-            f'Mission executor not yet implemented — '
-            f'queue: rows {queue}')
+            status_lbl.set_text('ERROR: queue is empty'); status_lbl.style('color:#cf222e'); return
+        status_lbl.set_text(f'Mission executor not yet implemented — queue: rows {queue}')
         status_lbl.style('color:#9a6700')
 
     # ── System tab ────────────────────────────────────────────────────────────
@@ -1203,51 +986,36 @@ class NiceGuiNode(Node):
                 ui.label('Telemetry').classes('font-semibold mb-2')
                 ui.html('<div class="sec-label">Linear velocity</div>')
                 ui.slider(min=-1, max=1, step=0.05, value=0).props(
-                    'readonly selection-color=transparent color=green'
-                ).bind_value(self, 'linear_velocity')
+                    'readonly selection-color=transparent color=green').bind_value(self, 'linear_velocity')
                 ui.html('<div class="sec-label mt-2">Angular velocity</div>')
                 ui.slider(min=-1, max=1, step=0.05, value=0).props(
-                    'readonly selection-color=transparent color=green'
-                ).bind_value(self, 'angular_velocity')
+                    'readonly selection-color=transparent color=green').bind_value(self, 'angular_velocity')
                 ui.html('<div class="sec-label mt-3">Battery</div>')
-                ui.label().classes('text-sm').bind_text_from(
-                    self, 'latest_battery',
-                    lambda msg: (f'{msg.percentage * 100:.1f}%  {msg.voltage:.1f} V'
+                ui.label().classes('text-sm').bind_text_from(self, 'latest_battery',
+                    lambda msg: (f'{msg.percentage*100:.1f}%  {msg.voltage:.1f} V'
                                  if msg is not None else '—'))
-
             with ui.card().classes('flex-1'):
                 ui.label('Safety').classes('font-semibold mb-2')
                 ui.html('<div class="sec-label">Bumpers</div>')
-                for attr, label in [
-                    ('bumper_front_top_active',    'Front top'),
-                    ('bumper_front_bottom_active', 'Front bottom'),
-                    ('bumper_back_active',          'Rear'),
-                ]:
+                for attr, label in [('bumper_front_top_active', 'Front top'),
+                                    ('bumper_front_bottom_active', 'Front bottom'),
+                                    ('bumper_back_active', 'Rear')]:
                     with ui.row().classes('items-center gap-0'):
                         dot = ui.html('<span class="dot-off"></span>')
                         ui.label(label).classes('text-sm')
                     def _mk(d=dot, a=attr):
-                        def _u():
-                            d.set_content(
-                                f'<span class="dot-{"warn" if getattr(self, a) else "ok"}"></span>')
+                        def _u(): d.set_content(f'<span class="dot-{"warn" if getattr(self,a) else "ok"}"></span>')
                         return _u
                     ui.timer(0.2, _mk())
-
                 ui.html('<div class="sec-label mt-3">E-stops</div>')
-                for attr, label in [
-                    ('estop_front_active', 'Front'),
-                    ('estop_back_active',  'Rear'),
-                ]:
+                for attr, label in [('estop_front_active', 'Front'), ('estop_back_active', 'Rear')]:
                     with ui.row().classes('items-center gap-0'):
                         dot = ui.html('<span class="dot-off"></span>')
                         ui.label(label).classes('text-sm')
                     def _mk2(d=dot, a=attr):
-                        def _u():
-                            d.set_content(
-                                f'<span class="dot-{"warn" if getattr(self, a) else "off"}"></span>')
+                        def _u(): d.set_content(f'<span class="dot-{"warn" if getattr(self,a) else "off"}"></span>')
                         return _u
                     ui.timer(0.2, _mk2())
-
         with ui.card().classes('w-full mt-3'):
             ui.label('ESP').classes('font-semibold mb-2')
             with ui.row().classes('gap-2 flex-wrap'):
@@ -1256,35 +1024,31 @@ class NiceGuiNode(Node):
                 ui.button('Reset',     on_click=lambda: self.esp_reset_publisher.publish(Empty())).props('color=warning outline no-caps').classes('px-4')
                 ui.button('Restart',   on_click=lambda: self.esp_restart_publisher.publish(Empty())).props('color=primary outline no-caps').classes('px-4')
                 ui.button('Configure', on_click=lambda: self.esp_configure_publisher.publish(Empty())).props('outline no-caps').classes('px-4')
-
         with ui.card().classes('w-full mt-3'):
             ui.label('GPS').classes('font-semibold mb-2')
             leaflet = ui.leaflet(center=(51.98278, 7.43440), zoom=16).classes('w-full h-80')
             marker  = leaflet.marker(latlng=leaflet.center)
-            def update_gps_ui() -> None:
+            def update_gps_ui():
                 if self.latest_gps is not None:
                     leaflet.set_center((self.latest_gps.latitude, self.latest_gps.longitude))
                     marker.move(self.latest_gps.latitude, self.latest_gps.longitude)
             ui.timer(2.0, update_gps_ui)
 
-    # ── shared methods ────────────────────────────────────────────────────────
+    # ── shared ────────────────────────────────────────────────────────────────
 
     def toggle_estop(self) -> None:
         self.soft_estop_active = not self.soft_estop_active
-        msg = Bool()
-        msg.data = self.soft_estop_active
+        msg = Bool(); msg.data = self.soft_estop_active
         self.estop_publisher.publish(msg)
 
     def send_speed(self, x: float, y: float) -> None:
         msg = Twist()
-        msg.linear.x = x
-        msg.angular.z = -y
-        self.linear_velocity = x
-        self.angular_velocity = y
+        msg.linear.x = x; msg.angular.z = -y
+        self.linear_velocity = x; self.angular_velocity = y
         self.cmd_vel_publisher.publish(msg)
 
-    def store_gps(self, msg: GPSFix) -> None:        self.latest_gps = msg
-    def store_battery(self, msg: BatteryState) -> None: self.latest_battery = msg
+    def store_gps(self, msg: GPSFix) -> None:             self.latest_gps = msg
+    def store_battery(self, msg: BatteryState) -> None:   self.latest_battery = msg
     def update_bumper_front_top(self, msg: Bool) -> None:    self.bumper_front_top_active = msg.data
     def update_bumper_front_bottom(self, msg: Bool) -> None: self.bumper_front_bottom_active = msg.data
     def update_bumper_back(self, msg: Bool) -> None:         self.bumper_back_active = msg.data
