@@ -65,11 +65,13 @@ RUN apt-get update && \
       libegl1 \
       nano \
       htop \
-      libxcb-shape0 \                                                                           
+      libxcb-shape0 \
       libgles2 && \
     apt-get clean && rm -rf /var/lib/apt/lists/*
 
 # 3.2 ROS Jazzy binaries (with retries)
+#     NOTE: ros-jazzy-fields2cover intentionally excluded here —
+#     we build from source with BUILD_PYTHON=ON in Stage 3.5 instead.
 RUN for i in 1 2 3 4 5; do \
       apt-get update && \
       apt-get install -y --fix-missing --no-install-recommends \
@@ -97,12 +99,57 @@ RUN for i in 1 2 3 4 5; do \
         python3-fonttools \
         python3-ufolib2 \
         python3-matplotlib \
-        ros-jazzy-fields2cover \
-       # ros-jazzy-ros-gz \
         python3-serial python3-requests python3-yaml && \
       break || (echo "Stage 3.2 attempt $i failed, retrying in 15s..." && sleep 15); \
     done && \
     apt-get clean && rm -rf /var/lib/apt/lists/*
+
+# ============================================================
+# Stage 3.5: Fields2Cover — build from source with Python bindings
+#
+#   Why not the apt package?
+#     ros-jazzy-fields2cover ships the C++ library only.
+#     The Python bindings (fields2cover module) require cmake
+#     -DBUILD_PYTHON=ON which invokes SWIG and installs
+#     _fields2cover_python.so + fields2cover.py via setup.py.
+#
+#   This stage is intentionally isolated so Docker cache keeps
+#   the ~10-minute build unless the pinned commit changes.
+# ============================================================
+
+# Build deps for fields2cover (GDAL, Eigen, Boost, SWIG already pulled
+# transitively by ROS above; list them explicitly for cache clarity)
+RUN apt-get update && \
+    apt-get install -y --no-install-recommends \
+      cmake \
+      libgdal-dev \
+      libeigen3-dev \
+      libboost-all-dev \
+      swig \
+      python3-dev && \
+    apt-get clean && rm -rf /var/lib/apt/lists/*
+
+# Pin to a known-good commit so the cache is stable.
+# Bump F2C_REF to pick up upstream changes deliberately.
+ARG F2C_REF=v2.0.0
+
+RUN git clone --depth 1 --branch ${F2C_REF} \
+      https://github.com/Fields2Cover/Fields2Cover.git /opt/Fields2Cover && \
+    cmake -S /opt/Fields2Cover -B /opt/Fields2Cover/build \
+      -DCMAKE_BUILD_TYPE=Release \
+      -DBUILD_PYTHON=ON \
+      -DBUILD_TUTORIALS=OFF \
+      -DBUILD_TESTS=OFF && \
+    cmake --build /opt/Fields2Cover/build --parallel "$(nproc)" && \
+    cmake --install /opt/Fields2Cover/build && \
+    # setup.py install puts the Python module into dist-packages
+    cd /opt/Fields2Cover/build && \
+    python3 setup.py install --prefix=/usr/local 2>/dev/null || \
+    pip install --break-system-packages /opt/Fields2Cover/build && \
+    rm -rf /opt/Fields2Cover/build
+
+# Smoke-test: make sure `import fields2cover` works
+RUN python3 -c "import fields2cover as f2c; print('fields2cover OK:', f2c.__version__)"
 
 # ============================================================
 # Stage 4: Lizard (ESP32 devtools)
@@ -222,6 +269,7 @@ RUN apt-get update && apt-get install -y --fix-broken && \
           ros-jazzy-nav2-bringup \
           ros-jazzy-navigation2 \
           ros-jazzy-opennav-docking \
+          ros-jazzy-fields2cover \
           tf_transformations \
           interactive_markers \
           topological_navigation \
