@@ -121,7 +121,10 @@ apt-get install -y --fix-missing --no-install-recommends \
 
 # Build deps for fields2cover (GDAL, Eigen, Boost, SWIG already pulled
 # transitively by ROS above; list them explicitly for cache clarity)
+
+# Stage 3.5: Fields2Cover build deps
 RUN apt-get update && \
+    apt-get install -y -f && \
     apt-get install -y --no-install-recommends \
       cmake \
       libgdal-dev \
@@ -130,6 +133,7 @@ RUN apt-get update && \
       swig \
       python3-dev && \
     apt-get clean && rm -rf /var/lib/apt/lists/*
+
 
 # Pin to a known-good commit so the cache is stable.
 # Bump F2C_REF to pick up upstream changes deliberately.
