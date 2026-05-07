@@ -202,9 +202,9 @@ ENV MESA_GL_VERSION_OVERRIDE=3.3
 # Stage 7: Workspace — Local Sources
 # ============================================================
 WORKDIR /workspace
-COPY ./devkit_driver ./src/devkit_driver
-COPY ./devkit_launch ./src/devkit_launch
-COPY ./devkit_ui     ./src/devkit_ui
+COPY ./src/devkit_driver ./src/devkit_driver
+COPY ./src/devkit_launch ./src/devkit_launch
+COPY ./src/devkit_ui     ./src/devkit_ui
 
 # ============================================================
 # Stage 8: Workspace — Git Clones (each repo has its own
