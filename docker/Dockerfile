@@ -73,9 +73,11 @@ RUN apt-get update && \
 #     NOTE: ros-jazzy-fields2cover intentionally excluded here —
 #     we build from source with BUILD_PYTHON=ON in Stage 3.5 instead.
 RUN for i in 1 2 3 4 5; do \
-      apt-get update && \
-      apt-get install -y --fix-missing --no-install-recommends \
+apt-get install -y --fix-missing --no-install-recommends \
+        libinput-bin \
         ros-jazzy-navigation2 \
+        ros-jazzy-nav2-amcl \
+        ros-jazzy-nav2-bringup \
         ros-jazzy-nav2-bringup \
         ros-jazzy-nav2-behavior-tree \
         ros-jazzy-nav2-bt-navigator \
