@@ -316,6 +316,7 @@ RUN apt-get update && \
       ros-jazzy-rviz2 \
       ros-jazzy-nav2-bringup \
       ros-jazzy-navigation2 \
+      ros-jazzy-topic-tools \
       usbutils libusb-1.0-0-dev && \
     pip install --break-system-packages --no-cache-dir transforms3d && \
     . /opt/ros/jazzy/setup.sh && \
