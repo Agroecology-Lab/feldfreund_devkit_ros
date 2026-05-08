@@ -13,7 +13,7 @@ from typing import Optional
 
 import rclpy
 from geometry_msgs.msg import Twist
-from gps_msgs.msg import GPSFix
+from sensor_msgs.msg import NavSatFix
 from nav_msgs.msg import Odometry
 from nicegui import app, ui, ui_run
 from nicegui.events import ClickEventArguments
@@ -255,7 +255,7 @@ class NiceGuiNode(Node):
         self.esp_configure_publisher = self.create_publisher(Empty,  'esp/configure', 1)
         self.estop_publisher         = self.create_publisher(Bool,   'estop/soft',    SAFETY_QOS)
 
-        self.create_subscription(GPSFix,       'gpsfix',              self.store_gps,                   1)
+        self.create_subscription(NavSatFix,     '/gnss/fix',           self.store_gps,                   1)
         self.create_subscription(BatteryState, 'battery_state',       self.store_battery,               1)
         self.create_subscription(Bool,         'bumper/front_top',    self.update_bumper_front_top,    SAFETY_QOS)
         self.create_subscription(Bool,         'bumper/front_bottom', self.update_bumper_front_bottom, SAFETY_QOS)
@@ -283,7 +283,7 @@ class NiceGuiNode(Node):
             self._nav_ac = ActionClient(self, GotoNode, 'topological_navigation')
 
         self.latest_odom:    Optional[Odometry]     = None
-        self.latest_gps:     Optional[GPSFix]       = None
+        self.latest_gps:     Optional[NavSatFix]      = None
         self.latest_battery: Optional[BatteryState] = None
 
         self.bumper_front_top_active    = False
@@ -396,7 +396,7 @@ class NiceGuiNode(Node):
         if gps is not None and gps.status.status >= 0:
             gps_meta = {'gps_lat': round(gps.latitude, 7), 'gps_lon': round(gps.longitude, 7),
                         'gps_fix_type': int(gps.status.status),
-                        'gps_hdop': round(float(gps.hdop), 2) if gps.hdop else None}
+                        'gps_hdop': None}
 
         row_meta: dict = {'row_id': row_id, 'row_role': row_role or 'entry'} if is_row else {}
         timestamp = datetime.now(timezone.utc).strftime('%d-%m-%Y_%H-%M-%S')
@@ -1026,12 +1026,25 @@ class NiceGuiNode(Node):
                 ui.button('Configure', on_click=lambda: self.esp_configure_publisher.publish(Empty())).props('outline no-caps').classes('px-4')
         with ui.card().classes('w-full mt-3'):
             ui.label('GPS').classes('font-semibold mb-2')
-            leaflet = ui.leaflet(center=(51.98278, 7.43440), zoom=16).classes('w-full h-80')
+            leaflet = ui.leaflet(center=(51.5395, -2.4435), zoom=18).classes('w-full h-80')
             marker  = leaflet.marker(latlng=leaflet.center)
+            gps_status_lbl = ui.label('—').classes('text-xs font-mono mt-1').style('color:#57606a')
+            _FIX_LABELS = {-1: 'NO FIX', 0: 'AUTONOMOUS', 1: 'SBAS',
+                            2: 'DGNSS', 4: 'RTK FLOAT', 5: 'RTK FIXED'}
             def update_gps_ui():
                 if self.latest_gps is not None:
-                    leaflet.set_center((self.latest_gps.latitude, self.latest_gps.longitude))
-                    marker.move(self.latest_gps.latitude, self.latest_gps.longitude)
+                    lat, lon = self.latest_gps.latitude, self.latest_gps.longitude
+                    leaflet.set_center((lat, lon))
+                    marker.move(lat, lon)
+                    code = self.latest_gps.status.status
+                    cov  = self.latest_gps.position_covariance[0]
+                    gps_status_lbl.set_text(
+                        f'{_FIX_LABELS.get(code, str(code))}  '
+                        f'{lat:.6f}, {lon:.6f}  '
+                        f'alt={self.latest_gps.altitude:.1f}m  '
+                        f'σ={cov**0.5:.2f}m')
+                    col = '#1a7f37' if code == 5 else '#9a6700' if code >= 1 else '#cf222e'
+                    gps_status_lbl.style(f'color:{col}')
             ui.timer(2.0, update_gps_ui)
 
     # ── shared ────────────────────────────────────────────────────────────────
@@ -1047,7 +1060,7 @@ class NiceGuiNode(Node):
         self.linear_velocity = x; self.angular_velocity = y
         self.cmd_vel_publisher.publish(msg)
 
-    def store_gps(self, msg: GPSFix) -> None:             self.latest_gps = msg
+    def store_gps(self, msg: NavSatFix) -> None:             self.latest_gps = msg
     def store_battery(self, msg: BatteryState) -> None:   self.latest_battery = msg
     def update_bumper_front_top(self, msg: Bool) -> None:    self.bumper_front_top_active = msg.data
     def update_bumper_front_bottom(self, msg: Bool) -> None: self.bumper_front_bottom_active = msg.data
