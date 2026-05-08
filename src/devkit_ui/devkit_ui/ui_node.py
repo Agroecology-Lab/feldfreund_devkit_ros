@@ -266,32 +266,46 @@ def _run_f2c(corners_ll: list, tool_width: float,
     Pure function — no self, safe to pickle for cpu_bound.
     corners_ll : [(lat, lon), ...] — at least 3 points
     Returns    : [[(lat, lon), ...], ...]  one list per swath
+
+    F2C v1.x flat API confirmed:
+      f2c.LinearRing, f2c.Point, f2c.Cell, f2c.Cells, f2c.Field
+      f2c.SG_BruteForce, f2c.OBJ_NSwath
+      sg.generateSwaths(angle_rad, tool_width, cells)
+      swaths[i] -> f2c.Swath, .getPath() -> LineString, .getGeometry(j) -> Point
     """
     import math
     import fields2cover as f2c
 
     lat0, lon0 = corners_ll[0]
 
+    # ── field boundary in local metres ───────────────────────────────────────
     ring = f2c.LinearRing()
     for lat, lon in corners_ll:
         x, y = _f2c_latlon_to_xy(lat, lon, lat0, lon0)
-        ring.addPoint(f2c.Point(x, y))
+        ring.addPoint(f2c.Point(x, y, 0))
+    # close
     x0, y0 = _f2c_latlon_to_xy(corners_ll[0][0], corners_ll[0][1], lat0, lon0)
-    ring.addPoint(f2c.Point(x0, y0))
+    ring.addPoint(f2c.Point(x0, y0, 0))
 
-    poly  = f2c.Polygon(ring)
-    field = f2c.Field(f2c.Cell(poly))
+    cell  = f2c.Cell()
+    cell.addRing(ring)
+    cells = f2c.Cells()
+    cells.addGeometry(cell)
 
+    field = f2c.Field(cells)
+
+    # ── swath generation ─────────────────────────────────────────────────────
     angle_rad = math.radians(angle_deg % 180)
     sg        = f2c.SG_BruteForce()
     swaths    = sg.generateSwaths(angle_rad, tool_width, field.field)
 
+    # ── project back to lat/lon ───────────────────────────────────────────────
     result = []
     for i in range(swaths.size()):
-        line   = swaths.get(i).getPath()
+        path   = swaths.get(i).getPath()
         pts_ll = []
-        for j in range(line.size()):
-            pt = line.getGeometry(j)
+        for j in range(path.size()):
+            pt = path.getGeometry(j)
             pts_ll.append(_f2c_xy_to_latlon(pt.getX(), pt.getY(), lat0, lon0))
         if len(pts_ll) >= 2:
             result.append(pts_ll)
@@ -396,15 +410,22 @@ class NiceGuiNode(Node):
 
     def send_nav_goal(self, target: str) -> None:
         if not _ACTION_OK:
-            self.topo_nav_status = 'action server unavailable'; return
-        if not self._nav_ac.wait_for_server(timeout_sec=0.0):
-            self.topo_nav_status = 'action server not ready'; return
-        goal = GotoNode.Goal()
-        goal.target = target
-        self.topo_nav_status = f'→ {target}'
+            self.topo_nav_status = 'action unavailable (import failed)'; return
+        self.topo_nav_status = f'connecting → {target}…'
         self.topo_navigating = True
-        future = self._nav_ac.send_goal_async(goal, feedback_callback=self._nav_feedback)
-        future.add_done_callback(self._nav_accepted)
+        import threading
+        def _send():
+            ready = self._nav_ac.wait_for_server(timeout_sec=5.0)
+            if not ready:
+                self.topo_nav_status = 'action server not ready (5s timeout)'
+                self.topo_navigating = False
+                return
+            goal = GotoNode.Goal()
+            goal.target = target
+            self.topo_nav_status = f'→ {target}'
+            future = self._nav_ac.send_goal_async(goal, feedback_callback=self._nav_feedback)
+            future.add_done_callback(self._nav_accepted)
+        threading.Thread(target=_send, daemon=True).start()
 
     def _nav_accepted(self, future) -> None:
         gh = future.result()
@@ -1256,6 +1277,36 @@ class NiceGuiNode(Node):
                     col = '#1a7f37' if code == 5 else '#9a6700' if code >= 1 else '#cf222e'
                     gps_status_lbl.style(f'color:{col}')
             ui.timer(2.0, update_gps_ui)
+        with ui.card().classes('w-full mt-3'):
+            ui.label('Tools').classes('font-semibold mb-2')
+            with ui.row().classes('items-center gap-3 flex-wrap'):
+                _explorer_proc: list = [None]
+                _explorer_lbl = ui.label('').classes('text-xs font-mono').style('color:#57606a')
+                def _start_explorer():
+                    import subprocess
+                    if _explorer_proc[0] is not None and _explorer_proc[0].poll() is None:
+                        _explorer_lbl.set_text('already running')
+                        return
+                    try:
+                        _explorer_proc[0] = subprocess.Popen(
+                            ['ros2', 'run', 'ros2graph_explorer', 'ros2graph_explorer'],
+                            stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
+                        )
+                        _explorer_lbl.set_text(f'started (pid {_explorer_proc[0].pid})')
+                        _explorer_lbl.style('color:#1a7f37')
+                    except Exception as exc:
+                        _explorer_lbl.set_text(f'ERROR: {exc}')
+                        _explorer_lbl.style('color:#cf222e')
+                ui.button('Start Graph Explorer', on_click=_start_explorer).props(
+                    'outline no-caps').classes('px-4')
+                ui.html(
+                    '<a href="http://localhost:8734/" target="_blank" '
+                    'style="font-size:13px;color:var(--blue);text-decoration:none;'
+                    'padding:6px 12px;border:1px solid var(--blue);border-radius:4px;'
+                    'font-family:\'Courier New\',monospace;">'
+                    '↗ Graph Explorer</a>'
+                )
+                _explorer_lbl
 
     # ── shared ────────────────────────────────────────────────────────────────
 
