@@ -240,6 +240,64 @@ def _build_svg(nodes: dict, selected: Optional[str], current: Optional[str]) -> 
             f'xmlns="http://www.w3.org/2000/svg">{"".join(parts)}</svg>')
 
 
+# ── Fields2Cover geometry helpers (module-level so cpu_bound can pickle them) ─
+
+def _f2c_latlon_to_xy(lat: float, lon: float,
+                      lat0: float, lon0: float) -> tuple[float, float]:
+    import math
+    R = 6_378_137.0
+    x = math.radians(lon - lon0) * R * math.cos(math.radians(lat0))
+    y = math.radians(lat - lat0) * R
+    return x, y
+
+
+def _f2c_xy_to_latlon(x: float, y: float,
+                      lat0: float, lon0: float) -> tuple[float, float]:
+    import math
+    R   = 6_378_137.0
+    lat = lat0 + math.degrees(y / R)
+    lon = lon0 + math.degrees(x / (R * math.cos(math.radians(lat0))))
+    return lat, lon
+
+
+def _run_f2c(corners_ll: list, tool_width: float,
+             angle_deg: float) -> list:
+    """
+    Pure function — no self, safe to pickle for cpu_bound.
+    corners_ll : [(lat, lon), ...] — at least 3 points
+    Returns    : [[(lat, lon), ...], ...]  one list per swath
+    """
+    import math
+    import fields2cover as f2c
+
+    lat0, lon0 = corners_ll[0]
+
+    ring = f2c.LinearRing()
+    for lat, lon in corners_ll:
+        x, y = _f2c_latlon_to_xy(lat, lon, lat0, lon0)
+        ring.addPoint(f2c.Point(x, y))
+    x0, y0 = _f2c_latlon_to_xy(corners_ll[0][0], corners_ll[0][1], lat0, lon0)
+    ring.addPoint(f2c.Point(x0, y0))
+
+    poly  = f2c.Polygon(ring)
+    field = f2c.Field(f2c.Cell(poly))
+
+    angle_rad = math.radians(angle_deg % 180)
+    sg        = f2c.SG_BruteForce()
+    swaths    = sg.generateSwaths(angle_rad, tool_width, field.field)
+
+    result = []
+    for i in range(swaths.size()):
+        line   = swaths.get(i).getPath()
+        pts_ll = []
+        for j in range(line.size()):
+            pt = line.getGeometry(j)
+            pts_ll.append(_f2c_xy_to_latlon(pt.getX(), pt.getY(), lat0, lon0))
+        if len(pts_ll) >= 2:
+            result.append(pts_ll)
+    return result
+
+
 # ── ROS node ──────────────────────────────────────────────────────────────────
 
 class NiceGuiNode(Node):
@@ -255,7 +313,11 @@ class NiceGuiNode(Node):
         self.esp_configure_publisher = self.create_publisher(Empty,  'esp/configure', 1)
         self.estop_publisher         = self.create_publisher(Bool,   'estop/soft',    SAFETY_QOS)
 
-        self.create_subscription(NavSatFix,     '/gnss/fix',           self.store_gps,                   1)
+        _SENSOR_QOS = QoSProfile(
+            depth=1,
+            reliability=ReliabilityPolicy.BEST_EFFORT,
+        )
+        self.create_subscription(NavSatFix,     '/gnss/fix',           self.store_gps,       _SENSOR_QOS)
         self.create_subscription(BatteryState, 'battery_state',       self.store_battery,               1)
         self.create_subscription(Bool,         'bumper/front_top',    self.update_bumper_front_top,    SAFETY_QOS)
         self.create_subscription(Bool,         'bumper/front_bottom', self.update_bumper_front_bottom, SAFETY_QOS)
@@ -309,6 +371,11 @@ class NiceGuiNode(Node):
         self._track_is_row:  bool             = False
         self._track_first:   bool             = True
         self.track_status:   str              = ''
+
+        self._f2c_swaths:     list = []
+        self._f2c_row_start:  int  = 1
+        self._f2c_tool_width: float = 1.2
+        self._f2c_angle_deg:  float = 0.0
 
         @ui.page('/')
         def page():
@@ -437,7 +504,9 @@ class NiceGuiNode(Node):
                         {'action': edge_action, 'edge_id': f'{connect_to}_{name}', 'node': name})
                     break
 
-        self._topo_doc.setdefault('nodes', []).append(new_entry)
+        # Do NOT append to self._topo_doc here — _publish_and_persist reads the
+        # file as the single source of truth and syncs _topo_doc after writing.
+        # Appending here AND in the thread was the cause of duplicate node names.
         self.topo_nodes = new_nodes
 
         conn_str = f' → {connect_to}' if connect_to else ''
@@ -452,6 +521,9 @@ class NiceGuiNode(Node):
                 map_file      = f'/workspace/maps/{map_name}'
                 installed_src = ('/workspace/install/topological_navigation/share/'
                                  'topological_navigation/config/mixed_actions_map.yaml')
+
+                # Read the on-disk file as the authoritative base — never self._topo_doc,
+                # which may already contain in-memory-only state from a previous drop.
                 if os.path.exists(map_file):
                     with open(map_file) as f: file_doc = _yaml.safe_load(f)
                 elif os.path.exists(installed_src):
@@ -460,6 +532,13 @@ class NiceGuiNode(Node):
                 else:
                     file_doc = copy.deepcopy(self._topo_doc)
                     self.get_logger().warn('No YAML source — JSON fallback')
+
+                # Guard: skip if this node was already written (e.g. rapid double-drop)
+                existing_names = {e.get('node', {}).get('name')
+                                  for e in file_doc.get('nodes', [])}
+                if name in existing_names:
+                    self.get_logger().warn(f'Node {name} already in file — skipping write')
+                    return
 
                 file_doc.setdefault('nodes', []).append(
                     _make_node_dict(node_meta_disk, node_properties_disk))
@@ -474,6 +553,10 @@ class NiceGuiNode(Node):
                 with open(map_file, 'w') as f:
                     _yaml.dump(file_doc, f, default_flow_style=False,
                                allow_unicode=True, sort_keys=False)
+
+                # Sync _topo_doc to the file we just wrote so the next drop reads
+                # a consistent base — this is the only place _topo_doc is updated.
+                self._topo_doc = file_doc
 
                 self.drop_status = (f'{name}{conn_str} at ({x}, {y})'
                                     f'{row_str}{gps_str} — reloading…')
@@ -857,52 +940,179 @@ class NiceGuiNode(Node):
         inject_click_js()
 
     # ── Mission tab ───────────────────────────────────────────────────────────
+    #
+    # Layout:
+    #   ┌─────────────────────────────────────────────┬──────────────────────┐
+    #   │  Leaflet map (click to draw polygon)        │  Sidebar controls    │
+    #   │                                             │  tool_width          │
+    #   │                                             │  angle slider        │
+    #   │                                             │  row_id_start        │
+    #   │                                             │  Plan / Clear        │
+    #   │                                             │  status              │
+    #   └─────────────────────────────────────────────┴──────────────────────┘
+    #   ┌────────────────────────────────────────────────────────────────────┐
+    #   │  Mission Queue                                                     │
+    #   └────────────────────────────────────────────────────────────────────┘
 
     def _mission_content(self) -> None:
-        with ui.card().classes('w-full mb-3'):
-            with ui.row().classes('items-baseline gap-2 mb-2'):
-                ui.label('Coverage Planning').classes('font-semibold')
-                ui.label('fields2cover — draw field boundary, generate row plan').classes(
-                    'text-xs').style('color:#8c959f')
-            with ui.row().classes('items-center gap-3 w-full mb-2'):
-                f2c_width        = ui.number(label='Working width (m)', value=1.5,
-                                             min=0.1, step=0.1, precision=2).classes('w-40')
-                f2c_angle        = ui.number(label='Row angle (°)', value=0,
-                                             min=-180, max=180, step=1, precision=0).classes('w-36')
-                f2c_row_id_start = ui.number(label='First row ID', value=1,
-                                             min=1, step=1, precision=0).classes('w-32')
-            with ui.card().style('background:#f6f8fa;border:1px dashed #d0d7de;padding:12px'):
-                ui.html('<div class="sec-label mb-2">Field boundary — GPS waypoints</div>')
-                ui.label('Drive to each corner and press Add Corner. Min 3 corners.').classes(
-                    'text-xs').style('color:#8c959f')
-                f2c_corners: list = []
-                corners_lbl = ui.label('No corners yet').classes('text-xs font-mono mt-2').style(
+        import math
+
+        # ── State ─────────────────────────────────────────────────────────────
+        corners_ll: list[tuple[float, float]] = []   # [(lat, lon), ...]
+        swath_layers: list = []                       # leaflet layer handles
+        poly_layer:   list = [None]                   # single polygon layer
+
+        # ── Layout ────────────────────────────────────────────────────────────
+        with ui.row().classes('w-full gap-3 items-start mb-3'):
+
+            # Map
+            with ui.card().classes('flex-1').style('padding:10px;min-width:0'):
+                ui.html('<div class="sec-label mb-2">Field boundary — click to draw</div>')
+                gps_center = (
+                    (self.latest_gps.latitude, self.latest_gps.longitude)
+                    if self.latest_gps else (51.5395, -2.4435)
+                )
+                mission_map = ui.leaflet(center=gps_center, zoom=18).classes('w-full h-96')
+                mission_map.tile_layer(
+                    url_template='https://server.arcgisonline.com/ArcGIS/rest/services/'
+                                 'World_Imagery/MapServer/tile/{z}/{y}/{x}',
+                    options={'attribution': 'Esri', 'maxZoom': 20},
+                )
+
+            # Sidebar
+            with ui.card().style('width:220px;flex-shrink:0;padding:14px'):
+                ui.html('<div class="sec-label">Tool width</div>')
+                f2c_width = ui.number(
+                    value=1.2, min=0.1, max=10.0, step=0.1, precision=2,
+                    suffix='m',
+                ).classes('w-full')
+
+                ui.html('<div class="sec-label mt-3">Row angle</div>')
+                f2c_angle = ui.slider(min=0, max=179, step=1, value=0).classes('w-full')
+                angle_lbl = ui.label('0°').classes('text-xs font-mono').style('color:#57606a')
+                f2c_angle.on('update:model-value',
+                             lambda e: angle_lbl.set_text(f'{int(e.args)}°'))
+
+                ui.html('<div class="sec-label mt-3">First row ID</div>')
+                f2c_row_id_start = ui.number(
+                    value=1, min=1, step=1, precision=0,
+                ).classes('w-full')
+
+                ui.separator().classes('my-3')
+
+                corners_lbl = ui.label('0 corners').classes('text-xs font-mono').style(
                     'color:#57606a')
-                with ui.row().classes('gap-2 mt-2'):
-                    def add_corner():
-                        if self.latest_odom is None: return
-                        x = round(self.latest_odom.pose.pose.position.x, 3)
-                        y = round(self.latest_odom.pose.pose.position.y, 3)
-                        f2c_corners.append((x, y))
-                        corners_lbl.set_text(f'{len(f2c_corners)} corners: '
-                            + '  '.join(f'({c[0]:.1f},{c[1]:.1f})' for c in f2c_corners))
-                    def clear_corners():
-                        f2c_corners.clear(); corners_lbl.set_text('No corners yet')
-                    ui.button('Add Corner', on_click=add_corner).props(
-                        'color=primary outline no-caps dense')
-                    ui.button('Clear', on_click=clear_corners).props('outline no-caps dense')
-            f2c_status = ui.label('').classes('text-xs font-mono mt-2').style('color:#57606a')
-            def generate_coverage():
-                if len(f2c_corners) < 3:
-                    f2c_status.set_text('ERROR: need at least 3 corners')
-                    f2c_status.style('color:#cf222e'); return
-                f2c_status.set_text(
-                    f'fields2cover not yet implemented — {len(f2c_corners)} corners, '
-                    f'width={f2c_width.value}m, angle={f2c_angle.value}°, '
-                    f'first row ID={int(f2c_row_id_start.value or 1)}')
-                f2c_status.style('color:#9a6700')
-            ui.button('Generate Row Plan', on_click=generate_coverage).props(
-                'color=positive no-caps').classes('mt-2')
+
+                plan_btn  = ui.button('Plan Rows').props(
+                    'color=positive no-caps').classes('w-full mt-2')
+                clear_btn = ui.button('Clear').props(
+                    'outline no-caps').classes('w-full mt-1')
+
+                f2c_status = ui.label('').classes('text-xs font-mono mt-2').style(
+                    'color:#57606a;word-break:break-word')
+
+        # ── Map click handler ─────────────────────────────────────────────────
+
+        def _redraw_polygon():
+            if poly_layer[0] is not None:
+                try:
+                    poly_layer[0].run_method('remove')
+                except Exception:
+                    pass
+                poly_layer[0] = None
+            if len(corners_ll) >= 2:
+                latlngs = [[lat, lon] for lat, lon in corners_ll]
+                poly_layer[0] = mission_map.generic_layer(
+                    'polygon',
+                    latlngs,
+                    {'color': '#1a7f37', 'fillOpacity': 0.15,
+                     'weight': 2, 'dashArray': '6 4'},
+                )
+            corners_lbl.set_text(
+                f'{len(corners_ll)} corner{"s" if len(corners_ll) != 1 else ""}' +
+                (' ✓' if len(corners_ll) >= 3 else ' — need 3+'))
+
+        def on_map_click(e):
+            lat = e.args['latlng']['lat']
+            lon = e.args['latlng']['lng']
+            corners_ll.append((lat, lon))
+            mission_map.marker(latlng=(lat, lon))
+            _redraw_polygon()
+
+        mission_map.on('map-click', on_map_click)
+
+        # ── Clear ─────────────────────────────────────────────────────────────
+
+        def do_clear():
+            corners_ll.clear()
+            for lyr in swath_layers:
+                try: lyr.run_method('remove')
+                except Exception: pass
+            swath_layers.clear()
+            if poly_layer[0] is not None:
+                try: poly_layer[0].run_method('remove')
+                except Exception: pass
+                poly_layer[0] = None
+            corners_lbl.set_text('0 corners')
+            f2c_status.set_text('')
+            # Rebuild map to drop markers (leaflet markers have no easy bulk-remove)
+            mission_map.set_center(mission_map.center)
+
+        clear_btn.on_click(do_clear)
+
+        # ── Plan ──────────────────────────────────────────────────────────────
+
+        async def do_plan():
+            if len(corners_ll) < 3:
+                f2c_status.set_text('Need at least 3 corners')
+                f2c_status.style('color:#cf222e')
+                return
+
+            plan_btn.set_enabled(False)
+            f2c_status.set_text('Running F2C…')
+            f2c_status.style('color:#57606a')
+
+            width     = float(f2c_width.value or 1.2)
+            angle_deg = float(f2c_angle.value or 0)
+            row_start = int(f2c_row_id_start.value or 1)
+
+            try:
+                from nicegui import run as ng_run
+                swaths = await ng_run.cpu_bound(
+                    _run_f2c, list(corners_ll), width, angle_deg)
+            except Exception as exc:
+                f2c_status.set_text(f'ERROR: {exc}')
+                f2c_status.style('color:#cf222e')
+                plan_btn.set_enabled(True)
+                return
+
+            # Clear old swaths
+            for lyr in swath_layers:
+                try: lyr.run_method('remove')
+                except Exception: pass
+            swath_layers.clear()
+
+            # Draw new swaths
+            for i, pts in enumerate(swaths):
+                latlngs = [[lat, lon] for lat, lon in pts]
+                lyr = mission_map.generic_layer(
+                    'polyline', latlngs,
+                    {'color': '#0969da', 'weight': 2, 'opacity': 0.85},
+                )
+                swath_layers.append(lyr)
+
+            # Store on self for future ROS publishing
+            self._f2c_swaths     = swaths
+            self._f2c_row_start  = row_start
+            self._f2c_tool_width = width
+            self._f2c_angle_deg  = angle_deg
+
+            f2c_status.set_text(
+                f'{len(swaths)} rows · {width}m wide · {angle_deg:.0f}°')
+            f2c_status.style('color:#1a7f37')
+            plan_btn.set_enabled(True)
+
+        plan_btn.on_click(do_plan)
 
         with ui.card().classes('w-full'):
             with ui.row().classes('items-baseline gap-2 mb-3'):
