@@ -292,11 +292,10 @@ def _run_f2c(corners_ll: list, tool_width: float,
     cells = f2c.Cells()
     cells.addGeometry(cell)
 
-    # ── swath generation ─────────────────────────────────────────────────────
-    # Pass cells directly — f2c.Field Python bindings don't expose .field member.
-    angle_rad = math.radians(angle_deg % 180)
-    sg        = f2c.SG_BruteForce()
-    swaths    = sg.generateSwaths(angle_rad, tool_width, cells)
+# ── swath generation ─────────────────────────────────────────────────────
+angle_rad = math.radians(angle_deg % 180)
+sg        = f2c.SG_BruteForce()
+swaths    = sg.generateSwaths(angle_rad, tool_width, cell)   # <-- cell, not cells
     
     # ── project back to lat/lon ───────────────────────────────────────────────
     result = []
