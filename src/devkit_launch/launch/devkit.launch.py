@@ -25,37 +25,30 @@ def generate_launch_description():
 
     rover1_port   = os.getenv('GPS_PORT_ROVER1', 'virtual')
     rover1_serial = os.getenv('GPS_SERIAL_ROVER1', '')
-    gps1_type     = os.getenv('GPS_TYPE_ROVER1', 'none')
+    gps1_type     = os.getenv('GPS_TYPE_ROVER1', 'ublox')
 
     mcu_port     = os.getenv('MCU_PORT',    'virtual')
     tmap2_file   = os.getenv('TMAP2_FILE',  '')
 
     fusioncore_config = os.path.join(devkit_launch_pkg, 'config', 'fusioncore.yaml')
 
-    # Single F9P: front present, rear absent.
-    # Uses ublox_single.launch.py which sets LOAD_CONFIG_VIEW=false, avoiding
-    # the CFG-VALGET timeout on firmware < HPG 1.32.
-    single_gps_enabled = PythonExpression([
-        "'", rover_port,  "' != 'virtual' and '", gps_type,  "' == 'ublox' and "
-        "'", rover1_port, "' == 'virtual'"
-    ])
+    # Gate GPS groups on physical hardware being present and type being ublox
+    gps_enabled = PythonExpression(
+        ["'", rover_port, "' != 'virtual' and '", gps_type, "' == 'ublox'"]
+    )
+    gps1_enabled = PythonExpression(
+        ["'", rover1_port, "' != 'virtual' and '", gps1_type, "' == 'ublox'"]
+    )
 
-    # Dual F9P: both present. Uses mb+r rover mode for RELPOSNED heading.
-    dual_gps_enabled = PythonExpression([
-        "'", rover_port,  "' != 'virtual' and '", gps_type,  "' == 'ublox' and "
-        "'", rover1_port, "' != 'virtual' and '", gps1_type, "' == 'ublox'"
-    ])
-
-    # Rear F9P only when both are present.
-    rear_gps_enabled = PythonExpression([
-        "'", rover1_port, "' != 'virtual' and '", gps1_type, "' == 'ublox'"
-    ])
-
-    # Serial args for mb+r launches (only used in dual path)
+    # Rover F9P (front antenna) — moving-base rover mode
+    # Publishes: /rover/ublox_nav_sat_fix_hp  and  /rover/ubx_nav_rel_pos_ned
     front_args = {'device_family': 'F9P'}
     if rover_serial:
         front_args['device_serial_string'] = rover_serial
 
+    # Base F9P (rear antenna) — moving-base base mode
+    # Sends RTCM corrections to rover via UART2 (physical cable).
+    # No ROS topics consumed from /base/ — it is a hardware relay only.
     rear_args = {'device_family': 'F9P'}
     if rover1_serial:
         rear_args['device_serial_string'] = rover1_serial
@@ -66,27 +59,9 @@ def generate_launch_description():
         SetEnvironmentVariable(
             'RCUTILS_CONSOLE_OUTPUT_FORMAT', '[{severity}] [{name}]: {message}'),
 
-        # ── Single F9P path ───────────────────────────────────────────────────
-        # ublox_single.launch.py: sets LOAD_CONFIG_VIEW=false (no VALGET timeout),
-        # launches ublox_dgnss + ublox_nav_sat_fix_hp in the rover namespace.
-        # Publishes /rover/ublox_nav_sat_fix_hp for the relay below.
-        # RELPOSNED arrives from the F9P (TOML default enables it) but the
-        # relposned_heading_shim rejects all messages — correct for single-antenna.
-        GroupAction(
-            condition=IfCondition(single_gps_enabled),
-            actions=[
-                IncludeLaunchDescription(
-                    PythonLaunchDescriptionSource(
-                        os.path.join(devkit_launch_pkg, 'launch', 'ublox_single.launch.py')
-                    ),
-                ),
-            ],
-        ),
-
-        # ── Dual F9P path (RTK + heading) ─────────────────────────────────────
         # Base F9P (rear) — start before rover so RTCM is ready on UART2
         GroupAction(
-            condition=IfCondition(rear_gps_enabled),
+            condition=IfCondition(gps1_enabled),
             actions=[
                 IncludeLaunchDescription(
                     PythonLaunchDescriptionSource(
@@ -97,9 +72,9 @@ def generate_launch_description():
             ],
         ),
 
-        # Rover F9P (front) in moving-base rover mode — produces NavSatFix + RELPOSNED
+        # Rover F9P (front) — moving-base rover, produces NavSatFix + RELPOSNED
         GroupAction(
-            condition=IfCondition(dual_gps_enabled),
+            condition=IfCondition(gps_enabled),
             actions=[
                 IncludeLaunchDescription(
                     PythonLaunchDescriptionSource(
@@ -110,14 +85,14 @@ def generate_launch_description():
             ],
         ),
 
-        # /rover/ublox_nav_sat_fix_hp → /gnss/fix  (fusioncore GNSS input)
-        # Topic is published by both ublox_single and mb+r_rover paths.
+        # /rover/fix → /gnss/fix  (fusioncore GNSS input)
+        # ublox_nav_sat_fix_hp publishes on /rover/fix, not /rover/ublox_nav_sat_fix_hp.
         # Relay idles silently when topic absent (sim mode) — always safe to run.
         Node(
             package='topic_tools',
             executable='relay',
             name='navsatfix_relay',
-            arguments=['/rover/ublox_nav_sat_fix_hp', '/gnss/fix'],
+            arguments=['/rover/fix', '/gnss/fix'],
             output='screen',
         ),
 
@@ -131,10 +106,8 @@ def generate_launch_description():
             output='screen',
         ),
 
-        # NAV-RELPOSNED → /gnss/heading (sensor_msgs/Imu, ENU yaw quaternion)
+        # NAV-RELPOSNED → /gnss/heading (compass_msgs/Compass, ENU radians)
         # Only publishes when relPosValid + relPosHeadingValid flags are set.
-        # In single-F9P mode: receives RELPOSNED but rejects all (no second antenna).
-        # In dual-F9P mode: publishes heading once baseline >= 0.3 m and RTK converges.
         Node(
             package='devkit_driver',
             executable='relposned_heading_shim',
