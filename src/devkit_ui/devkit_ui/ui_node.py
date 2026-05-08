@@ -267,12 +267,14 @@ def _run_f2c(corners_ll: list, tool_width: float,
     corners_ll : [(lat, lon), ...] — at least 3 points
     Returns    : [[(lat, lon), ...], ...]  one list per swath
 
-    F2C v1.x flat API:
-      f2c.LinearRing, f2c.Point, f2c.Cell
-      f2c.SG_BruteForce
-      sg.generateSwaths(angle_rad, tool_width, cell)  # pass Cell, get Swaths back
-      swaths.size(), swaths.get(i) -> Swath
-      swath.getPath() -> LineString, .size(), .getGeometry(j) -> Point
+    F2C API (per docs):
+      f2c.LinearRing.addPoint(Point)
+      f2c.Cell.addRing(LinearRing)
+      f2c.SG_BruteForce.generateSwaths(angle_rad, tool_width, Cell) -> Swaths
+      Swaths.size(), Swaths.at(i) -> Swath
+      Swath.getPath() -> LineString
+      LineString.size(), LineString.getGeometry(j) -> Point
+      Point.getX() / .getY()
     """
     import math
     import fields2cover as f2c
@@ -298,9 +300,11 @@ def _run_f2c(corners_ll: list, tool_width: float,
     swaths    = sg.generateSwaths(angle_rad, tool_width, cell)
 
     # ── project back to lat/lon ──────────────────────────────────────────────
+    # Per F2C docs: Swaths.at(i) -> Swath; Swath.getPath() -> LineString;
+    # LineString.getGeometry(j) -> Point.
     result = []
     for i in range(swaths.size()):
-        path   = swaths.get(i).getPath()
+        path = swaths.at(i).getPath()
         pts_ll = []
         for j in range(path.size()):
             pt = path.getGeometry(j)
