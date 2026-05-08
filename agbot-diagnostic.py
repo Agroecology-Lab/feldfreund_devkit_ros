@@ -37,7 +37,7 @@ EXPECTED_NODES = [
 # Topics that must be flowing for the GPS pipeline to be healthy
 TARGET_TOPICS = {
     "F9P PVT":        "/rover/ubx_nav_pvt",
-    "HP NavSatFix":   "/rover/ublox_nav_sat_fix_hp",
+    "HP NavSatFix":   "/rover/fix",
     "RELPOSNED":      "/rover/ubx_nav_rel_pos_ned",
     "GNSS fix":       "/gnss/fix",
     "GNSS heading":   "/gnss/heading",
@@ -184,44 +184,52 @@ if __name__ == "__main__":
             src = "source /opt/ros/jazzy/setup.bash && [ -f install/setup.bash ] && source install/setup.bash"
             return subprocess.check_output(f"{src}; {cmd}", shell=True,
                                            executable="/bin/bash", stderr=subprocess.DEVNULL).decode().strip()
+        except KeyboardInterrupt:
+            raise
         except Exception:
             return ""
 
-    fix_raw = run_cmd_plain("timeout 4s ros2 topic echo /gnss/fix --once --no-arr 2>/dev/null")
-    if fix_raw:
-        status_m = re.search(r'status:\s*(-?\d+)', fix_raw)
-        code = status_m.group(1) if status_m else "?"
-        print(f"  /gnss/fix      status={code} ({FIX_STATUS.get(code, '?')})")
-    else:
-        print("  /gnss/fix      NO MESSAGE")
+    try:
+        fix_raw = run_cmd_plain("timeout 4s ros2 topic echo /gnss/fix --once --no-arr 2>/dev/null")
+        if fix_raw:
+            status_m = re.search(r'status:\s*(-?\d+)', fix_raw)
+            code = status_m.group(1) if status_m else "?"
+            print(f"  /gnss/fix      status={code} ({FIX_STATUS.get(code, '?')})")
+        else:
+            print("  /gnss/fix      NO MESSAGE")
 
-    relpos_raw = run_cmd_plain("timeout 4s ros2 topic echo /rover/ubx_nav_rel_pos_ned --once --no-arr 2>/dev/null")
-    if relpos_raw:
-        rv  = re.search(r'rel_pos_valid:\s*(\S+)', relpos_raw)
-        hv  = re.search(r'rel_pos_heading_valid:\s*(\S+)', relpos_raw)
-        hdg = re.search(r'rel_pos_heading:\s*(\S+)', relpos_raw)
-        bl  = re.search(r'rel_pos_length:\s*(\S+)', relpos_raw)
-        baseline_m = f"{float(bl.group(1))/100:.2f}m" if bl else "?"
-        print(f"  /rover/ubx_nav_rel_pos_ned  rel_pos_valid={rv and rv.group(1)}  "
-              f"heading_valid={hv and hv.group(1)}  baseline={baseline_m}")
-        if rv and rv.group(1) == "False":
-            print("    NOTE: rel_pos_valid=False is normal with a single F9P (no base station)")
-    else:
-        print("  /rover/ubx_nav_rel_pos_ned  NO MESSAGE")
+        relpos_raw = run_cmd_plain("timeout 4s ros2 topic echo /rover/ubx_nav_rel_pos_ned --once --no-arr 2>/dev/null")
+        if relpos_raw:
+            rv  = re.search(r'rel_pos_valid:\s*(\S+)', relpos_raw)
+            hv  = re.search(r'rel_pos_heading_valid:\s*(\S+)', relpos_raw)
+            bl  = re.search(r'rel_pos_length:\s*(\S+)', relpos_raw)
+            baseline_m = f"{float(bl.group(1))/100:.2f}m" if bl else "?"
+            print(f"  /rover/ubx_nav_rel_pos_ned  rel_pos_valid={rv and rv.group(1)}  "
+                  f"heading_valid={hv and hv.group(1)}  baseline={baseline_m}")
+            if rv and rv.group(1).lower() == "false":
+                print("    NOTE: rel_pos_valid=False is normal with a single F9P (no base station)")
+        else:
+            print("  /rover/ubx_nav_rel_pos_ned  NO MESSAGE")
 
-    heading_raw = run_cmd_plain("timeout 4s ros2 topic echo /gnss/heading --once --no-arr 2>/dev/null")
-    print(f"  /gnss/heading  {'PUBLISHING' if heading_raw else 'SILENT (expected without base F9P)'}")
+        heading_raw = run_cmd_plain("timeout 4s ros2 topic echo /gnss/heading --once --no-arr 2>/dev/null")
+        print(f"  /gnss/heading  {'PUBLISHING' if heading_raw else 'SILENT (expected without base F9P)'}")
+    except KeyboardInterrupt:
+        print("\n  (interrupted)")
+        sys.exit(0)
 
     if do_full_sweep:
         print("\n" + "═"*75)
         print("  DATA FLOW CHECK (1.5s samples)")
         print("═"*75)
         all_topics = run_cmd_plain("ros2 topic list").split('\n')
-        for t in all_topics:
-            if not t or "parameter" in t:
-                continue
-            data = run_cmd_plain(f"timeout 1.5s ros2 topic echo {t} --once --no-arr")
-            status = "[ACTIVE]" if data else "[SILENT]"
-            print(f"  {status} {t}")
+        try:
+            for t in all_topics:
+                if not t or "parameter" in t:
+                    continue
+                data = run_cmd_plain(f"timeout 1.5s ros2 topic echo {t} --once --no-arr")
+                status = "[ACTIVE]" if data else "[SILENT]"
+                print(f"  {status} {t}")
+        except KeyboardInterrupt:
+            print("\n  (interrupted)")
     else:
         print(f"\n  Tip: run './agbot-diagnostic.py full' to sample every topic.")
