@@ -14,11 +14,12 @@ from launch.conditions import IfCondition
 from launch_ros.actions import Node
 
 
-def _topo_nav_nodes(tmap2_file, sim_condition, real_condition):
-    """Inlined topo nav stack with sim-conditional fake_nav2_server.
+def _topo_nav_nodes(tmap2_file, sim_condition, real_condition, devkit_launch_pkg):
+    """Inlined topo nav stack with sim/real conditional Nav2 backends.
     
     Replaces the upstream topological_navigation.launch.py which hardcodes
-    fake_nav2_server unconditionally. Inlining gives us the conditional we need.
+    fake_nav2_server unconditionally. Inlining lets us route to either
+    fake_nav2_server (sim) or real Nav2 (hardware).
     """
     topo_share = get_package_share_directory('topological_navigation')
     rviz_cfg = os.path.join(topo_share, 'rviz', 'topological_navigation.rviz')
@@ -287,4 +288,4 @@ def generate_launch_description():
         ),
 
         # ── Topological Navigation (inlined, conditional fake_nav2) ──────────
-    ] + _topo_nav_nodes(tmap2_file, sim_condition, real_condition))
+    ] + _topo_nav_nodes(tmap2_file, sim_condition, real_condition, devkit_launch_pkg))
