@@ -267,11 +267,12 @@ def _run_f2c(corners_ll: list, tool_width: float,
     corners_ll : [(lat, lon), ...] — at least 3 points
     Returns    : [[(lat, lon), ...], ...]  one list per swath
 
-    F2C v1.x flat API confirmed:
-      f2c.LinearRing, f2c.Point, f2c.Cell, f2c.Cells, f2c.Field
-      f2c.SG_BruteForce, f2c.OBJ_NSwath
-      sg.generateSwaths(angle_rad, tool_width, cells)
-      swaths[i] -> f2c.Swath, .getPath() -> LineString, .getGeometry(j) -> Point
+    F2C v1.x flat API:
+      f2c.LinearRing, f2c.Point, f2c.Cell
+      f2c.SG_BruteForce
+      sg.generateSwaths(angle_rad, tool_width, cell)  # pass Cell, get Swaths back
+      swaths.size(), swaths.get(i) -> Swath
+      swath.getPath() -> LineString, .size(), .getGeometry(j) -> Point
     """
     import math
     import fields2cover as f2c
@@ -287,17 +288,16 @@ def _run_f2c(corners_ll: list, tool_width: float,
     x0, y0 = _f2c_latlon_to_xy(corners_ll[0][0], corners_ll[0][1], lat0, lon0)
     ring.addPoint(f2c.Point(x0, y0, 0))
 
-    cell  = f2c.Cell()
+    cell = f2c.Cell()
     cell.addRing(ring)
-    cells = f2c.Cells()
-    cells.addGeometry(cell)
 
-# ── swath generation ─────────────────────────────────────────────────────
-angle_rad = math.radians(angle_deg % 180)
-sg        = f2c.SG_BruteForce()
-swaths    = sg.generateSwaths(angle_rad, tool_width, cell)   # <-- cell, not cells
-    
-    # ── project back to lat/lon ───────────────────────────────────────────────
+    # ── swath generation ─────────────────────────────────────────────────────
+    # Pass Cell directly — passing Cells gives a SwathsByCells with a different API.
+    angle_rad = math.radians(angle_deg % 180)
+    sg        = f2c.SG_BruteForce()
+    swaths    = sg.generateSwaths(angle_rad, tool_width, cell)
+
+    # ── project back to lat/lon ──────────────────────────────────────────────
     result = []
     for i in range(swaths.size()):
         path   = swaths.get(i).getPath()
@@ -974,8 +974,6 @@ class NiceGuiNode(Node):
     #   └────────────────────────────────────────────────────────────────────┘
 
     def _mission_content(self) -> None:
-        import math
-
         # ── State ─────────────────────────────────────────────────────────────
         corners_ll: list[tuple[float, float]] = []   # [(lat, lon), ...]
         swath_layers: list = []                       # leaflet layer handles
