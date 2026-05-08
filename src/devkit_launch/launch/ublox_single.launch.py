@@ -14,7 +14,11 @@ def generate_launch_description():
         # so the driver falls back to "use first F9P device found" automatically.
         SetEnvironmentVariable('DEVICE_FAMILY',    'F9P'),
         SetEnvironmentVariable('FRAME_ID',         'gnss'),
-        SetEnvironmentVariable('LOAD_CONFIG_VIEW', 'false'),  # skip VALGET write-back
+        # Skip CFG-VALGET read-back verification after writing params.
+        # Required for firmware < HPG 1.32: params like CFG_SEC_JAMDET_SENSITIVITY_HI,
+        # CFG_SIGNAL_GAL_*, CFG_SIGNAL_BDS_* are unknown to older firmware and never
+        # ACK the VALGET, causing a 5-second batch timeout and degraded-mode startup.
+        SetEnvironmentVariable('LOAD_CONFIG_VIEW', 'false'),
 
         ComposableNodeContainer(
             name='ublox_container',
@@ -22,10 +26,21 @@ def generate_launch_description():
             package='rclcpp_components',
             executable='component_container',
             composable_node_descriptions=[
+                # F9P USB driver — publishes raw UBX messages
                 ComposableNode(
                     package='ublox_dgnss_node',
                     plugin='ublox_dgnss::UbloxDGNSSNode',
                     name='ublox_dgnss',
+                    namespace='rover',
+                    extra_arguments=[{'use_intra_process_comms': True}],
+                ),
+                # Converts UBX NAV-HPPOSLLH → sensor_msgs/NavSatFix HP
+                # Publishes /rover/ublox_nav_sat_fix_hp which devkit.launch.py
+                # relays to /gnss/fix for fusioncore.
+                ComposableNode(
+                    package='ublox_nav_sat_fix_hp_node',
+                    plugin='ublox_nav_sat_fix_hp::UbloxNavSatHpFixNode',
+                    name='ublox_nav_sat_fix_hp',
                     namespace='rover',
                     extra_arguments=[{'use_intra_process_comms': True}],
                 ),
