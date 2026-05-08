@@ -73,11 +73,11 @@ RUN apt-get update && \
 #     NOTE: ros-jazzy-fields2cover intentionally excluded here —
 #     we build from source with BUILD_PYTHON=ON in Stage 3.5 instead.
 RUN for i in 1 2 3 4 5; do \
-apt-get install -y --fix-missing --no-install-recommends \
+      apt-get update && \
+      apt-get install -y --fix-missing --no-install-recommends \
         libinput-bin \
         ros-jazzy-navigation2 \
         ros-jazzy-nav2-amcl \
-        ros-jazzy-nav2-bringup \
         ros-jazzy-nav2-bringup \
         ros-jazzy-nav2-behavior-tree \
         ros-jazzy-nav2-bt-navigator \
@@ -106,16 +106,9 @@ apt-get install -y --fix-missing --no-install-recommends \
     done && \
     apt-get clean && rm -rf /var/lib/apt/lists/*
 
-
-# ============================================================
-
-# Build deps for fields2cover (GDAL, Eigen, Boost, SWIG already pulled
-# transitively by ROS above; list them explicitly for cache clarity)
-
 # ============================================================
 # Stage 3.5: Fields2Cover — build from source with Python bindings
 # ============================================================
-
 RUN apt-get update && \
     apt-get install -y --no-install-recommends \
       cmake \
@@ -137,16 +130,13 @@ RUN git clone --depth 1 --branch ${F2C_REF} \
       -DBUILD_TUTORIALS=OFF \
       -DBUILD_TESTS=OFF && \
     cmake --build /opt/Fields2Cover/build --parallel "$(nproc)" && \
-    
-    
     cmake --install /opt/Fields2Cover/build && \
     ldconfig && \
     SITE=$(python3 -c "import site; print(site.getsitepackages()[0])") && \
     find /opt/Fields2Cover/build -name "_fields2cover*.so" -exec cp {} "$SITE/" \; && \
     find /opt/Fields2Cover/build -name "fields2cover.py"  -exec cp {} "$SITE/" \; && \
     rm -rf /opt/Fields2Cover/build
-    
-    
+
 # Smoke-test: make sure `import fields2cover` works
 RUN python3 -c "import fields2cover as f2c; print('fields2cover OK:', f2c.__version__)"
 
@@ -202,9 +192,10 @@ ENV MESA_GL_VERSION_OVERRIDE=3.3
 # Stage 7: Workspace — Local Sources
 # ============================================================
 WORKDIR /workspace
-COPY ./src/devkit_driver ./src/devkit_driver
-COPY ./src/devkit_launch ./src/devkit_launch
-COPY ./src/devkit_ui     ./src/devkit_ui
+COPY ./src/devkit_driver    ./src/devkit_driver
+COPY ./src/devkit_launch    ./src/devkit_launch
+COPY ./src/devkit_ui        ./src/devkit_ui
+COPY /sowbot_row_follow ./src/sowbot_row_follow
 
 # ============================================================
 # Stage 8: Workspace — Git Clones (each repo has its own
@@ -246,7 +237,8 @@ RUN for i in 1 2 3 4 5; do \
 # ============================================================
 # Stage 9: rosdep — Automated Dependency Resolution
 # ============================================================
-RUN apt-get update && apt-get install -y --fix-broken && \
+RUN apt-get update && \
+    apt-get install -y --fix-broken && \
     if [ ! -d /etc/ros/rosdep/sources.list.d ]; then rosdep init; fi && \
     rosdep update && \
     for i in 1 2 3 4 5; do \
@@ -297,27 +289,28 @@ RUN apt-get update && apt-get install -y --fix-broken && \
           sentor" && \
       break || (echo "rosdep attempt $i failed, retrying in 15s..." && sleep 15); \
     done && \
-    apt-get install -y --fix-missing \
-      ros-jazzy-opennav-docking || \
-    echo "opennav-docking install failed (archive issue) — skipping" && \
     rm -rf /var/lib/apt/lists/*
 
 # ============================================================
 # Stage 10: colcon Build
 # ============================================================
 RUN apt-get update && \
-    apt-get install -y --no-install-recommends \
-      ros-jazzy-rmw-cyclonedds-cpp \
-      ros-jazzy-rtcm-msgs \
-      ros-jazzy-nmea-msgs \
-      ros-jazzy-libcurl-vendor \
-      ros-jazzy-interactive-markers \
-      ros-jazzy-tf-transformations \
-      ros-jazzy-rviz2 \
-      ros-jazzy-nav2-bringup \
-      ros-jazzy-navigation2 \
-      ros-jazzy-topic-tools \
-      usbutils libusb-1.0-0-dev && \
+    apt-get install -f -y && \
+    for i in 1 2 3 4 5; do \
+      apt-get install -y --no-install-recommends \
+        ros-jazzy-rmw-cyclonedds-cpp \
+        ros-jazzy-rtcm-msgs \
+        ros-jazzy-nmea-msgs \
+        ros-jazzy-libcurl-vendor \
+        ros-jazzy-interactive-markers \
+        ros-jazzy-tf-transformations \
+        ros-jazzy-rviz2 \
+        ros-jazzy-nav2-bringup \
+        ros-jazzy-navigation2 \
+        ros-jazzy-topic-tools \
+        usbutils libusb-1.0-0-dev && \
+      break || (echo "Stage 10 apt attempt $i failed, retrying in 15s..." && sleep 15); \
+    done && \
     pip install --break-system-packages --no-cache-dir transforms3d && \
     . /opt/ros/jazzy/setup.sh && \
     colcon build --symlink-install \
