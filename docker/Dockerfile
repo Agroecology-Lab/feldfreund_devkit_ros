@@ -196,6 +196,7 @@ COPY ./src/devkit_driver    ./src/devkit_driver
 COPY ./src/devkit_launch    ./src/devkit_launch
 COPY ./src/devkit_ui        ./src/devkit_ui
 
+
 # ============================================================
 # Stage 8: Workspace — Git Clones (each repo has its own
 #           retry loop so one failure does not skip the rest)
@@ -231,6 +232,12 @@ RUN for i in 1 2 3 4 5; do \
       GIT_TERMINAL_PROMPT=0 git clone --depth 1 -b master \
         https://github.com/LCAS/sentor src/sentor && break || \
       (echo "sentor attempt $i failed, retrying in 15s..." && sleep 15); \
+    done
+    
+RUN for i in 1 2 3 4 5; do \
+      GIT_TERMINAL_PROMPT=0 git clone --depth 1 -b main \
+        https://github.com/nilseuropa/ros2graph_explorer src/ros2graph_explorer && break || \
+      (echo "ros2graph_explorer attempt $i failed, retrying in 15s..." && sleep 15); \
     done
 
 # ============================================================
