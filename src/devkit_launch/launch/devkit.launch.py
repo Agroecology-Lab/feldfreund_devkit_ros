@@ -48,7 +48,7 @@ def _topo_nav_nodes(tmap2_file, sim_condition, real_condition, devkit_launch_pkg
 
         # 3a. Fake Nav2 simulator — SIM ONLY
         # Provides /navigate_to_pose, /navigate_through_poses, /follow_waypoints
-        # action servers and publishes map → odom → base_link TF.
+        # action servers and publishes map -> odom -> base_link TF.
         TimerAction(period=2.0, actions=[
             Node(
                 condition=sim_condition,
@@ -65,11 +65,6 @@ def _topo_nav_nodes(tmap2_file, sim_condition, real_condition, devkit_launch_pkg
         ]),
 
         # 3b. Real Nav2 — REAL HARDWARE ONLY
-        # Brings up the full Nav2 stack (controller, planner, BT navigator,
-        # behavior server, waypoint follower, smoother, velocity smoother,
-        # collision monitor, lifecycle manager). Uses the project's nav2
-        # params file. Does NOT include localisation — fusioncore provides
-        # odom → base_link and a static transform provides map → odom.
         TimerAction(period=2.0, actions=[
             IncludeLaunchDescription(
                 PythonLaunchDescriptionSource(
@@ -127,8 +122,6 @@ def generate_launch_description():
     devkit_launch_pkg = get_package_share_directory('devkit_launch')
     ui_pkg            = get_package_share_directory('devkit_ui')
 
-    # mb+r launch files identify hardware by serial string, not USB bus path.
-    # GPS_PORT_ROVER (tty) is used only to detect whether hardware is present.
     rover_port   = os.getenv('GPS_PORT_ROVER',  'virtual')
     rover_serial = os.getenv('GPS_SERIAL_ROVER', '')
     gps_type     = os.getenv('GPS_TYPE_ROVER',  'ublox')
@@ -142,14 +135,6 @@ def generate_launch_description():
 
     fusioncore_config = os.path.join(devkit_launch_pkg, 'config', 'fusioncore.yaml')
 
-    # ── Sim/real mode decision ──────────────────────────────────────────────
-    # manage.py passes sim:=true/false on the command line. This launch file
-    # consumes it and uses it to gate fake_nav2_server (sim only) and the
-    # static map→odom TF (real only).
-    #
-    # Default mirrors manage.py's auto-detect: if any hardware is present the
-    # default is real mode, otherwise sim. This makes direct ros2 launch
-    # invocations behave sensibly without needing manage.py.
     any_hw_present = (rover_port  != 'virtual' or
                       rover1_port != 'virtual' or
                       mcu_port    != 'virtual')
@@ -165,7 +150,6 @@ def generate_launch_description():
     sim_condition  = IfCondition(sim)
     real_condition = IfCondition(PythonExpression(["'", sim, "' != 'true'"]))
 
-    # Gate GPS groups on physical hardware being present and type being ublox
     gps_enabled = PythonExpression(
         ["'", rover_port, "' != 'virtual' and '", gps_type, "' == 'ublox'"]
     )
@@ -173,12 +157,10 @@ def generate_launch_description():
         ["'", rover1_port, "' != 'virtual' and '", gps1_type, "' == 'ublox'"]
     )
 
-    # Rover F9P (front antenna) — moving-base rover mode
     front_args = {'device_family': 'F9P'}
     if rover_serial:
         front_args['device_serial_string'] = rover_serial
 
-    # Base F9P (rear antenna) — moving-base base mode
     rear_args = {'device_family': 'F9P'}
     if rover1_serial:
         rear_args['device_serial_string'] = rover1_serial
@@ -191,7 +173,6 @@ def generate_launch_description():
 
         # ── GPS hardware ─────────────────────────────────────────────────────
 
-        # Base F9P (rear) — start before rover so RTCM is ready on UART2
         GroupAction(
             condition=IfCondition(gps1_enabled),
             actions=[
@@ -204,7 +185,6 @@ def generate_launch_description():
             ],
         ),
 
-        # Rover F9P (front) — moving-base rover, produces NavSatFix + RELPOSNED
         GroupAction(
             condition=IfCondition(gps_enabled),
             actions=[
@@ -217,9 +197,8 @@ def generate_launch_description():
             ],
         ),
 
-        # ── Topic relays (always run; idle silently if source absent) ────────
+        # ── Topic relays ─────────────────────────────────────────────────────
 
-        # /rover/fix → /gnss/fix
         Node(
             package='topic_tools',
             executable='relay',
@@ -228,7 +207,6 @@ def generate_launch_description():
             output='screen',
         ),
 
-        # /odom → /odom/wheels (explicit fusioncore odom input)
         Node(
             package='topic_tools',
             executable='relay',
@@ -237,8 +215,6 @@ def generate_launch_description():
             output='screen',
         ),
 
-        # NAV-RELPOSNED → /gnss/heading (sensor_msgs/Imu, ENU yaw quaternion)
-        # Rejects silently if dual antenna not connected.
         Node(
             package='devkit_driver',
             executable='relposned_heading_shim',
@@ -247,9 +223,10 @@ def generate_launch_description():
         ),
 
         # ── FusionCore UKF ───────────────────────────────────────────────────
-        # Always publishes odom → base_link TF.
-        # Sim: wheel odom only (no GNSS fix from real hardware).
-        # Real: GNSS fix + heading + wheel odom.
+        # fusioncore is a lifecycle node. It subscribes to nothing and publishes
+        # nothing (no odom->base_link TF, no /fusion/odom) until transitioned
+        # through configure -> active. lifecycle_manager_fusioncore does this
+        # automatically on startup via autostart=true.
         Node(
             package='fusioncore_ros',
             executable='fusioncore_node',
@@ -258,11 +235,23 @@ def generate_launch_description():
             output='screen',
         ),
 
-        # ── Static map → odom TF (real hardware only) ────────────────────────
-        # In sim, fake_nav2_server provides this. In real mode, broadcast
-        # identity so the topo nav TF chain (map → odom → base_link) is
-        # complete.
-        # TODO: replace with GPS-anchored map origin once tmap2 is surveyed.
+        Node(
+            package='nav2_lifecycle_manager',
+            executable='lifecycle_manager',
+            name='lifecycle_manager_fusioncore',
+            output='screen',
+            parameters=[{
+                'autostart':    True,
+                'node_names':   ['fusioncore'],
+                'bond_timeout': 4.0,
+            }],
+        ),
+
+        # ── Static map -> odom TF (real hardware only) ───────────────────────
+        # In sim, fake_nav2_server owns the full map->odom->base_link TF chain.
+        # In real mode, fusioncore publishes odom->base_link; this node closes
+        # the chain with an identity map->odom.
+        # TODO: replace with GPS-anchored origin once tmap2 nodes are surveyed.
         Node(
             condition=real_condition,
             package='tf2_ros',
@@ -272,7 +261,7 @@ def generate_launch_description():
             output='screen',
         ),
 
-        # ── Devkit Driver (Lizard ESP32 bridge) ──────────────────────────────
+        # ── Devkit Driver ────────────────────────────────────────────────────
         IncludeLaunchDescription(
             PythonLaunchDescriptionSource(
                 os.path.join(devkit_launch_pkg, 'launch', 'devkit_driver.launch.py')
@@ -287,5 +276,5 @@ def generate_launch_description():
             ),
         ),
 
-        # ── Topological Navigation (inlined, conditional fake_nav2) ──────────
+        # ── Topological Navigation ───────────────────────────────────────────
     ] + _topo_nav_nodes(tmap2_file, sim_condition, real_condition, devkit_launch_pkg))
