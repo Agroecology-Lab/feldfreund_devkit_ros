@@ -286,9 +286,7 @@ def _run_f2c(corners_ll: list, tool_width: float,
     for lat, lon in corners_ll:
         x, y = _f2c_latlon_to_xy(lat, lon, lat0, lon0)
         ring.addPoint(f2c.Point(x, y, 0))
-    # close
-    x0, y0 = _f2c_latlon_to_xy(corners_ll[0][0], corners_ll[0][1], lat0, lon0)
-    ring.addPoint(f2c.Point(x0, y0, 0))
+    ring.closeRing()
 
     cell = f2c.Cell()
     cell.addRing(ring)
@@ -1099,7 +1097,10 @@ class NiceGuiNode(Node):
 
             try:
                 from nicegui import run as ng_run
-                swaths = await ng_run.cpu_bound(
+                # io_bound runs in a thread (same process as ROS+GDAL).
+                # cpu_bound would fork, and forking a process with GDAL/ROS
+                # already loaded segfaults the worker on first F2C call.
+                swaths = await ng_run.io_bound(
                     _run_f2c, list(corners_ll), width, angle_deg)
             except Exception as exc:
                 f2c_status.set_text(f'ERROR: {exc}')
