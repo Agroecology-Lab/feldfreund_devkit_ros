@@ -390,6 +390,8 @@ class NiceGuiNode(Node):
         self._f2c_row_start:  int  = 1
         self._f2c_tool_width: float = 1.2
         self._f2c_angle_deg:  float = 0.0
+        self.f2c_save_status: str  = ''
+        self.delete_status:   str  = ''
 
         @ui.page('/')
         def page():
@@ -659,6 +661,285 @@ class NiceGuiNode(Node):
         self._track_counter = 0; self._track_prefix = ''
         self._track_row_id  = None; self._track_is_row = False; self._track_first = True
 
+    # ── shared topo-map persistence helper ───────────────────────────────────
+
+    def _persist_and_reload(self, modify_fn, status_attr: str,
+                             success_msg: str) -> None:
+        """
+        Apply `modify_fn(file_doc)` to the on-disk topo-map YAML, write it back,
+        sync `self._topo_doc`, and trigger a map reload (switch service if
+        available, else republish on /topological_map_2). Runs in a thread.
+        """
+        map_name = self._topo_doc.get('name', 'mixed_test_map')
+        map_file = f'/workspace/maps/{map_name}'
+        installed_src = ('/workspace/install/topological_navigation/share/'
+                         'topological_navigation/config/mixed_actions_map.yaml')
+
+        def _work():
+            try:
+                import copy, yaml as _yaml
+                if os.path.exists(map_file):
+                    with open(map_file) as f: file_doc = _yaml.safe_load(f)
+                elif os.path.exists(installed_src):
+                    with open(installed_src) as f: file_doc = _yaml.safe_load(f)
+                else:
+                    file_doc = copy.deepcopy(self._topo_doc)
+
+                modify_fn(file_doc)
+
+                with open(map_file, 'w') as f:
+                    _yaml.dump(file_doc, f, default_flow_style=False,
+                               allow_unicode=True, sort_keys=False)
+                self._topo_doc = file_doc
+
+                def _call(client, req, timeout=5.0):
+                    ev = threading.Event(); res = [None]
+                    def _cb(f): res[0] = f.result(); ev.set()
+                    client.call_async(req).add_done_callback(_cb)
+                    ev.wait(timeout=timeout); return res[0]
+
+                if _TOPO_SRV_OK:
+                    sw = WriteTopologicalMap.Request()
+                    sw.filename = map_file; sw.no_alias = True
+                    sr = _call(self._switch_map_cli, sw)
+                    if sr and sr.success:
+                        setattr(self, status_attr, f'{success_msg} — live')
+                    else:
+                        msg = String(); msg.data = json.dumps(self._topo_doc, ensure_ascii=False)
+                        self._topo_map_pub.publish(msg)
+                        err = sr.message if sr else 'timeout'
+                        setattr(self, status_attr,
+                                f'{success_msg} (switch failed: {err})')
+                else:
+                    msg = String(); msg.data = json.dumps(self._topo_doc, ensure_ascii=False)
+                    self._topo_map_pub.publish(msg)
+                    setattr(self, status_attr, f'{success_msg} — live (no srv)')
+                self.get_logger().info(f'_persist_and_reload: {success_msg}')
+            except Exception as e:
+                setattr(self, status_attr, f'ERROR: {e}')
+                self.get_logger().error(f'_persist_and_reload failed: {e}')
+
+        threading.Thread(target=_work, daemon=True).start()
+
+    # ── F2C → topo rows ──────────────────────────────────────────────────────
+
+    def save_f2c_rows_to_topo(self, prefix: str, row_id_start: int) -> None:
+        """
+        Project each F2C swath's first/last point to the map frame using the
+        current (odom_xy, gps_latlon) as a single anchor, and drop a pair of
+        topo nodes per row joined by a `limbic_row_follow` edge.
+        """
+        prefix = re.sub(r'[^A-Z0-9_]', '',
+                        (prefix or '').strip().upper().replace(' ', '_'))
+        if not prefix:
+            self.f2c_save_status = 'ERROR: prefix required'; return
+        if not self._f2c_swaths:
+            self.f2c_save_status = 'ERROR: no rows planned — click Plan Rows first'
+            return
+        if self.latest_odom is None:
+            self.f2c_save_status = 'ERROR: no odometry'; return
+        if self.latest_gps is None or self.latest_gps.status.status < 0:
+            self.f2c_save_status = 'ERROR: no GPS fix'; return
+        if not self._topo_doc:
+            self.f2c_save_status = 'ERROR: map not loaded'; return
+
+        # Single anchor: where the robot is RIGHT NOW. All F2C lat/lon offsets
+        # are relative to this; map-frame xy is anchored to current odom xy.
+        anchor_x   = self.latest_odom.pose.pose.position.x
+        anchor_y   = self.latest_odom.pose.pose.position.y
+        anchor_lat = self.latest_gps.latitude
+        anchor_lon = self.latest_gps.longitude
+        fix_type   = int(self.latest_gps.status.status)
+
+        map_name  = self._topo_doc.get('name', 'mixed_test_map')
+        nav_frame = self._topo_doc.get('transformation', {}).get('topo_frame_id', 'map')
+        timestamp = datetime.now(timezone.utc).strftime('%d-%m-%Y_%H-%M-%S')
+
+        new_topo_nodes = dict(self.topo_nodes)
+        new_entries: list = []
+        added: list = []
+        skipped: list = []
+
+        verts = [{'x': -0.5, 'y': -0.5}, {'x':  0.5, 'y': -0.5},
+                 {'x':  0.5, 'y':  0.5}, {'x': -0.5, 'y':  0.5}]
+
+        for i, swath in enumerate(self._f2c_swaths):
+            if len(swath) < 2:
+                continue
+            rid = row_id_start + i
+            in_lat,  in_lon  = swath[0]
+            out_lat, out_lon = swath[-1]
+
+            ie, in_n = _f2c_latlon_to_xy(in_lat,  in_lon,  anchor_lat, anchor_lon)
+            oe, on_  = _f2c_latlon_to_xy(out_lat, out_lon, anchor_lat, anchor_lon)
+            ix, iy = round(anchor_x + ie, 3), round(anchor_y + in_n, 3)
+            ox, oy = round(anchor_x + oe, 3), round(anchor_y + on_, 3)
+
+            in_name  = f'{prefix}_R{rid}_IN'
+            out_name = f'{prefix}_R{rid}_OUT'
+            if in_name in new_topo_nodes or out_name in new_topo_nodes:
+                skipped.append(rid); continue
+
+            def _disk_node(name, x, y, role, lat, lon, edges):
+                meta = {'map': map_name, 'node': name, 'pointset': map_name}
+                props = {'xy_goal_tolerance': 0.1, 'yaw_goal_tolerance': 0.05,
+                         'dropped_by': 'webui_f2c', 'timestamp': timestamp,
+                         'gps_lat': round(lat, 7), 'gps_lon': round(lon, 7),
+                         'gps_fix_type': fix_type, 'gps_hdop': None,
+                         'row_id': rid, 'row_role': role}
+                return {'meta': meta, 'node': {
+                    'edges': edges, 'name': name, 'nav_frame': nav_frame,
+                    'pose': {'orientation': {'w': 1.0, 'x': 0.0, 'y': 0.0, 'z': 0.0},
+                             'position':    {'x': x,   'y': y,   'z': 0.0}},
+                    'properties': props, 'verts': verts,
+                }}
+
+            in_edges = [{'action': _ROW_ACTION,
+                         'edge_id': f'{in_name}_{out_name}', 'node': out_name}]
+            new_entries.append(_disk_node(in_name,  ix, iy, 'entry', in_lat,  in_lon,  in_edges))
+            new_entries.append(_disk_node(out_name, ox, oy, 'exit',  out_lat, out_lon, []))
+
+            ui_meta_common = {'dropped_by': 'webui_f2c', 'timestamp': timestamp,
+                              'gps_fix_type': fix_type, 'gps_hdop': None,
+                              'row_id': rid}
+            new_topo_nodes[in_name] = {
+                'x': ix, 'y': iy, 'edges': [out_name],
+                'meta': {**ui_meta_common, 'row_role': 'entry',
+                         'gps_lat': round(in_lat, 7), 'gps_lon': round(in_lon, 7)},
+            }
+            new_topo_nodes[out_name] = {
+                'x': ox, 'y': oy, 'edges': [],
+                'meta': {**ui_meta_common, 'row_role': 'exit',
+                         'gps_lat': round(out_lat, 7), 'gps_lon': round(out_lon, 7)},
+            }
+            added.append(rid)
+
+        if not added:
+            self.f2c_save_status = 'ERROR: nothing added (all names already taken)'
+            return
+
+        self.topo_nodes = new_topo_nodes
+        skip_str = f' (skipped {len(skipped)} dup ids)' if skipped else ''
+        self.f2c_save_status = f'writing {len(added)} rows · {prefix}{skip_str}…'
+
+        def _modify(file_doc):
+            existing = {e.get('node', {}).get('name') for e in file_doc.get('nodes', [])}
+            for entry in new_entries:
+                if entry['node']['name'] in existing:
+                    continue
+                file_doc.setdefault('nodes', []).append(entry)
+
+        self._persist_and_reload(_modify, 'f2c_save_status',
+                                  f'saved {len(added)} rows · {prefix}{skip_str}')
+
+    # ── Delete topo nodes / rows ─────────────────────────────────────────────
+
+    def delete_topo_node(self, name: str) -> None:
+        if not name or name not in self.topo_nodes:
+            self.delete_status = f'ERROR: {name!r} not in map'; return
+        if not self._topo_doc:
+            self.delete_status = 'ERROR: map not loaded'; return
+
+        # In-memory: drop the node and scrub edges pointing at it
+        new_nodes = {}
+        for nm, nd in self.topo_nodes.items():
+            if nm == name:
+                continue
+            edges = [e for e in nd.get('edges', []) if e != name]
+            new_nodes[nm] = {**nd, 'edges': edges}
+        self.topo_nodes = new_nodes
+        if self.topo_selected == name:
+            self.topo_selected = None
+        self.delete_status = f'deleting {name}…'
+
+        def _modify(file_doc):
+            kept = []
+            for entry in file_doc.get('nodes', []):
+                n = entry.get('node', {})
+                if n.get('name') == name:
+                    continue
+                n['edges'] = [e for e in n.get('edges', [])
+                              if e.get('node') != name]
+                kept.append(entry)
+            file_doc['nodes'] = kept
+
+        self._persist_and_reload(_modify, 'delete_status', f'deleted {name}')
+
+    def delete_row(self, row_id: int) -> None:
+        targets = {nm for nm, nd in self.topo_nodes.items()
+                   if nd.get('meta', {}).get('row_id') == row_id}
+        if not targets:
+            self.delete_status = f'ERROR: no nodes for row {row_id}'; return
+        if not self._topo_doc:
+            self.delete_status = 'ERROR: map not loaded'; return
+
+        new_nodes = {}
+        for nm, nd in self.topo_nodes.items():
+            if nm in targets:
+                continue
+            edges = [e for e in nd.get('edges', []) if e not in targets]
+            new_nodes[nm] = {**nd, 'edges': edges}
+        self.topo_nodes = new_nodes
+        if self.topo_selected in targets:
+            self.topo_selected = None
+        self.delete_status = f'deleting row {row_id} ({len(targets)} nodes)…'
+
+        def _modify(file_doc):
+            kept = []
+            for entry in file_doc.get('nodes', []):
+                n = entry.get('node', {})
+                if n.get('name') in targets:
+                    continue
+                n['edges'] = [e for e in n.get('edges', [])
+                              if e.get('node') not in targets]
+                kept.append(entry)
+            file_doc['nodes'] = kept
+
+        self._persist_and_reload(_modify, 'delete_status',
+                                  f'deleted row {row_id} ({len(targets)} nodes)')
+
+    # ── Confirmation dialogs (UI helpers) ────────────────────────────────────
+
+    async def confirm_delete_node(self, name: Optional[str]) -> None:
+        if not name or name not in self.topo_nodes:
+            return
+        nd = self.topo_nodes[name]
+        rid = nd.get('meta', {}).get('row_id')
+        with ui.dialog() as d, ui.card():
+            ui.label(f'Delete topo node "{name}"?').classes('font-semibold')
+            if rid is not None:
+                ui.label(
+                    f'This is part of row {rid}. To delete the whole row '
+                    f'(entry + exit), use the ✕ on the Mission tab instead.'
+                ).classes('text-xs').style('color:#9a6700;max-width:340px')
+            ui.label('This persists immediately and cannot be undone.').classes(
+                'text-xs').style('color:#8c959f')
+            with ui.row().classes('w-full justify-end gap-2 mt-2'):
+                ui.button('Cancel', on_click=lambda: d.submit('cancel')).props('flat no-caps')
+                ui.button('Delete', color='negative',
+                          on_click=lambda: d.submit('ok')).props('no-caps')
+        if await d == 'ok':
+            self.delete_topo_node(name)
+
+    async def confirm_delete_row(self, row_id: int) -> None:
+        targets = sorted(nm for nm, nd in self.topo_nodes.items()
+                         if nd.get('meta', {}).get('row_id') == row_id)
+        if not targets:
+            return
+        with ui.dialog() as d, ui.card():
+            ui.label(f'Delete row {row_id}?').classes('font-semibold')
+            ui.label(f'{len(targets)} nodes will be removed:').classes('text-xs').style('color:#57606a')
+            ui.label(', '.join(targets)).classes('text-xs font-mono').style(
+                'color:#8c959f;max-width:340px;word-break:break-all')
+            with ui.row().classes('w-full justify-end gap-2 mt-2'):
+                ui.button('Cancel', on_click=lambda: d.submit('cancel')).props('flat no-caps')
+                ui.button('Delete', color='negative',
+                          on_click=lambda: d.submit('ok')).props('no-caps')
+        if await d == 'ok':
+            self.delete_row(row_id)
+
+    # ── existing helpers below ───────────────────────────────────────────────
+
     def _patch_node_role(self, node_name: str, role: str) -> None:
         import yaml as _yaml
         if node_name in self.topo_nodes:
@@ -841,6 +1122,12 @@ class NiceGuiNode(Node):
                 go_btn   = ui.button('Go',     color='positive').classes('w-full').props('no-caps')
                 stop_btn = ui.button('Cancel', color='negative').classes('w-full').props(
                     'no-caps flat')
+                del_btn  = ui.button('Delete Node', color='negative').classes('w-full').props(
+                    'no-caps outline')
+
+                ui.html('<div class="sec-label mt-3">Status</div>')
+                del_status_lbl = ui.label('').classes('text-xs font-mono').style(
+                    'color:#57606a;word-break:break-all')
 
                 ui.html('<div class="sec-label mt-3">Nodes</div>')
                 with ui.scroll_area().style('flex:1;min-height:0'):
@@ -851,6 +1138,7 @@ class NiceGuiNode(Node):
         go_btn.on_click(
             lambda: self.send_nav_goal(self.topo_selected) if self.topo_selected else None)
         stop_btn.on_click(self.cancel_nav_goal)
+        del_btn.on_click(lambda: self.confirm_delete_node(self.topo_selected))
 
         def on_node_clicked(e) -> None:
             n = (e.args or {}).get('node')
@@ -956,6 +1244,11 @@ class NiceGuiNode(Node):
                       and not self.soft_estop_active)
             go_btn.set_enabled(can_go)
             stop_btn.set_enabled(self.topo_navigating)
+            del_btn.set_enabled(bool(self.topo_selected))
+            del_status_lbl.set_text(self.delete_status)
+            del_status_lbl.style(
+                'color:#cf222e' if self.delete_status.startswith('ERROR') else
+                'color:#1a7f37' if self.delete_status else 'color:#57606a')
 
         ui.timer(0.2, refresh_nav)
         inject_click_js()
@@ -1017,6 +1310,13 @@ class NiceGuiNode(Node):
                     value=1, min=1, step=1, precision=0,
                 ).classes('w-full')
 
+                ui.html('<div class="sec-label mt-3">Row name prefix</div>')
+                f2c_prefix = ui.input(
+                    value='F2C', placeholder='F2C',
+                ).classes('w-full')
+                ui.label('→ {prefix}_R{n}_IN / _OUT').classes('text-xs font-mono').style(
+                    'color:#8c959f')
+
                 ui.separator().classes('my-3')
 
                 corners_lbl = ui.label('0 corners').classes('text-xs font-mono').style(
@@ -1024,10 +1324,15 @@ class NiceGuiNode(Node):
 
                 plan_btn  = ui.button('Plan Rows').props(
                     'color=positive no-caps').classes('w-full mt-2')
+                save_btn  = ui.button('Save as Topo Rows').props(
+                    'color=primary no-caps').classes('w-full mt-1')
+                save_btn.set_enabled(False)
                 clear_btn = ui.button('Clear').props(
                     'outline no-caps').classes('w-full mt-1')
 
                 f2c_status = ui.label('').classes('text-xs font-mono mt-2').style(
+                    'color:#57606a;word-break:break-word')
+                f2c_save_lbl = ui.label('').classes('text-xs font-mono mt-1').style(
                     'color:#57606a;word-break:break-word')
 
         # ── Map click handler ─────────────────────────────────────────────────
@@ -1074,6 +1379,7 @@ class NiceGuiNode(Node):
                 poly_layer[0] = None
             corners_lbl.set_text('0 corners')
             f2c_status.set_text('')
+            save_btn.set_enabled(False)
             # Rebuild map to drop markers (leaflet markers have no easy bulk-remove)
             mission_map.set_center(mission_map.center)
 
@@ -1134,8 +1440,29 @@ class NiceGuiNode(Node):
                 f'{len(swaths)} rows · {width}m wide · {angle_deg:.0f}°')
             f2c_status.style('color:#1a7f37')
             plan_btn.set_enabled(True)
+            save_btn.set_enabled(bool(swaths))
 
         plan_btn.on_click(do_plan)
+
+        def do_save():
+            self.save_f2c_rows_to_topo(
+                f2c_prefix.value or 'F2C',
+                int(f2c_row_id_start.value or 1),
+            )
+        save_btn.on_click(do_save)
+
+        # Status pump for the save button — runs lightly, only updates on change.
+        _save_prev = ['']
+        def _refresh_save_status():
+            cur = self.f2c_save_status
+            if cur == _save_prev[0]:
+                return
+            _save_prev[0] = cur
+            f2c_save_lbl.set_text(cur)
+            f2c_save_lbl.style(
+                'color:#cf222e' if cur.startswith('ERROR') else
+                'color:#1a7f37' if cur else 'color:#57606a')
+        ui.timer(0.4, _refresh_save_status)
 
         with ui.card().classes('w-full'):
             with ui.row().classes('items-baseline gap-2 mb-3'):
@@ -1203,6 +1530,8 @@ class NiceGuiNode(Node):
                                 ui.label(rows[rid]).classes('text-xs font-mono').style('color:#8c959f')
                                 ui.button('Add →', on_click=lambda _, r=r: _add_row(r)).props(
                                     'color=primary outline no-caps dense')
+                                ui.button('✕', on_click=lambda _, r=r: self.confirm_delete_row(r)).props(
+                                    'flat dense').classes('text-xs').style('color:#cf222e')
             ui.timer(1.0, refresh_mission)
 
     def _run_mission(self, queue: list, status_lbl) -> None:
