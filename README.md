@@ -10,7 +10,6 @@ Reference open hardware stack(s) under development at [Sowbot.co.uk](https://sow
 ## Sowbot Roadmap
 
 Branch: `caatinga-dev` | ROS 2 Jazzy | Upstream: [zauberzeug/feldfreund\_devkit\_ros](https://github.com/zauberzeug/feldfreund_devkit_ros)  
-Open-source precision seeding and weeding robot — [sowbot.co.uk](https://sowbot.co.uk) | [Agroecology Lab](https://agroecologylab.org.uk)  
 **Collaborators welcome.** See [CONTRIBUTING.md](CONTRIBUTING.md). Contact: [sowbot.co.uk](https://sowbot.co.uk)
 
 | # | Feature | Description | Status | Phase |
@@ -91,7 +90,7 @@ Use the management script to build the ROS 2 workspace and launch the robot stac
 xhost +local:docker
 ./manage.py 
 ```
-*Note: manage.py automatically detects hardware ports (ESP32 & u-blox), updates your .env configuration, and launches the container with live volume mapping to /workspace.*
+Access http://localhost to access the WebUI
 
 
 ## Management & Tools
@@ -127,18 +126,6 @@ You can also make it verbose with:
 python3 agbot-diagnostic.py full
 ```
 
-### Proposed GNSS Topic Mapping: Septentrio vs. Dual u-blox F9P (Moving Base)
-
-| Septentrio Topic | `ublox_dgnss` Topic (Rover-Rover) | Source UBX Message | Functional Description |
-| :--- | :--- | :--- | :--- |
-| `/pvtgeodetic` | `/ubx_nav_pvt` | **NAV-PVT** | Geodetic position, velocity, and time. |
-| `/gpsfix` | `/ublox_nav_sat_fix_hp` | **NAV-PVT + NAV-HPPOSLLH** | High-precision global position fix. |
-| `/poscovgeodetic` | `/ubx_nav_cov` | **NAV-COV** | Position and velocity covariance matrix. |
-| `/atteuler` | `/ubx_nav_rel_pos_ned` | **NAV-RELPOSNED** | **Heading/Yaw** derived from the relative vector. |
-| `/attcoveuler` | `/ubx_nav_rel_pos_ned` | **NAV-RELPOSNED** | Accuracy/Variance of the heading calculation. |
-| `/aimplusstatus` | `/ubx_mon_rf` | **MON-RF** | Jamming/Interference monitoring indicators. |
-
-
 ## Sketch of MVP 2026 architecture
 
 ### 1. The Lizard Brain (RT Microcontroller)
@@ -164,14 +151,7 @@ python3 agbot-diagnostic.py full
 * **Function:** NPU-accelerated inference (YOLO/Object tracking) and sensor fusion.
 * **Connectivity:** Native Zenoh integration via `rmw_zenoh_cpp`. Publishes environment states and "Conditions" to the Zenoh network.
 
-# Navigation detail for 2026
-
-| Layer          | Component                                      | Role                                                        |
-|----------------|------------------------------------------------|-------------------------------------------------------------|
-| **Task**       | LCAS topological_navigation                    | "Visit crop rows A, B, C" — graph of named farm locations   |
-| **Navigation** | Nav2 (fazenda_completa)                        | Moves between poses                                         |
-| **Localisation**| GPS + EKF (navsat_transform + ekf_node)       | Outdoor positioning                                         |
-| **Simulation** | Gazebo (sim.launch.py + minha_fazenda.world)   | Simulated environment                                       |
+                          |
 
 ## Sketch of possible eventual ~2027 architecture
 
@@ -205,7 +185,6 @@ python3 agbot-diagnostic.py full
 * **Role:** Asynchronous Perception.
 * **Function:** NPU-accelerated inference (YOLO/Object tracking) and sensor fusion.
 * **Connectivity:** Native Zenoh integration via `rmw_zenoh_cpp`. Publishes environment states and "Conditions" to the Zenoh network.
-
 
 
 ## Feldfreund DevKit ROS 
