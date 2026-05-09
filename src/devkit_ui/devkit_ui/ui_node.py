@@ -331,22 +331,29 @@ class NiceGuiNode(Node):
             depth=1,
             reliability=ReliabilityPolicy.BEST_EFFORT,
         )
-        self.create_subscription(NavSatFix,     '/gnss/fix',           self.store_gps,       _SENSOR_QOS)
+        self.create_subscription(NavSatFix,    '/gnss/fix',           self.store_gps,                  _SENSOR_QOS)
         self.create_subscription(BatteryState, 'battery_state',       self.store_battery,               1)
         self.create_subscription(Bool,         'bumper/front_top',    self.update_bumper_front_top,    SAFETY_QOS)
         self.create_subscription(Bool,         'bumper/front_bottom', self.update_bumper_front_bottom, SAFETY_QOS)
         self.create_subscription(Bool,         'bumper/back',         self.update_bumper_back,         SAFETY_QOS)
         self.create_subscription(Bool,         'estop/front',         self.update_estop_front,         SAFETY_QOS)
         self.create_subscription(Bool,         'estop/back',          self.update_estop_back,          SAFETY_QOS)
+
         # fusioncore publishes on /fusion/odom (RELIABLE, depth 100). The old
         # /odometry/global was from fake_nav2_server, which we no longer run.
         _ODOM_QOS = QoSProfile(
             depth=10,
             reliability=ReliabilityPolicy.RELIABLE,
         )
-        self.create_subscription(Odometry,     '/fusion/odom',
+        self.create_subscription(Odometry, '/fusion/odom',
                                  lambda m: setattr(self, 'latest_odom', m), _ODOM_QOS)
-        self.create_subscription(String,       '/current_node',
+        # Fallback: use wheel odom directly if fusioncore is silent (e.g. IMU not yet live).
+        # Once /fusion/odom starts arriving it takes over automatically — latest_odom is
+        # only set from /odom while it is still None.
+        self.create_subscription(Odometry, '/odom',
+                                 self._odom_fallback, _ODOM_QOS)
+
+        self.create_subscription(String, '/current_node',
                                  lambda m: setattr(self, 'topo_current', m.data), _SENSOR_QOS)
 
         self._topo_doc:  dict            = {}
@@ -365,7 +372,7 @@ class NiceGuiNode(Node):
             self._nav_ac = ActionClient(self, GotoNode, 'topological_navigation')
 
         self.latest_odom:    Optional[Odometry]     = None
-        self.latest_gps:     Optional[NavSatFix]      = None
+        self.latest_gps:     Optional[NavSatFix]    = None
         self.latest_battery: Optional[BatteryState] = None
 
         self.bumper_front_top_active    = False
@@ -392,16 +399,23 @@ class NiceGuiNode(Node):
         self._track_first:   bool             = True
         self.track_status:   str              = ''
 
-        self._f2c_swaths:     list = []
-        self._f2c_row_start:  int  = 1
+        self._f2c_swaths:     list  = []
+        self._f2c_row_start:  int   = 1
         self._f2c_tool_width: float = 1.2
         self._f2c_angle_deg:  float = 0.0
-        self.f2c_save_status: str  = ''
-        self.delete_status:   str  = ''
+        self.f2c_save_status: str   = ''
+        self.delete_status:   str   = ''
 
         @ui.page('/')
         def page():
             self.content()
+
+    # ── odom fallback ─────────────────────────────────────────────────────────
+
+    def _odom_fallback(self, msg: Odometry) -> None:
+        """Use /odom (wheel odometry) only while /fusion/odom has not yet arrived."""
+        if self.latest_odom is None:
+            self.latest_odom = msg
 
     # ── map callback ──────────────────────────────────────────────────────────
 
@@ -1665,6 +1679,13 @@ class NiceGuiNode(Node):
                     'font-family:\'Courier New\',monospace;">'
                     '↗ Graph Explorer</a>'
                 )
+                ui.html(
+                    '<a href="https://github.com/nilseuropa/ros2graph_explorer#build--launch"'
+                    ' target="_blank"'
+                    ' style="font-size:11px;color:var(--txt-muted);text-decoration:none;'
+                    'font-family:\'Courier New\',monospace;">'
+                    '📄 Documentation</a>'
+                )
                 _explorer_lbl
 
     # ── shared ────────────────────────────────────────────────────────────────
@@ -1681,7 +1702,7 @@ class NiceGuiNode(Node):
         self.cmd_vel_publisher.publish(msg)
 
     def store_gps(self, msg: NavSatFix) -> None:             self.latest_gps = msg
-    def store_battery(self, msg: BatteryState) -> None:   self.latest_battery = msg
+    def store_battery(self, msg: BatteryState) -> None:      self.latest_battery = msg
     def update_bumper_front_top(self, msg: Bool) -> None:    self.bumper_front_top_active = msg.data
     def update_bumper_front_bottom(self, msg: Bool) -> None: self.bumper_front_bottom_active = msg.data
     def update_bumper_back(self, msg: Bool) -> None:         self.bumper_back_active = msg.data
