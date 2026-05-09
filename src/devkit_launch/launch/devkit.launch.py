@@ -243,7 +243,10 @@ def generate_launch_description():
             parameters=[{
                 'autostart':    True,
                 'node_names':   ['fusioncore'],
-                'bond_timeout': 4.0,
+                # Increased from 4.0 — fusioncore TF validation + sensor
+                # subscription setup takes longer than 4 s on startup,
+                # causing a spurious bond timeout and aborting bringup.
+                'bond_timeout': 10.0,
             }],
         ),
 
@@ -258,6 +261,21 @@ def generate_launch_description():
             executable='static_transform_publisher',
             name='map_to_odom_static',
             arguments=['0', '0', '0', '0', '0', '0', 'map', 'odom'],
+            output='screen',
+        ),
+
+        # ── Static odom -> base_link TF (sim / no-MCU only) ──────────────────
+        # In sim mode the MCU is virtual so odom_handler never runs and
+        # fusioncore has no wheel odom to fuse, meaning odom->base_link is
+        # never published. This identity static TF closes the chain so that
+        # topological localisation and Nav2 can start up.
+        # In real mode fusioncore owns this TF — do not publish it there.
+        Node(
+            condition=sim_condition,
+            package='tf2_ros',
+            executable='static_transform_publisher',
+            name='odom_to_base_link_static',
+            arguments=['0', '0', '0', '0', '0', '0', 'odom', 'base_link'],
             output='screen',
         ),
 
