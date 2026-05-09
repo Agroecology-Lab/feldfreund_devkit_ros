@@ -3,6 +3,7 @@ from ament_index_python.packages import get_package_share_directory
 from launch import LaunchDescription
 from launch.actions import (
     DeclareLaunchArgument,
+    ExecuteProcess,
     GroupAction,
     IncludeLaunchDescription,
     SetEnvironmentVariable,
@@ -243,11 +244,15 @@ def generate_launch_description():
         # ── FusionCore UKF ───────────────────────────────────────────────────
         # Launched directly — NOT wrapped in a lifecycle_manager.
         #
-        # fusioncore implements the Nav2 lifecycle state machine internally and
-        # self-transitions configure → active on startup. It does NOT implement
-        # the bond heartbeat protocol that nav2_lifecycle_manager requires, so
-        # wrapping it causes a guaranteed bond timeout on every boot regardless
-        # of the timeout value set.
+        # fusioncore does NOT implement the bond heartbeat protocol that
+        # nav2_lifecycle_manager requires, so wrapping it causes a guaranteed
+        # bond timeout on every boot regardless of the timeout value set.
+        #
+        # fusioncore was documented as self-transitioning configure → active,
+        # but in practice it stalls at unconfigured — likely because /gnss/fix
+        # and /odom/wheels are not yet available when the node initialises.
+        # We drive the two lifecycle transitions explicitly via a timed
+        # ExecuteProcess pair (4 s gives Nav2 and the driver time to settle).
         Node(
             package='fusioncore_ros',
             executable='fusioncore_node',
@@ -255,6 +260,18 @@ def generate_launch_description():
             parameters=[fusioncore_config],
             output='screen',
         ),
+        TimerAction(period=4.0, actions=[
+            ExecuteProcess(
+                cmd=['ros2', 'lifecycle', 'set', '/fusioncore', 'configure'],
+                output='screen',
+            ),
+        ]),
+        TimerAction(period=5.0, actions=[
+            ExecuteProcess(
+                cmd=['ros2', 'lifecycle', 'set', '/fusioncore', 'activate'],
+                output='screen',
+            ),
+        ]),
 
         # ── Static map -> odom TF (real hardware only) ───────────────────────
         # In sim, fake_nav2_server owns the full map->odom->base_link TF chain.
