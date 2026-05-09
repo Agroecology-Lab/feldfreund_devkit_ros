@@ -1,0 +1,17 @@
+# config/nav2_lifecycle_params.yaml
+# Overrides the lifecycle_manager_navigation node_names list from nav2_bringup's
+# navigation_launch.py to exclude collision_monitor.
+# collision_monitor requires observation_sources to be set — without a sensor
+# (lidar, ultrasonic) it cannot start and crashes the entire Nav2 bringup.
+# Remove collision_monitor from this list when a sensor is wired up and
+# add its config to nav2_params.yaml.
+lifecycle_manager_navigation:
+  ros__parameters:
+    node_names:
+      - controller_server
+      - smoother_server
+      - planner_server
+      - behavior_server
+      - bt_navigator
+      - waypoint_follower
+      - velocity_smoother
