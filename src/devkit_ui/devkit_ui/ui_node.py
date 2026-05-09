@@ -1042,10 +1042,10 @@ class NiceGuiNode(Node):
             if len(corners_ll) >= 2:
                 latlngs = [[lat, lon] for lat, lon in corners_ll]
                 poly_layer[0] = mission_map.generic_layer(
-                    'polygon',
-                    latlngs,
-                    {'color': '#1a7f37', 'fillOpacity': 0.15,
-                     'weight': 2, 'dashArray': '6 4'},
+                    name='polygon',
+                    args=[latlngs,
+                          {'color': '#1a7f37', 'fillOpacity': 0.15,
+                           'weight': 2, 'dashArray': '6 4'}],
                 )
             corners_lbl.set_text(
                 f'{len(corners_ll)} corner{"s" if len(corners_ll) != 1 else ""}' +
@@ -1118,8 +1118,9 @@ class NiceGuiNode(Node):
             for i, pts in enumerate(swaths):
                 latlngs = [[lat, lon] for lat, lon in pts]
                 lyr = mission_map.generic_layer(
-                    'polyline', latlngs,
-                    {'color': '#0969da', 'weight': 2, 'opacity': 0.85},
+                    name='polyline',
+                    args=[latlngs,
+                          {'color': '#0969da', 'weight': 2, 'opacity': 0.85}],
                 )
                 swath_layers.append(lyr)
 
