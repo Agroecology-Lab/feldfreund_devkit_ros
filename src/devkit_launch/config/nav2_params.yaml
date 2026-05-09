@@ -106,6 +106,16 @@ global_costmap:
       publish_frequency: 1.0
       global_frame: map
       robot_base_frame: base_link
+      # Rolling window so the costmap follows the robot.
+      # Without this the costmap is fixed at the map origin (0,0) with Nav2's
+      # 10×10 m default, leaving the robot's footprint partially outside the
+      # valid region and causing NavfnPlanner to refuse every segment.
+      # There is no static occupancy map, so a rolling global is the right
+      # pattern here. Size (100 m) comfortably spans any single waypoint-to-
+      # waypoint segment; raise if route legs exceed ~80 m in the field.
+      rolling_window: true
+      width: 100
+      height: 100
       footprint: "[[0.3, 0.25], [0.3, -0.25], [-0.3, -0.25], [-0.3, 0.25]]"
       resolution: 0.1
       track_unknown_space: false
