@@ -338,10 +338,16 @@ class NiceGuiNode(Node):
         self.create_subscription(Bool,         'bumper/back',         self.update_bumper_back,         SAFETY_QOS)
         self.create_subscription(Bool,         'estop/front',         self.update_estop_front,         SAFETY_QOS)
         self.create_subscription(Bool,         'estop/back',          self.update_estop_back,          SAFETY_QOS)
-        self.create_subscription(Odometry,     '/odometry/global',
-                                 lambda m: setattr(self, 'latest_odom', m), 10)
+        # fusioncore publishes on /fusion/odom (RELIABLE, depth 100). The old
+        # /odometry/global was from fake_nav2_server, which we no longer run.
+        _ODOM_QOS = QoSProfile(
+            depth=10,
+            reliability=ReliabilityPolicy.RELIABLE,
+        )
+        self.create_subscription(Odometry,     '/fusion/odom',
+                                 lambda m: setattr(self, 'latest_odom', m), _ODOM_QOS)
         self.create_subscription(String,       '/current_node',
-                                 lambda m: setattr(self, 'topo_current', m.data), 10)
+                                 lambda m: setattr(self, 'topo_current', m.data), _SENSOR_QOS)
 
         self._topo_doc:  dict            = {}
         self.topo_nodes: dict[str, dict] = _demo_nodes()
@@ -738,8 +744,30 @@ class NiceGuiNode(Node):
             return
         if self.latest_odom is None:
             self.f2c_save_status = 'ERROR: no odometry'; return
-        if self.latest_gps is None or self.latest_gps.status.status < 0:
-            self.f2c_save_status = 'ERROR: no GPS fix'; return
+        if self.latest_gps is None:
+            self.f2c_save_status = 'ERROR: no GPS message on /gnss/fix yet'; return
+
+        # Don't gate on status.status — drivers (notably ublox) often publish -1
+        # even with a valid autonomous fix until their configured fix mode is
+        # achieved. Just check that lat/lon are usable.
+        import math
+        _lat = self.latest_gps.latitude
+        _lon = self.latest_gps.longitude
+        _status = self.latest_gps.status.status
+        if not (math.isfinite(_lat) and math.isfinite(_lon)):
+            self.f2c_save_status = (
+                f'ERROR: GPS lat/lon not finite ({_lat}, {_lon}) status={_status}')
+            return
+        if abs(_lat) < 1e-9 and abs(_lon) < 1e-9:
+            self.f2c_save_status = (
+                f'ERROR: GPS lat/lon are 0,0 — no fix yet (status={_status})')
+            return
+        if _status < 0:
+            # Permitted, just note it in the log so you know what you got.
+            self.get_logger().warn(
+                f'save_f2c_rows: proceeding with status={_status} '
+                f'(lat={_lat:.7f}, lon={_lon:.7f})')
+
         if not self._topo_doc:
             self.f2c_save_status = 'ERROR: map not loaded'; return
 
