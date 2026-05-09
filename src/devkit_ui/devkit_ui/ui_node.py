@@ -492,8 +492,16 @@ class NiceGuiNode(Node):
 
         x = round(self.latest_odom.pose.pose.position.x, 3)
         y = round(self.latest_odom.pose.pose.position.y, 3)
+        # connect_to: prefer the localised current node, else fall back to the
+        # node the user has highlighted in the sidebar. Without a fallback, the
+        # node would be dropped with edges:[] when /current_node is silent —
+        # which it commonly is in this stack.
         connect_to = (self.topo_current
                       if self.topo_current not in ('—', 'none', 'None', '', None) else None)
+        if connect_to and connect_to not in self.topo_nodes:
+            connect_to = None
+        if not connect_to and self.topo_selected and self.topo_selected in self.topo_nodes:
+            connect_to = self.topo_selected
         map_name  = self._topo_doc.get('name', 'mixed_test_map')
         nav_frame = self._topo_doc.get('transformation', {}).get('topo_frame_id', 'map')
         is_row    = row_id is not None
@@ -746,8 +754,10 @@ class NiceGuiNode(Node):
     def save_f2c_rows_to_topo(self, prefix: str, row_id_start: int) -> None:
         """
         Project each F2C swath's first/last point to the map frame using the
-        current (odom_xy, gps_latlon) as a single anchor, and drop a pair of
-        topo nodes per row joined by a `limbic_row_follow` edge.
+        current (odom_xy, gps_latlon) as a single anchor, drop a topo node pair
+        per row joined by `limbic_row_follow`, and wire headland-turn edges
+        between consecutive rows + endpoints to the robot's current node so
+        the topo planner has a connected path through the field.
         """
         prefix = re.sub(r'[^A-Z0-9_]', '',
                         (prefix or '').strip().upper().replace(' ', '_'))
@@ -797,9 +807,21 @@ class NiceGuiNode(Node):
         nav_frame = self._topo_doc.get('transformation', {}).get('topo_frame_id', 'map')
         timestamp = datetime.now(timezone.utc).strftime('%d-%m-%Y_%H-%M-%S')
 
+        # connect_to: where to splice the row chain into the existing graph.
+        # Prefer the localised current node, fall back to the user's selection
+        # in the sidebar, fall back to None (chain dropped standalone).
+        connect_to = (self.topo_current
+                      if self.topo_current not in ('—', 'none', 'None', '', None)
+                      else None)
+        if connect_to and connect_to not in self.topo_nodes:
+            connect_to = None
+        if not connect_to and self.topo_selected and self.topo_selected in self.topo_nodes:
+            connect_to = self.topo_selected
+
         new_topo_nodes = dict(self.topo_nodes)
         new_entries: list = []
-        added: list = []
+        added: list = []          # row ids actually added (in order)
+        row_names: dict = {}      # rid -> (in_name, out_name) for chaining
         skipped: list = []
 
         verts = [{'x': -0.5, 'y': -0.5}, {'x':  0.5, 'y': -0.5},
@@ -855,24 +877,205 @@ class NiceGuiNode(Node):
                          'gps_lat': round(out_lat, 7), 'gps_lon': round(out_lon, 7)},
             }
             added.append(rid)
+            row_names[rid] = (in_name, out_name)
 
         if not added:
             self.f2c_save_status = 'ERROR: nothing added (all names already taken)'
             return
 
+        # ── Wire headland-turn edges between consecutive rows ────────────────
+        # R{i}_OUT <-> R{i+1}_IN via navigate_to_pose. Bidirectional so the
+        # planner can run rows in any order or reverse direction.
+        for a_rid, b_rid in zip(added, added[1:]):
+            a_out = row_names[a_rid][1]
+            b_in  = row_names[b_rid][0]
+
+            # in-memory
+            a_e = list(new_topo_nodes[a_out]['edges'])
+            if b_in not in a_e:
+                a_e.append(b_in)
+                new_topo_nodes[a_out] = {**new_topo_nodes[a_out], 'edges': a_e}
+            b_e = list(new_topo_nodes[b_in]['edges'])
+            if a_out not in b_e:
+                b_e.append(a_out)
+                new_topo_nodes[b_in] = {**new_topo_nodes[b_in], 'edges': b_e}
+
+            # disk: a_out and b_in are both in new_entries, mutate in place
+            for entry in new_entries:
+                n = entry['node']
+                if n['name'] == a_out and not any(
+                        e.get('node') == b_in for e in n.get('edges', [])):
+                    n['edges'].append({'action': _NAV_ACTION,
+                                       'edge_id': f'{a_out}_{b_in}', 'node': b_in})
+                elif n['name'] == b_in and not any(
+                        e.get('node') == a_out for e in n.get('edges', [])):
+                    n['edges'].append({'action': _NAV_ACTION,
+                                       'edge_id': f'{b_in}_{a_out}', 'node': a_out})
+
+        # ── Splice into existing graph via connect_to ────────────────────────
+        # connect_to <-> first IN and connect_to <-> last OUT. The connect_to
+        # node lives in file_doc, not new_entries, so its file-side edge is
+        # patched inside _modify below.
+        graph_splice: list = []  # (existing_node_name, new_node_name) pairs
+        if connect_to:
+            first_in = row_names[added[0]][0]
+            last_out = row_names[added[-1]][1]
+
+            for tgt in (first_in, last_out):
+                # in-memory: connect_to → tgt
+                c_e = list(new_topo_nodes[connect_to]['edges'])
+                if tgt not in c_e:
+                    c_e.append(tgt)
+                    new_topo_nodes[connect_to] = {
+                        **new_topo_nodes[connect_to], 'edges': c_e}
+                # in-memory: tgt → connect_to
+                t_e = list(new_topo_nodes[tgt]['edges'])
+                if connect_to not in t_e:
+                    t_e.append(connect_to)
+                    new_topo_nodes[tgt] = {**new_topo_nodes[tgt], 'edges': t_e}
+                # disk: tgt → connect_to (tgt is in new_entries)
+                for entry in new_entries:
+                    n = entry['node']
+                    if n['name'] == tgt and not any(
+                            e.get('node') == connect_to for e in n.get('edges', [])):
+                        n['edges'].append({
+                            'action': _NAV_ACTION,
+                            'edge_id': f'{tgt}_{connect_to}', 'node': connect_to,
+                        })
+                # disk: connect_to → tgt — patch in _modify
+                graph_splice.append((connect_to, tgt))
+
         self.topo_nodes = new_topo_nodes
-        skip_str = f' (skipped {len(skipped)} dup ids)' if skipped else ''
-        self.f2c_save_status = f'writing {len(added)} rows · {prefix}{skip_str}…'
+        skip_str   = f' (skipped {len(skipped)} dup ids)' if skipped else ''
+        splice_str = f' · spliced @ {connect_to}' if connect_to else ' · standalone'
+        self.f2c_save_status = (
+            f'writing {len(added)} rows · {prefix}{splice_str}{skip_str}…')
 
         def _modify(file_doc):
-            existing = {e.get('node', {}).get('name') for e in file_doc.get('nodes', [])}
+            existing = {e.get('node', {}).get('name')
+                        for e in file_doc.get('nodes', [])}
             for entry in new_entries:
                 if entry['node']['name'] in existing:
                     continue
                 file_doc.setdefault('nodes', []).append(entry)
+            # connect_to lives in file_doc already — patch its outgoing edges
+            for src, tgt in graph_splice:
+                for entry in file_doc.get('nodes', []):
+                    n = entry.get('node', {})
+                    if n.get('name') != src:
+                        continue
+                    if not any(e.get('node') == tgt for e in n.get('edges', [])):
+                        n.setdefault('edges', []).append({
+                            'action': _NAV_ACTION,
+                            'edge_id': f'{src}_{tgt}', 'node': tgt,
+                        })
+                    break
 
-        self._persist_and_reload(_modify, 'f2c_save_status',
-                                  f'saved {len(added)} rows · {prefix}{skip_str}')
+        self._persist_and_reload(
+            _modify, 'f2c_save_status',
+            f'saved {len(added)} rows · {prefix}{splice_str}{skip_str}')
+
+    # ── Repair row connectivity ──────────────────────────────────────────────
+
+    def repair_row_connectivity(self, connect_to: Optional[str] = None) -> None:
+        """
+        Add navigate_to_pose edges between consecutive row IN/OUT pairs and,
+        if `connect_to` is given (and exists), splice the chain endpoints into
+        that node. Idempotent: skips edges that already exist.
+
+        Reads row groupings from in-memory topo_nodes (meta.row_id + meta.row_role)
+        and writes the same edge additions to the on-disk YAML via
+        _persist_and_reload.
+        """
+        if not self._topo_doc:
+            self.f2c_save_status = 'ERROR: map not loaded'; return
+
+        # Group row nodes by row_id from in-memory state
+        rows: dict = {}
+        for nm, nd in self.topo_nodes.items():
+            meta = nd.get('meta', {}) or {}
+            rid = meta.get('row_id')
+            role = meta.get('row_role')
+            if rid is None or role not in ('entry', 'exit'):
+                continue
+            try:
+                rid_int = int(rid)
+            except (TypeError, ValueError):
+                continue
+            rows.setdefault(rid_int, {})[role] = nm
+
+        if not rows:
+            self.f2c_save_status = 'ERROR: no row nodes found'
+            return
+
+        sorted_rids = sorted(rows)
+        if connect_to and connect_to not in self.topo_nodes:
+            self.get_logger().warn(
+                f'repair: connect_to={connect_to!r} not in map, ignoring')
+            connect_to = None
+
+        # Build the in-memory edge additions and remember them so _modify can
+        # mirror the same set into file_doc. Pairs of (src_name, tgt_name) for
+        # each navigate_to_pose edge to ensure exists.
+        wanted_edges: list = []
+
+        for a_rid, b_rid in zip(sorted_rids, sorted_rids[1:]):
+            a_out = rows[a_rid].get('exit')
+            b_in  = rows[b_rid].get('entry')
+            if not (a_out and b_in):
+                continue
+            wanted_edges.append((a_out, b_in))
+            wanted_edges.append((b_in, a_out))
+
+        if connect_to:
+            first_in = rows[sorted_rids[0]].get('entry')
+            last_out = rows[sorted_rids[-1]].get('exit')
+            for tgt in (first_in, last_out):
+                if not tgt:
+                    continue
+                wanted_edges.append((connect_to, tgt))
+                wanted_edges.append((tgt, connect_to))
+
+        # Apply to in-memory
+        new_topo_nodes = dict(self.topo_nodes)
+        added_count = 0
+        for src, tgt in wanted_edges:
+            if src not in new_topo_nodes:
+                continue
+            cur = list(new_topo_nodes[src].get('edges', []))
+            if tgt in cur:
+                continue
+            cur.append(tgt)
+            new_topo_nodes[src] = {**new_topo_nodes[src], 'edges': cur}
+            added_count += 1
+        self.topo_nodes = new_topo_nodes
+
+        if added_count == 0:
+            self.f2c_save_status = (
+                f'repair: already wired ({len(sorted_rids)} rows)')
+            return
+
+        self.f2c_save_status = f'repair: adding {added_count} edges…'
+
+        def _modify(file_doc):
+            for src, tgt in wanted_edges:
+                for entry in file_doc.get('nodes', []):
+                    n = entry.get('node', {})
+                    if n.get('name') != src:
+                        continue
+                    if any(e.get('node') == tgt for e in n.get('edges', [])):
+                        break
+                    n.setdefault('edges', []).append({
+                        'action': _NAV_ACTION,
+                        'edge_id': f'{src}_{tgt}', 'node': tgt,
+                    })
+                    break
+
+        target_str = (f' @ {connect_to}' if connect_to
+                      else ' — NO SPLICE, chain still isolated')
+        self._persist_and_reload(
+            _modify, 'f2c_save_status',
+            f'repair: wired {added_count} edges{target_str}')
 
     # ── Delete topo nodes / rows ─────────────────────────────────────────────
 
@@ -1372,6 +1575,12 @@ class NiceGuiNode(Node):
                 clear_btn = ui.button('Clear').props(
                     'outline no-caps').classes('w-full mt-1')
 
+                repair_btn = ui.button('Repair Connectivity').props(
+                    'outline no-caps').classes('w-full mt-1')
+                repair_btn.tooltip(
+                    'Wire navigate_to_pose edges between consecutive row '
+                    'IN/OUT pairs. Splices into current node if localised.')
+
                 f2c_status = ui.label('').classes('text-xs font-mono mt-2').style(
                     'color:#57606a;word-break:break-word')
                 f2c_save_lbl = ui.label('').classes('text-xs font-mono mt-1').style(
@@ -1492,6 +1701,58 @@ class NiceGuiNode(Node):
                 int(f2c_row_id_start.value or 1),
             )
         save_btn.on_click(do_save)
+
+        async def do_repair():
+            # Best-guess default for the splice base: localised current node,
+            # else whatever the user has highlighted in the sidebar, else blank.
+            cur = self.topo_current
+            default_base = ''
+            if cur not in ('—', 'none', 'None', '', None) and cur in self.topo_nodes:
+                default_base = cur
+            elif self.topo_selected and self.topo_selected in self.topo_nodes:
+                default_base = self.topo_selected
+
+            row_count = sum(
+                1 for nd in self.topo_nodes.values()
+                if nd.get('meta', {}).get('row_id') is not None
+                and nd.get('meta', {}).get('row_role') == 'entry'
+            )
+
+            with ui.dialog() as d, ui.card():
+                ui.label('Repair row connectivity').classes('font-semibold')
+                ui.label(
+                    f'Add navigate_to_pose edges between {row_count} consecutive '
+                    f'row IN/OUT pairs. Optionally splice the chain into a base '
+                    f'node so the planner can reach it.'
+                ).classes('text-xs').style('color:#57606a;max-width:340px')
+                base_input = ui.input(
+                    label='Splice into',
+                    placeholder='leave blank for chain only',
+                    value=default_base,
+                ).classes('w-full mt-2')
+                ui.label(
+                    'Without a base node the chain is wired internally but '
+                    'remains unreachable from the rest of the graph.'
+                ).classes('text-xs').style(
+                    'color:#9a6700;max-width:340px;margin-top:4px')
+                with ui.row().classes('w-full justify-end gap-2 mt-2'):
+                    ui.button('Cancel',
+                              on_click=lambda: d.submit('cancel')).props(
+                                  'flat no-caps')
+                    ui.button('Repair', color='positive',
+                              on_click=lambda: d.submit('ok')).props('no-caps')
+
+            result = await d
+            if result != 'ok':
+                return
+
+            base = (base_input.value or '').strip()
+            if base and base not in self.topo_nodes:
+                self.f2c_save_status = f'ERROR: base node {base!r} not in map'
+                return
+            self.repair_row_connectivity(connect_to=base or None)
+
+        repair_btn.on_click(do_repair)
 
         # Status pump for the save button — runs lightly, only updates on change.
         _save_prev = ['']
