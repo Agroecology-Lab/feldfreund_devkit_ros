@@ -1,14 +1,14 @@
 meta:
-  last_updated: 08-03-2026_12-00-00
+  last_updated: 09-05-2026_00-00-00
   origin:
-    latitude: 53.268642038
-    longitude: -0.524509505881
+    latitude: 53.312012987
+    longitude: -0.451990580
     altitude: 0
 metric_map: mixed_test_map
 name: mixed_test_map
 pointset: mixed_test_map
 transformation:
-  topo_frame_id: mixed_test_map
+  topo_frame_id: map
   parent: map
   rotation:
     w: 1.0
@@ -100,6 +100,7 @@ nodes:
       edge_id: N1_N0
       node: N0
     name: N1
+    nav_frame: map
     pose:
       orientation:
         w: 1.0
@@ -135,6 +136,7 @@ nodes:
       edge_id: N2_N1
       node: N1
     name: N2
+    nav_frame: map
     pose:
       orientation:
         w: 1.0
@@ -173,6 +175,7 @@ nodes:
       edge_id: N3_N10
       node: N10
     name: N3
+    nav_frame: map
     pose:
       orientation:
         w: 1.0
@@ -208,6 +211,7 @@ nodes:
       edge_id: N4_N3
       node: N3
     name: N4
+    nav_frame: map
     pose:
       orientation:
         w: 1.0
@@ -243,6 +247,7 @@ nodes:
       edge_id: N5_N4
       node: N4
     name: N5
+    nav_frame: map
     pose:
       orientation:
         w: 0.707
@@ -310,7 +315,7 @@ nodes:
       edge_id: N0_N1
       node: N1
     name: N0
-    nav_frame: mixed_test_map
+    nav_frame: map
     pose:
       orientation:
         w: 1.0
@@ -345,7 +350,7 @@ nodes:
       edge_id: N10_N3
       node: N3
     name: N10
-    nav_frame: mixed_test_map
+    nav_frame: map
     pose:
       orientation:
         w: 1.0
