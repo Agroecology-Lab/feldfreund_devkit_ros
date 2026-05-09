@@ -16,7 +16,7 @@ from launch_ros.actions import Node
 
 def _topo_nav_nodes(tmap2_file, sim_condition, real_condition, devkit_launch_pkg):
     """Inlined topo nav stack with sim/real conditional Nav2 backends.
-    
+
     Replaces the upstream topological_navigation.launch.py which hardcodes
     fake_nav2_server unconditionally. Inlining lets us route to either
     fake_nav2_server (sim) or real Nav2 (hardware).
@@ -65,6 +65,10 @@ def _topo_nav_nodes(tmap2_file, sim_condition, real_condition, devkit_launch_pkg
         ]),
 
         # 3b. Real Nav2 — REAL HARDWARE ONLY
+        # Two params files are passed:
+        #   nav2_params.yaml         — all node configs
+        #   nav2_lifecycle_params.yaml — overrides lifecycle_manager node_names
+        #                               to exclude collision_monitor (no sensor)
         TimerAction(period=2.0, actions=[
             IncludeLaunchDescription(
                 PythonLaunchDescriptionSource(
@@ -80,6 +84,20 @@ def _topo_nav_nodes(tmap2_file, sim_condition, real_condition, devkit_launch_pkg
                     'params_file': os.path.join(
                         devkit_launch_pkg, 'config', 'nav2_params.yaml'),
                 }.items(),
+            ),
+            # Second lifecycle manager params override — must be a separate Node
+            # because navigation_launch.py only accepts one params_file arg.
+            # This remaps lifecycle_manager_navigation's node_names to drop
+            # collision_monitor. Launched after the include so the node exists.
+            Node(
+                package='nav2_lifecycle_manager',
+                executable='lifecycle_manager',
+                name='lifecycle_manager_navigation',
+                output='screen',
+                parameters=[
+                    os.path.join(devkit_launch_pkg, 'config', 'nav2_lifecycle_params.yaml'),
+                    {'autostart': True},
+                ],
             ),
         ]),
 
@@ -223,31 +241,19 @@ def generate_launch_description():
         ),
 
         # ── FusionCore UKF ───────────────────────────────────────────────────
-        # fusioncore is a lifecycle node. It subscribes to nothing and publishes
-        # nothing (no odom->base_link TF, no /fusion/odom) until transitioned
-        # through configure -> active. lifecycle_manager_fusioncore does this
-        # automatically on startup via autostart=true.
+        # Launched directly — NOT wrapped in a lifecycle_manager.
+        #
+        # fusioncore implements the Nav2 lifecycle state machine internally and
+        # self-transitions configure → active on startup. It does NOT implement
+        # the bond heartbeat protocol that nav2_lifecycle_manager requires, so
+        # wrapping it causes a guaranteed bond timeout on every boot regardless
+        # of the timeout value set.
         Node(
             package='fusioncore_ros',
             executable='fusioncore_node',
             name='fusioncore',
             parameters=[fusioncore_config],
             output='screen',
-        ),
-
-        Node(
-            package='nav2_lifecycle_manager',
-            executable='lifecycle_manager',
-            name='lifecycle_manager_fusioncore',
-            output='screen',
-            parameters=[{
-                'autostart':    True,
-                'node_names':   ['fusioncore'],
-                # Increased from 4.0 — fusioncore TF validation + sensor
-                # subscription setup takes longer than 4 s on startup,
-                # causing a spurious bond timeout and aborting bringup.
-                'bond_timeout': 10.0,
-            }],
         ),
 
         # ── Static map -> odom TF (real hardware only) ───────────────────────
