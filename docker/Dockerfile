@@ -228,6 +228,16 @@ RUN for i in 1 2 3 4 5; do \
       (echo "fusioncore attempt $i failed, retrying in 15s..." && sleep 15); \
     done
 
+# Patch fusioncore: use BEST_EFFORT QoS for /gnss/fix subscriptions.
+# ublox_dgnss publishes BEST_EFFORT (sensor convention); fusioncore's default
+# `10` shorthand is RELIABLE, which silently never connects → no GPS to fuse.
+# Matches both gnss_sub_ and gnss2_sub_ (dual-antenna).
+# If upstream changes the subscription form, the final grep will halt the build.
+RUN awk '/create_subscription<sensor_msgs::msg::NavSatFix>/ { in_sub=1 } in_sub && /, 10,/ { sub(/, 10,/, ", rclcpp::SensorDataQoS(),"); in_sub=0 } { print }' \
+      src/fusioncore/fusioncore_ros/src/fusion_node.cpp > /tmp/_fc.cpp && \
+    mv /tmp/_fc.cpp src/fusioncore/fusioncore_ros/src/fusion_node.cpp && \
+    grep -q "rclcpp::SensorDataQoS()" src/fusioncore/fusioncore_ros/src/fusion_node.cpp
+
 RUN for i in 1 2 3 4 5; do \
       GIT_TERMINAL_PROMPT=0 git clone --depth 1 -b master \
         https://github.com/LCAS/sentor src/sentor && break || \
