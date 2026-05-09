@@ -9,6 +9,12 @@
 #
 # To enable obstacle avoidance later: add LaserScan plugin to local_costmap
 # obstacle_layer.observation_sources and configure the scan topic.
+#
+# collision_monitor is intentionally absent from this file.
+# navigation_launch.py includes it in the managed node list by default, so we
+# override that by passing an explicit node_names list in devkit.launch.py
+# (see the nav2_bringup launch_arguments there). Until a sensor is available
+# the collision monitor cannot be configured and crashes on startup.
 
 bt_navigator:
   ros__parameters:
@@ -180,20 +186,3 @@ velocity_smoother:
     max_decel: [-2.5, 0.0, -3.2]
     odom_topic: /fusion/odom
     odom_duration: 0.1
-
-# ── Collision Monitor ─────────────────────────────────────────────────────────
-# No obstacle sensors on this robot. Configured with empty sources so the node
-# starts cleanly. Add polygon + observation_sources entries here when a lidar
-# or ultrasonic layer is introduced.
-collision_monitor:
-  ros__parameters:
-    base_frame_id: base_link
-    odom_frame_id: odom
-    cmd_vel_in_topic: cmd_vel_smoothed
-    cmd_vel_out_topic: cmd_vel
-    state_topic: collision_monitor_state
-    transform_tolerance: 0.5
-    source_timeout: 5.0
-    stop_pub_timeout: 2.0
-    polygons: []
-    observation_sources: []
