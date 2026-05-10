@@ -10,11 +10,11 @@
 # To enable obstacle avoidance later: add LaserScan plugin to local_costmap
 # obstacle_layer.observation_sources and configure the scan topic.
 #
-# collision_monitor is intentionally absent from this file.
-# navigation_launch.py includes it in the managed node list by default, so we
-# override that by passing an explicit node_names list in devkit.launch.py
-# (see the nav2_bringup launch_arguments there). Until a sensor is available
-# the collision monitor cannot be configured and crashes on startup.
+# collision_monitor is included with empty observation_sources so it starts
+# cleanly without a sensor. The lifecycle_manager node_names override below
+# keeps it in the managed list. When a lidar or ultrasonic is available:
+#   1. Add a real polygon + source under collision_monitor.ros__parameters
+#   2. Remove or update the stub accordingly
 
 bt_navigator:
   ros__parameters:
@@ -197,13 +197,28 @@ velocity_smoother:
     odom_topic: /fusion/odom
     odom_duration: 0.1
 
+# Stub config — no sensors yet. The node starts and passes velocity commands
+# through unchanged. Add polygons + observation_sources when a lidar or
+# ultrasonic is wired up, then remove the empty-list overrides below.
+collision_monitor:
+  ros__parameters:
+    base_frame_id: "base_link"
+    odom_frame_id: "odom"
+    cmd_vel_in_topic: "cmd_vel_smoothed"
+    cmd_vel_out_topic: "cmd_vel"
+    state_topic: "collision_monitor_state"
+    transform_tolerance: 0.5
+    source_timeout: 5.0
+    stop_pub_timeout: 2.0
+    polygons: []
+    observation_sources: []
+
 lifecycle_manager_navigation:
   ros__parameters:
-    # Excludes collision_monitor — it requires observation_sources (a sensor)
-    # which we don't have yet. Remove this section and add collision_monitor
-    # config to this file once a lidar or ultrasonic is wired up.
-    # This override is loaded by navigation_launch.py via its params_file arg,
-    # so no second lifecycle_manager node is needed in devkit.launch.py.
+    # node_names controls which nodes the lifecycle manager brings up.
+    # collision_monitor is now included — it starts cleanly with the empty
+    # stub above. Remove it from this list only if you strip the node entirely
+    # from navigation_launch.py (not recommended; just keep the stub instead).
     node_names:
       - controller_server
       - smoother_server
@@ -212,3 +227,4 @@ lifecycle_manager_navigation:
       - bt_navigator
       - waypoint_follower
       - velocity_smoother
+      - collision_monitor
