@@ -8,8 +8,8 @@
 #   /odom                       → /odom/wheels
 #
 # No separate IMU. Heading supplied by dual-antenna NAV-RELPOSNED shim.
-# BNO085 is present on the Lizard board but not yet published by devkit_driver.
-# Uncomment imu.* params once /imu/data is wired up.
+# BNO085 is wired up: devkit_driver now publishes /imu/data from the ImuBno085
+# Lizard module. imu.* params below are active.
 #
 # Validate after launch:
 #   ros2 topic hz /fusion/odom
@@ -104,9 +104,9 @@ fusioncore:
 
     # ── IMU (not yet wired) ────────────────────────────────────────────────────
     # BNO085 on Lizard board. Enable once devkit_driver publishes /imu/data.
-    # imu.gyro_noise:   0.005
-    # imu.accel_noise:  0.1
-    # imu.frame_id:     imu_link
+    imu.gyro_noise:   0.005
+    imu.accel_noise:  0.1
+    imu.frame_id:     imu_link
 
     # ── UKF process noise ─────────────────────────────────────────────────────
     # Defaults are reasonable for a slow field robot. Tune if yaw drifts
