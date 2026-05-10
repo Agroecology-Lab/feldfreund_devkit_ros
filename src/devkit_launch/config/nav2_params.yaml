@@ -197,22 +197,6 @@ velocity_smoother:
     odom_topic: /fusion/odom
     odom_duration: 0.1
 
-# collision_monitor is launched by navigation_launch.py and cannot easily be
-# excluded via node_names override (nav2_bringup passes node_names as an inline
-# Python dict after the params_file, overriding our YAML). Give it a valid
-# no-op config so it starts cleanly and passes cmd_vel through unmodified.
-# Add real observation_sources here once a lidar or ultrasonic is wired up.
-collision_monitor:
-  ros__parameters:
-    base_frame_id: "base_link"
-    odom_frame_id: "odom"
-    cmd_vel_in_topic: "cmd_vel_smoothed"
-    cmd_vel_out_topic: "cmd_vel"
-    transform_tolerance: 0.5
-    source_timeout: 5.0
-    stop_pub_timeout: 2.0
-    observation_sources: []
-
 lifecycle_manager_navigation:
   ros__parameters:
     # Excludes collision_monitor — it requires observation_sources (a sensor)
