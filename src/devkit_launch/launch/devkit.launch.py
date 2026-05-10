@@ -15,6 +15,114 @@ from launch.conditions import IfCondition
 from launch_ros.actions import Node
 
 
+def _nav2_nodes(params_file, real_condition):
+    """Explicit Nav2 node declarations for real hardware.
+
+    Replaces IncludeLaunchDescription of navigation_launch.py so we can
+    omit collision_monitor, which requires observation_sources (a sensor)
+    and throws InvalidParameterValueException on startup in Nav2 Jazzy when
+    no sensor is configured — even with observation_sources: [] in the YAML.
+    Re-add collision_monitor here once a lidar or ultrasonic is wired up.
+
+    Remappings mirror those in navigation_launch.py:
+      cmd_vel -> cmd_vel_nav  (controller_server, behavior_server)
+      cmd_vel -> cmd_vel_nav  (velocity_smoother input, output stays cmd_vel)
+    tf/tf_static are remapped globally via the common remappings list.
+    """
+    remappings = [('/tf', 'tf'), ('/tf_static', 'tf_static')]
+    common = dict(
+        output='screen',
+        condition=real_condition,
+        parameters=[{'use_sim_time': False}, params_file],
+        arguments=['--ros-args', '--log-level', 'info'],
+        remappings=remappings,
+    )
+
+    return [
+        Node(
+            package='nav2_controller',
+            executable='controller_server',
+            name='controller_server',
+            remappings=remappings + [('cmd_vel', 'cmd_vel_nav')],
+            output='screen',
+            condition=real_condition,
+            parameters=[{'use_sim_time': False}, params_file],
+            arguments=['--ros-args', '--log-level', 'info'],
+        ),
+        Node(
+            package='nav2_smoother',
+            executable='smoother_server',
+            name='smoother_server',
+            **common,
+        ),
+        Node(
+            package='nav2_planner',
+            executable='planner_server',
+            name='planner_server',
+            **common,
+        ),
+        Node(
+            package='nav2_route',
+            executable='route_server',
+            name='route_server',
+            **common,
+        ),
+        Node(
+            package='nav2_behaviors',
+            executable='behavior_server',
+            name='behavior_server',
+            remappings=remappings + [('cmd_vel', 'cmd_vel_nav')],
+            output='screen',
+            condition=real_condition,
+            parameters=[{'use_sim_time': False}, params_file],
+            arguments=['--ros-args', '--log-level', 'info'],
+        ),
+        Node(
+            package='nav2_bt_navigator',
+            executable='bt_navigator',
+            name='bt_navigator',
+            **common,
+        ),
+        Node(
+            package='nav2_waypoint_follower',
+            executable='waypoint_follower',
+            name='waypoint_follower',
+            **common,
+        ),
+        Node(
+            package='nav2_velocity_smoother',
+            executable='velocity_smoother',
+            name='velocity_smoother',
+            remappings=remappings + [('cmd_vel', 'cmd_vel_nav')],
+            output='screen',
+            condition=real_condition,
+            parameters=[{'use_sim_time': False}, params_file],
+            arguments=['--ros-args', '--log-level', 'info'],
+        ),
+        Node(
+            package='opennav_docking',
+            executable='opennav_docking',
+            name='docking_server',
+            **common,
+        ),
+        # collision_monitor intentionally omitted — no sensor available.
+        # Add it back here with a proper params_file entry once a lidar
+        # or ultrasonic is connected.
+        Node(
+            package='nav2_lifecycle_manager',
+            executable='lifecycle_manager',
+            name='lifecycle_manager_navigation',
+            output='screen',
+            condition=real_condition,
+            parameters=[
+                {'use_sim_time': False},
+                {'autostart': True},
+                params_file,
+            ],
+        ),
+    ]
+
+
 def _topo_nav_nodes(tmap2_file, sim_condition, real_condition, devkit_launch_pkg):
     """Inlined topo nav stack with sim/real conditional Nav2 backends.
 
@@ -26,6 +134,8 @@ def _topo_nav_nodes(tmap2_file, sim_condition, real_condition, devkit_launch_pkg
     rviz_cfg = os.path.join(topo_share, 'rviz', 'topological_navigation.rviz')
     map_path = tmap2_file or os.path.join(
         topo_share, 'config', 'mixed_actions_map.yaml')
+
+    nav2_params = os.path.join(devkit_launch_pkg, 'config', 'nav2_params.yaml')
 
     return [
         # 1. Map Manager — loads and publishes the topological map
@@ -66,36 +176,11 @@ def _topo_nav_nodes(tmap2_file, sim_condition, real_condition, devkit_launch_pkg
         ]),
 
         # 3b. Real Nav2 — REAL HARDWARE ONLY
-        # Two params files are passed:
-        #   nav2_params.yaml         — all node configs
-        #   nav2_lifecycle_params.yaml — overrides lifecycle_manager node_names
-        #                               to exclude collision_monitor (no sensor)
-        TimerAction(period=2.0, actions=[
-            IncludeLaunchDescription(
-                PythonLaunchDescriptionSource(
-                    os.path.join(
-                        get_package_share_directory('nav2_bringup'),
-                        'launch', 'navigation_launch.py'
-                    )
-                ),
-                condition=real_condition,
-                launch_arguments={
-                    'use_sim_time': 'false',
-                    'autostart': 'true',
-                    'params_file': os.path.join(
-                        devkit_launch_pkg, 'config', 'nav2_params.yaml'),
-                    # Disable collision_monitor — it requires observation_sources
-                    # (a sensor) and aborts with SIGABRT on an empty list in
-                    # Nav2 Jazzy. Re-enable once a lidar or ultrasonic is wired up.
-                    'use_collision_monitor': 'false',
-                }.items(),
-            ),
-            # node_names override (excludes collision_monitor) lives directly
-            # in nav2_params.yaml under lifecycle_manager_navigation.ros__parameters,
-            # so navigation_launch.py picks it up via its params_file arg.
-            # No second lifecycle_manager node is needed — a duplicate caused
-            # both managers to race and fail on every startup.
-        ]),
+        # Nodes declared explicitly (not via navigation_launch.py include) so
+        # collision_monitor can be cleanly omitted until a sensor is available.
+        # node_names in nav2_params.yaml controls which nodes the lifecycle
+        # manager brings up — it must match the nodes declared here.
+        TimerAction(period=2.0, actions=_nav2_nodes(nav2_params, real_condition)),
 
         # 4. Topological navigation server (delayed 3 s)
         TimerAction(period=3.0, actions=[
