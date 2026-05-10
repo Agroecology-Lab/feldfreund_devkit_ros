@@ -86,20 +86,11 @@ def _topo_nav_nodes(tmap2_file, sim_condition, real_condition, devkit_launch_pkg
                         devkit_launch_pkg, 'config', 'nav2_params.yaml'),
                 }.items(),
             ),
-            # Second lifecycle manager params override — must be a separate Node
-            # because navigation_launch.py only accepts one params_file arg.
-            # This remaps lifecycle_manager_navigation's node_names to drop
-            # collision_monitor. Launched after the include so the node exists.
-            Node(
-                package='nav2_lifecycle_manager',
-                executable='lifecycle_manager',
-                name='lifecycle_manager_navigation',
-                output='screen',
-                parameters=[
-                    os.path.join(devkit_launch_pkg, 'config', 'nav2_lifecycle_params.yaml'),
-                    {'autostart': True},
-                ],
-            ),
+            # node_names override (excludes collision_monitor) lives directly
+            # in nav2_params.yaml under lifecycle_manager_navigation.ros__parameters,
+            # so navigation_launch.py picks it up via its params_file arg.
+            # No second lifecycle_manager node is needed — a duplicate caused
+            # both managers to race and fail on every startup.
         ]),
 
         # 4. Topological navigation server (delayed 3 s)
