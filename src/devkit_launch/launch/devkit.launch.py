@@ -84,6 +84,10 @@ def _topo_nav_nodes(tmap2_file, sim_condition, real_condition, devkit_launch_pkg
                     'autostart': 'true',
                     'params_file': os.path.join(
                         devkit_launch_pkg, 'config', 'nav2_params.yaml'),
+                    # Disable collision_monitor — it requires observation_sources
+                    # (a sensor) and aborts with SIGABRT on an empty list in
+                    # Nav2 Jazzy. Re-enable once a lidar or ultrasonic is wired up.
+                    'use_collision_monitor': 'false',
                 }.items(),
             ),
             # node_names override (excludes collision_monitor) lives directly
