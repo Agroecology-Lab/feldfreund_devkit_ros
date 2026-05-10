@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """
-cog_heading_shim.py
-───────────────────
+course_over_ground.py
+─────────────────────
 Converts ublox_dgnss NAV-PVT → sensor_msgs/Imu for FusionCore.
 
 Subscribes : /rover/ubx_nav_pvt   (ublox_ubx_msgs/UBXNavPVT)
@@ -9,18 +9,19 @@ Publishes  : /gnss/heading        (sensor_msgs/Imu)
 
 Single-receiver fallback for relposned_heading_shim: when there is no second
 F9P and no dual-antenna baseline, this shim derives heading from the receiver's
-course-over-ground (head_mot from NAV-PVT), gated by ground speed and the
+course over ground (head_mot from NAV-PVT), gated by ground speed and the
 receiver's reported heading accuracy.
 
-CoG is only meaningful while the robot is moving — at low speeds the heading
-vector noise blows up. To keep /gnss/heading populated during dwells (e.g. topo
-node arrival pauses) the last accepted heading is re-published with inflated
-covariance until either a fresh fix passes the gates or STALE_TIMEOUT_S elapses.
+Course over ground is only meaningful while the robot is moving — at low speeds
+the heading vector noise blows up. To keep /gnss/heading populated during
+dwells (e.g. topo node arrival pauses) the last accepted heading is re-published
+with inflated covariance until either a fresh fix passes the gates or
+STALE_TIMEOUT_S elapses.
 
 NAV-PVT head_mot is True North referenced, NED, degrees × 1e-5.
 ROS convention: ENU yaw.  NED → ENU: yaw_ENU = π/2 − heading_NED_rad
 
-Run alongside relposned_heading_shim is safe in single-F9P mode (relposned
+Running alongside relposned_heading_shim is safe in single-F9P mode (relposned
 publishes 0 messages with no baseline). Disable this shim when upgrading to
 dual-F9P + RTK so fusioncore receives only one heading source.
 """
@@ -51,9 +52,9 @@ _STALE_VAR_INFLATE = 100.0
 _STALE_REPUB_HZ = 5.0
 
 
-class CogHeadingShim(Node):
+class CourseOverGround(Node):
     def __init__(self):
-        super().__init__('cog_heading_shim')
+        super().__init__('course_over_ground')
         self._pub = self.create_publisher(Imu, '/gnss/heading', 10)
         self._sub = self.create_subscription(
             UBXNavPVT, '/rover/ubx_nav_pvt',
@@ -66,7 +67,7 @@ class CogHeadingShim(Node):
         self._reject_count = 0
         self.create_timer(10.0, self._log_stats)
         self.create_timer(1.0 / _STALE_REPUB_HZ, self._republish_stale)
-        self.get_logger().info('cog_heading_shim ready')
+        self.get_logger().info('course_over_ground ready')
 
     def _cb(self, msg: UBXNavPVT) -> None:
         # GNSS solution must be valid before we trust any of its fields
@@ -149,7 +150,7 @@ class CogHeadingShim(Node):
 
     def _log_stats(self) -> None:
         self.get_logger().info(
-            f'cog heading shim: published={self._pub_count}  '
+            f'course_over_ground: published={self._pub_count}  '
             f'stale_repub={self._stale_count}  '
             f'rejected={self._reject_count} (slow / inaccurate / no fix)')
         self._pub_count    = 0
@@ -159,7 +160,7 @@ class CogHeadingShim(Node):
 
 def main(args=None):
     rclpy.init(args=args)
-    node = CogHeadingShim()
+    node = CourseOverGround()
     try:
         rclpy.spin(node)
     except KeyboardInterrupt:
