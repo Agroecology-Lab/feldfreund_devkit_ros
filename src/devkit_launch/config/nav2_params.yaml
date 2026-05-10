@@ -16,6 +16,11 @@
 # To re-enable: add the sensor to the collision_monitor block, add the node
 # back to _nav2_nodes() in devkit.launch.py, and add 'collision_monitor' to
 # node_names below.
+#
+# docking_server is included with a SimpleChargingDock placeholder plugin
+# so the lifecycle manager can configure/activate it cleanly with no hardware.
+# When a real dock arrives, swap the plugin block for the vendor's plugin
+# and populate `docks:` with the dock pose(s).
 
 bt_navigator:
   ros__parameters:
@@ -188,9 +193,7 @@ velocity_smoother:
     odom_topic: /fusion/odom
     odom_duration: 0.1
 
-
-
-    docking_server:
+docking_server:
   ros__parameters:
     controller_frequency: 50.0
     initial_perception_timeout: 5.0
@@ -203,8 +206,6 @@ velocity_smoother:
     fixed_frame: "odom"
     dock_backwards: false
     dock_prestaging_tolerance: 0.5
-
-    # Placeholder — no physical dock yet. Swap plugin/params when hardware arrives.
     dock_plugins: ["simple_charging_dock"]
     simple_charging_dock:
       plugin: "opennav_docking::SimpleChargingDock"
@@ -220,10 +221,6 @@ velocity_smoother:
       external_detection_rotation_pitch: -1.57
       external_detection_rotation_yaw: 0.0
       filter_coef: 0.1
-
-    # No docks registered yet — fleet is empty, nothing to navigate to.
-    #dock_database: ""
-    #docks: []
 
 lifecycle_manager_navigation:
   ros__parameters:
