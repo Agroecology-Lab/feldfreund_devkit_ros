@@ -222,8 +222,8 @@ velocity_smoother:
       filter_coef: 0.1
 
     # No docks registered yet — fleet is empty, nothing to navigate to.
-    dock_database: ""
-    docks: []
+    #dock_database: ""
+    #docks: []
 
 lifecycle_manager_navigation:
   ros__parameters:
