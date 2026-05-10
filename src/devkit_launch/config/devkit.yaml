@@ -34,6 +34,12 @@
         - imu_quat_x
         - imu_quat_y
         - imu_quat_z
+        - imu_gyr_x
+        - imu_gyr_y
+        - imu_gyr_z
+        - imu_acc_x
+        - imu_acc_y
+        - imu_acc_z
         - rdyp_level
         - vdp_level
         - heap
@@ -82,7 +88,7 @@
         default: 0
       imu_quat_w:
         type: double
-        default: 0.0
+        default: 1.0
       imu_quat_x:
         type: double
         default: 0.0
@@ -90,6 +96,24 @@
         type: double
         default: 0.0
       imu_quat_z:
+        type: double
+        default: 0.0
+      imu_gyr_x:
+        type: double
+        default: 0.0
+      imu_gyr_y:
+        type: double
+        default: 0.0
+      imu_gyr_z:
+        type: double
+        default: 0.0
+      imu_acc_x:
+        type: double
+        default: 0.0
+      imu_acc_y:
+        type: double
+        default: 0.0
+      imu_acc_z:
         type: double
         default: 0.0
       rdyp_level:
