@@ -12,8 +12,9 @@ from rclpy.executors import ExternalShutdownException
 from rclpy.node import Node
 from ament_index_python.packages import get_package_share_directory
 
-from devkit_driver.modules import (BMSHandler, BumperHandler, EStopHandler, 
-                                   OdomHandler, RobotBrainHandler, TwistHandler)
+from devkit_driver.modules import (BMSHandler, BumperHandler, EStopHandler,
+                                   ImuHandler, OdomHandler, RobotBrainHandler, TwistHandler)
+
 
 class DevkitDriver(Node):
     """Devkit node handler with defensive attribute checks for simulation support."""
@@ -21,10 +22,10 @@ class DevkitDriver(Node):
     def __init__(self, system: System):
         super().__init__('devkit_driver_node')
         self.system = system
-        
+
         # NOTE: Support both physical hardware and simulation (GHOST mode)
         assert isinstance(self.system.feldfreund, (FeldfreundHardware, FeldfreundSimulation))
-        
+
         # Defensive initialization: Only load handlers if attributes exist.
         if hasattr(self.system.feldfreund, 'robot_brain'):
             self._robot_brain_handler = RobotBrainHandler(self, self.system.feldfreund.robot_brain)
@@ -33,18 +34,24 @@ class DevkitDriver(Node):
 
         # Odometry is standard across both modes
         self._odom_handler = OdomHandler(self, self.system.odometer)
-        
+
         if hasattr(self.system.feldfreund, 'bms'):
             self._bms_handler = BMSHandler(self, self.system.feldfreund.bms)
-            
+
         if getattr(self.system.feldfreund, 'bumper', None) is not None:
             self._bumper_handler = BumperHandler(self, self.system.feldfreund.bumper, self.system.feldfreund.estop)
-            
+
         if hasattr(self.system.feldfreund, 'wheels'):
             self._twist_handler = TwistHandler(self, self.system.feldfreund.wheels)
-            
+
         if hasattr(self.system.feldfreund, 'estop'):
             self._estop_handler = EStopHandler(self, self.system.feldfreund.estop)
+
+        # BNO085 IMU — publishes sensor_msgs/Imu on /imu/data when present.
+        if getattr(self.system.feldfreund, 'imu', None) is not None:
+            self._imu_handler = ImuHandler(self, self.system.feldfreund.imu)
+        else:
+            self.get_logger().info('IMU not detected (no imu attribute); skipping ImuHandler.')
 
 
 def main() -> None:
@@ -75,11 +82,11 @@ def on_startup() -> None:
         os._exit(1)
 
     print(f"SYSTEM: Loading hardware configuration from {config_path}")
-    
+
     config = config_from_file(str(config_path))
     system = System(config)
     api.Online()
-    
+
     # Background thread handles ROS middleware events without blocking NiceGUI
     threading.Thread(target=ros_main, args=(system,), daemon=True).start()
 
