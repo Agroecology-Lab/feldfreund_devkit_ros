@@ -339,7 +339,12 @@ def generate_launch_description():
         # but in practice it stalls at unconfigured — likely because /gnss/fix
         # and /odom/wheels are not yet available when the node initialises.
         # We drive the two lifecycle transitions explicitly via a timed
-        # ExecuteProcess pair (4 s gives Nav2 and the driver time to settle).
+        # ExecuteProcess pair. Timings are deliberately conservative because
+        # the configure callback does non-trivial work (PROJ transform, UKF
+        # init, parameter validation) and activate must not race ahead of it.
+        # Earlier 4 s / 5 s spacing produced a "Transitioning successful" but
+        # left the node in inactive a few seconds later — bumped to 8 s / 14 s
+        # to give configure time to finish before activate is issued.
         Node(
             package='fusioncore_ros',
             executable='fusioncore_node',
@@ -347,13 +352,13 @@ def generate_launch_description():
             parameters=[fusioncore_config],
             output='screen',
         ),
-        TimerAction(period=4.0, actions=[
+        TimerAction(period=8.0, actions=[
             ExecuteProcess(
                 cmd=['ros2', 'lifecycle', 'set', '/fusioncore', 'configure'],
                 output='screen',
             ),
         ]),
-        TimerAction(period=5.0, actions=[
+        TimerAction(period=14.0, actions=[
             ExecuteProcess(
                 cmd=['ros2', 'lifecycle', 'set', '/fusioncore', 'activate'],
                 output='screen',
