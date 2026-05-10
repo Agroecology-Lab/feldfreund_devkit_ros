@@ -321,6 +321,13 @@ def generate_launch_description():
             output='screen',
         ),
 
+        Node(
+            package='devkit_driver',
+            executable='course_over_ground',
+            name='course_over_ground',
+            output='screen',
+        ),
+
         # ── FusionCore UKF ───────────────────────────────────────────────────
         # Launched directly — NOT wrapped in a lifecycle_manager.
         #
