@@ -1,6 +1,10 @@
 # ODrive v6 CAN Hardware Definition
 p0 = expander()
 
+# BNO085 IMU — I²C port 0, default Robot Brain pins (SDA=21, SCL=22), INT=26, RST=32
+# Address 0x4A (AD0 low); 400 kHz fast-mode.  Adjust pins to match your wiring if needed.
+imu = ImuBno085(0, 21, 22, 26, 32, 0x4a, 400_000)
+
 # CAN Bus at 1MBaud
 # Pins 4 and 5 are typical for ESP32 CAN TX/RX
 can_bus = can(4, 5, 1_000_000) 
@@ -21,12 +25,23 @@ b_front_top = p0.input(21)
 b_front_bottom = p0.input(35)
 b_back = p0.input(18)
 
-# Telemetry
+# Telemetry — 50 Hz.  IMU fields mirror the read_data keys in devkit.yaml.
 core.on_every_20ms = line(
     'time', core.time,
     'linear_speed', core.wheels.linear_speed,
     'angular_speed', core.wheels.angular_speed,
     'v_battery', core.vdp,
     'm_lb_err', m_lb.error,
-    'm_rb_err', m_rb.error
+    'm_rb_err', m_rb.error,
+    'imu_cal_gyr', imu.cal_gyr,
+    'imu_quat_w', imu.quat_w,
+    'imu_quat_x', imu.quat_x,
+    'imu_quat_y', imu.quat_y,
+    'imu_quat_z', imu.quat_z,
+    'imu_gyr_x', imu.gyr_x,
+    'imu_gyr_y', imu.gyr_y,
+    'imu_gyr_z', imu.gyr_z,
+    'imu_acc_x', imu.acc_x,
+    'imu_acc_y', imu.acc_y,
+    'imu_acc_z', imu.acc_z
 )
