@@ -5,16 +5,17 @@
 #
 # Frames provided externally:
 #   map   — static identity TF from devkit.launch.py (placeholder)
-#   odom  — fusioncore publishes odom → base_link
+#   odom  — fusioncore publishes odom -> base_link
 #
-# To enable obstacle avoidance later: add LaserScan plugin to local_costmap
-# obstacle_layer.observation_sources and configure the scan topic.
+# collision_monitor is absent because Nav2 Jazzy requires observation_sources
+# to be a non-empty declared parameter — it throws InvalidParameterValueException
+# at node startup even if observation_sources: [] is set in this file, before
+# the lifecycle manager can bring it up. It is omitted from devkit.launch.py
+# entirely until a lidar or ultrasonic sensor is available.
 #
-# collision_monitor is included with empty observation_sources so it starts
-# cleanly without a sensor. The lifecycle_manager node_names override below
-# keeps it in the managed list. When a lidar or ultrasonic is available:
-#   1. Add a real polygon + source under collision_monitor.ros__parameters
-#   2. Remove or update the stub accordingly
+# To re-enable: add the sensor to the collision_monitor block, add the node
+# back to _nav2_nodes() in devkit.launch.py, and add 'collision_monitor' to
+# node_names below.
 
 bt_navigator:
   ros__parameters:
@@ -53,7 +54,6 @@ controller_server:
       yaw_goal_tolerance: 0.25
       stateful: True
 
-    # Regulated Pure Pursuit — robust for outdoor diff-drive without complex obstacle handling
     FollowPath:
       plugin: "nav2_regulated_pure_pursuit_controller::RegulatedPurePursuitController"
       desired_linear_vel: 0.5
@@ -106,21 +106,12 @@ global_costmap:
       publish_frequency: 1.0
       global_frame: map
       robot_base_frame: base_link
-      # Rolling window so the costmap follows the robot.
-      # Without this the costmap is fixed at the map origin (0,0) with Nav2's
-      # 10×10 m default, leaving the robot's footprint partially outside the
-      # valid region and causing NavfnPlanner to refuse every segment.
-      # There is no static occupancy map, so a rolling global is the right
-      # pattern here. Size (100 m) comfortably spans any single waypoint-to-
-      # waypoint segment; raise if route legs exceed ~80 m in the field.
       rolling_window: true
       width: 100
       height: 100
       footprint: "[[0.3, 0.25], [0.3, -0.25], [-0.3, -0.25], [-0.3, 0.25]]"
       resolution: 0.1
       track_unknown_space: false
-      # No static_layer — there is no occupancy map. The static map → odom
-      # transform is identity until a real GPS-anchored origin is wired up.
       plugins: ["inflation_layer"]
       inflation_layer:
         plugin: "nav2_costmap_2d::InflationLayer"
@@ -197,34 +188,17 @@ velocity_smoother:
     odom_topic: /fusion/odom
     odom_duration: 0.1
 
-# Stub config — no sensors yet. The node starts and passes velocity commands
-# through unchanged. Add polygons + observation_sources when a lidar or
-# ultrasonic is wired up, then remove the empty-list overrides below.
-collision_monitor:
-  ros__parameters:
-    base_frame_id: "base_link"
-    odom_frame_id: "odom"
-    cmd_vel_in_topic: "cmd_vel_smoothed"
-    cmd_vel_out_topic: "cmd_vel"
-    state_topic: "collision_monitor_state"
-    transform_tolerance: 0.5
-    source_timeout: 5.0
-    stop_pub_timeout: 2.0
-    polygons: []
-    observation_sources: []
-
 lifecycle_manager_navigation:
   ros__parameters:
-    # node_names controls which nodes the lifecycle manager brings up.
-    # collision_monitor is now included — it starts cleanly with the empty
-    # stub above. Remove it from this list only if you strip the node entirely
-    # from navigation_launch.py (not recommended; just keep the stub instead).
+    # Must match exactly the nodes declared in _nav2_nodes() in devkit.launch.py.
+    # collision_monitor is absent — see file header for rationale.
     node_names:
       - controller_server
       - smoother_server
       - planner_server
+      - route_server
       - behavior_server
       - bt_navigator
       - waypoint_follower
       - velocity_smoother
-      - collision_monitor
+      - docking_server
