@@ -196,3 +196,19 @@ velocity_smoother:
     max_decel: [-2.5, 0.0, -3.2]
     odom_topic: /fusion/odom
     odom_duration: 0.1
+
+lifecycle_manager_navigation:
+  ros__parameters:
+    # Excludes collision_monitor — it requires observation_sources (a sensor)
+    # which we don't have yet. Remove this section and add collision_monitor
+    # config to this file once a lidar or ultrasonic is wired up.
+    # This override is loaded by navigation_launch.py via its params_file arg,
+    # so no second lifecycle_manager node is needed in devkit.launch.py.
+    node_names:
+      - controller_server
+      - smoother_server
+      - planner_server
+      - behavior_server
+      - bt_navigator
+      - waypoint_follower
+      - velocity_smoother
