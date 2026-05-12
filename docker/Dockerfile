@@ -110,6 +110,7 @@ RUN for i in 1 2 3 4 5; do \
 # Stage 3.5: Fields2Cover — build from source with Python bindings
 # ============================================================
 RUN apt-get update && \
+    apt --fix-broken install -y && \
     apt-get install -y --no-install-recommends \
       cmake \
       libgdal-dev \
