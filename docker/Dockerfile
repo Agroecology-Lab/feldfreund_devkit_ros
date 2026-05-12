@@ -311,6 +311,7 @@ RUN apt-get update && \
 # Stage 10: colcon Build
 # ============================================================
 RUN apt-get update && \
+    apt --fix-broken install -y && \
     apt-get install -f -y && \
     for i in 1 2 3 4 5; do \
       apt-get install -y --no-install-recommends \
