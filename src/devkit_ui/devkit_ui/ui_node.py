@@ -26,6 +26,14 @@ from rclpy.qos import (
 from sensor_msgs.msg import BatteryState
 from std_msgs.msg import Bool, Empty, String
 
+# OBSTACLE: obstacle manager + UI attachment helpers
+from devkit_ui.obstacles import (
+    ObstacleManager,
+    attach_nav_card,
+    attach_mission_sidebar_controls,
+    attach_mission_obstacle_panel,
+)
+
 _TOPO_SRV_OK = False
 try:
     from topological_navigation_msgs.srv import WriteTopologicalMap
@@ -240,7 +248,7 @@ def _build_svg(nodes: dict, selected: Optional[str], current: Optional[str]) -> 
             f'xmlns="http://www.w3.org/2000/svg">{"".join(parts)}</svg>')
 
 
-# ── Fields2Cover geometry helpers (module-level so cpu_bound can pickle them) ─
+# ── Fields2Cover geometry helpers ─────────────────────────────────────────────
 
 def _f2c_latlon_to_xy(lat: float, lon: float,
                       lat0: float, lon0: float) -> tuple[float, float]:
@@ -260,53 +268,230 @@ def _f2c_xy_to_latlon(x: float, y: float,
     return lat, lon
 
 
-def _run_f2c(corners_ll: list, tool_width: float,
-             angle_deg: float) -> list:
-    """
-    Pure function — no self, safe to pickle for cpu_bound.
-    corners_ll : [(lat, lon), ...] — at least 3 points
-    Returns    : [[(lat, lon), ...], ...]  one list per swath
-
-    F2C API (per docs):
-      f2c.LinearRing.addPoint(Point)
-      f2c.Cell.addRing(LinearRing)
-      f2c.SG_BruteForce.generateSwaths(angle_rad, tool_width, Cell) -> Swaths
-      Swaths.size(), Swaths.at(i) -> Swath
-      Swath.getPath() -> LineString
-      LineString.size(), LineString.getGeometry(j) -> Point
-      Point.getX() / .getY()
-    """
-    import math
+# OBSTACLE: shapely post-clipping for swath/obstacle avoidance.
+#
+# We do not trust F2C's interior-ring handling. Across F2C builds and
+# Python-binding versions the behaviour of SG_BruteForce with respect to
+# Cell holes is inconsistent — sometimes swaths are clipped against
+# holes, sometimes they aren't, with no error either way. Field tests
+# showed swaths running straight through marked obstacles even with CW-
+# wound interior rings.
+#
+# The fix: generate swaths against the outer boundary (F2C's job), then
+# compute swath_line.difference(union_of_obstacle_polygons) ourselves
+# (shapely's job). This is observable, deterministic, and guarantees the
+# lines you see on the Mission map are the lines the robot will follow.
+#
+# Obstacle rings are still added to the F2C Cell as a hint — belt and
+# braces — but the safety net is the shapely post-clip.
+def _run_f2c(corners_ll: list,
+             obstacle_rings: list,
+             tool_width: float,
+             angle_deg: float,
+             obstacle_pad_m: float = 0.0) -> list:
+    import math, sys
     import fields2cover as f2c
+
+    def _log(msg):
+        print(f'[F2C] {msg}', file=sys.stderr, flush=True)
+
+    _log(f'called: {len(corners_ll)} boundary pts, '
+         f'{len(obstacle_rings)} obstacles, pad={obstacle_pad_m}m, '
+         f'width={tool_width}m, angle={angle_deg}°')
+
+    try:
+        from shapely.geometry import LineString, MultiLineString, Polygon
+        from shapely.ops import unary_union
+        has_shapely = True
+        _log('shapely OK')
+    except ImportError as e:
+        has_shapely = False
+        _log(f'shapely MISSING: {e}')
 
     lat0, lon0 = corners_ll[0]
 
-    # ── field boundary in local metres ───────────────────────────────────────
-    ring = f2c.LinearRing()
+    outer = f2c.LinearRing()
     for lat, lon in corners_ll:
         x, y = _f2c_latlon_to_xy(lat, lon, lat0, lon0)
-        ring.addPoint(f2c.Point(x, y, 0))
-    ring.closeRing()
+        outer.addPoint(f2c.Point(x, y, 0))
+    outer.closeRing()
+    cell = f2c.Cell()
+    cell.addRing(outer)
+
+    obstacle_polys_xy: list = []
+    for idx, ring_ll in enumerate(obstacle_rings):
+        if len(ring_ll) < 3:
+            _log(f'obstacle {idx}: skipped (only {len(ring_ll)} pts)')
+            continue
+        pts_xy = [_f2c_latlon_to_xy(lat, lon, lat0, lon0)
+                  for lat, lon in ring_ll]
+        _log(f'obstacle {idx}: {len(pts_xy)} pts, '
+             f'xy bbox=({min(p[0] for p in pts_xy):.1f},{min(p[1] for p in pts_xy):.1f}) '
+             f'to ({max(p[0] for p in pts_xy):.1f},{max(p[1] for p in pts_xy):.1f})')
+
+        if has_shapely:
+            poly = Polygon(pts_xy)
+            _log(f'obstacle {idx}: shapely poly valid={poly.is_valid} '
+                 f'empty={poly.is_empty} area={poly.area:.3f}m²')
+            if obstacle_pad_m > 0:
+                poly = poly.buffer(obstacle_pad_m, join_style=2, resolution=8)
+                _log(f'obstacle {idx}: after buffer({obstacle_pad_m}m) '
+                     f'empty={poly.is_empty} type={poly.geom_type} '
+                     f'area={poly.area:.3f}m²')
+            if poly.is_empty or poly.geom_type != 'Polygon':
+                _log(f'obstacle {idx}: DROPPED (empty or non-Polygon)')
+                continue
+            obstacle_polys_xy.append(poly)
+            pts_xy = list(poly.exterior.coords)
+
+        hole = f2c.LinearRing()
+        for x, y in reversed(pts_xy):
+            hole.addPoint(f2c.Point(x, y, 0))
+        hole.closeRing()
+        cell.addRing(hole)
+
+    _log(f'built cell with {len(obstacle_polys_xy)} shapely obstacles')
+
+    angle_rad = math.radians(angle_deg % 180)
+    sg     = f2c.SG_BruteForce()
+    swaths = sg.generateSwaths(angle_rad, tool_width, cell)
+
+    raw_xy: list = []
+    for i in range(swaths.size()):
+        path = swaths.at(i).getPath()
+        pts  = []
+        for j in range(path.size()):
+            pt = path.getGeometry(j)
+            pts.append((pt.getX(), pt.getY()))
+        if len(pts) >= 2:
+            raw_xy.append(pts)
+    _log(f'F2C produced {len(raw_xy)} raw swaths')
+
+    if has_shapely and obstacle_polys_xy:
+        obstacles_union = unary_union(obstacle_polys_xy)
+        _log(f'obstacle union: type={obstacles_union.geom_type} '
+             f'area={obstacles_union.area:.3f}m² '
+             f'bounds={obstacles_union.bounds}')
+        if raw_xy:
+            sample = raw_xy[0]
+            _log(f'first swath: {len(sample)} pts, '
+                 f'from ({sample[0][0]:.1f},{sample[0][1]:.1f}) '
+                 f'to ({sample[-1][0]:.1f},{sample[-1][1]:.1f})')
+        clipped: list = []
+        clipped_count, dropped_count = 0, 0
+        for pts in raw_xy:
+            line = LineString(pts)
+            intersects = line.intersects(obstacles_union)
+            remaining = line.difference(obstacles_union)
+            if remaining.is_empty:
+                dropped_count += 1
+                continue
+            geoms = (list(remaining.geoms)
+                     if isinstance(remaining, MultiLineString)
+                     else [remaining])
+            for sub in geoms:
+                if sub.length > tool_width * 0.5:
+                    clipped.append(list(sub.coords))
+                    if intersects:
+                        clipped_count += 1
+        _log(f'clipped {clipped_count} swaths against obstacles, '
+             f'{dropped_count} fully dropped, final={len(clipped)}')
+        raw_xy = clipped
+    else:
+        _log(f'NO CLIPPING: has_shapely={has_shapely}, '
+             f'obstacle_polys_xy={len(obstacle_polys_xy)}')
+
+    result: list = []
+    for pts_xy in raw_xy:
+        pts_ll = [_f2c_xy_to_latlon(x, y, lat0, lon0) for x, y in pts_xy]
+        if len(pts_ll) >= 2:
+            result.append(pts_ll)
+    _log(f'returning {len(result)} swaths to UI')
+    return result
+    
+    # ── Outer boundary ────────────────────────────────────────────────────
+    outer = f2c.LinearRing()
+    for lat, lon in corners_ll:
+        x, y = _f2c_latlon_to_xy(lat, lon, lat0, lon0)
+        outer.addPoint(f2c.Point(x, y, 0))
+    outer.closeRing()
 
     cell = f2c.Cell()
-    cell.addRing(ring)
+    cell.addRing(outer)
 
-    # ── swath generation ─────────────────────────────────────────────────────
-    # Pass Cell directly — passing Cells gives a SwathsByCells with a different API.
+    # ── Obstacles: build shapely polys for post-clip, plus add as F2C holes
+    # (CW winding) in case the local build does honour them — costs nothing
+    # to add and helps the F2C output if it does.
+    obstacle_polys_xy: list = []
+    for ring_ll in obstacle_rings:
+        if len(ring_ll) < 3:
+            continue
+        pts_xy = [_f2c_latlon_to_xy(lat, lon, lat0, lon0)
+                  for lat, lon in ring_ll]
+
+        if has_shapely:
+            poly = Polygon(pts_xy)
+            if obstacle_pad_m > 0:
+                poly = poly.buffer(obstacle_pad_m,
+                                   join_style=2, resolution=8)
+            if poly.is_empty or poly.geom_type != 'Polygon':
+                continue
+            obstacle_polys_xy.append(poly)
+            # Use the buffered exterior for the F2C hole too, so the hint
+            # matches what we'll post-clip against.
+            pts_xy = list(poly.exterior.coords)
+
+        hole = f2c.LinearRing()
+        # CW winding for interior ring (opposite the CCW outer boundary).
+        for x, y in reversed(pts_xy):
+            hole.addPoint(f2c.Point(x, y, 0))
+        hole.closeRing()
+        cell.addRing(hole)
+
+    # ── F2C swath generation ──────────────────────────────────────────────
     angle_rad = math.radians(angle_deg % 180)
     sg        = f2c.SG_BruteForce()
     swaths    = sg.generateSwaths(angle_rad, tool_width, cell)
 
-    # ── project back to lat/lon ──────────────────────────────────────────────
-    # Per F2C docs: Swaths.at(i) -> Swath; Swath.getPath() -> LineString;
-    # LineString.getGeometry(j) -> Point.
-    result = []
+    raw_xy: list = []
     for i in range(swaths.size()):
         path = swaths.at(i).getPath()
-        pts_ll = []
+        pts  = []
         for j in range(path.size()):
             pt = path.getGeometry(j)
-            pts_ll.append(_f2c_xy_to_latlon(pt.getX(), pt.getY(), lat0, lon0))
+            pts.append((pt.getX(), pt.getY()))
+        if len(pts) >= 2:
+            raw_xy.append(pts)
+
+    # ── Post-clip swaths against obstacle union ──────────────────────────
+    # This is the guarantee. Each swath is a LineString, the obstacles
+    # form a single (possibly multi-) polygon, and line.difference(poly)
+    # returns the line with the in-polygon portion removed. A swath that
+    # would pass through an obstacle gets broken into 2+ shorter swaths
+    # with a gap around the obstacle.
+    #
+    # Fragments shorter than half the tool width are dropped — they can't
+    # be driven meaningfully and just clutter the output / topo graph.
+    if has_shapely and obstacle_polys_xy:
+        obstacles_union = unary_union(obstacle_polys_xy)
+        clipped: list = []
+        for pts in raw_xy:
+            line = LineString(pts)
+            remaining = line.difference(obstacles_union)
+            if remaining.is_empty:
+                continue
+            geoms = (list(remaining.geoms)
+                     if isinstance(remaining, MultiLineString)
+                     else [remaining])
+            for sub in geoms:
+                if sub.length > tool_width * 0.5:
+                    clipped.append(list(sub.coords))
+        raw_xy = clipped
+
+    # ── Project back to lat/lon ──────────────────────────────────────────
+    result: list = []
+    for pts_xy in raw_xy:
+        pts_ll = [_f2c_xy_to_latlon(x, y, lat0, lon0) for x, y in pts_xy]
         if len(pts_ll) >= 2:
             result.append(pts_ll)
     return result
@@ -339,17 +524,12 @@ class NiceGuiNode(Node):
         self.create_subscription(Bool,         'estop/front',         self.update_estop_front,         SAFETY_QOS)
         self.create_subscription(Bool,         'estop/back',          self.update_estop_back,          SAFETY_QOS)
 
-        # fusioncore publishes on /fusion/odom (RELIABLE, depth 100). The old
-        # /odometry/global was from fake_nav2_server, which we no longer run.
         _ODOM_QOS = QoSProfile(
             depth=10,
             reliability=ReliabilityPolicy.RELIABLE,
         )
         self.create_subscription(Odometry, '/fusion/odom',
                                  lambda m: setattr(self, 'latest_odom', m), _ODOM_QOS)
-        # Fallback: use wheel odom directly if fusioncore is silent (e.g. IMU not yet live).
-        # Once /fusion/odom starts arriving it takes over automatically — latest_odom is
-        # only set from /odom while it is still None.
         self.create_subscription(Odometry, '/odom',
                                  self._odom_fallback, _ODOM_QOS)
 
@@ -405,6 +585,12 @@ class NiceGuiNode(Node):
         self._f2c_angle_deg:  float = 0.0
         self.f2c_save_status: str   = ''
         self.delete_status:   str   = ''
+
+        # OBSTACLE: manager owns obstacles.yaml + /obstacles publisher.
+        # Attach after latest_odom / latest_gps fields exist so the
+        # manager can read them when projecting to the map frame.
+        self._obstacle_mgr = ObstacleManager()
+        self._obstacle_mgr.attach(self)
 
         @ui.page('/')
         def page():
@@ -492,10 +678,6 @@ class NiceGuiNode(Node):
 
         x = round(self.latest_odom.pose.pose.position.x, 3)
         y = round(self.latest_odom.pose.pose.position.y, 3)
-        # connect_to: prefer the localised current node, else fall back to the
-        # node the user has highlighted in the sidebar. Without a fallback, the
-        # node would be dropped with edges:[] when /current_node is silent —
-        # which it commonly is in this stack.
         connect_to = (self.topo_current
                       if self.topo_current not in ('—', 'none', 'None', '', None) else None)
         if connect_to and connect_to not in self.topo_nodes:
@@ -555,9 +737,6 @@ class NiceGuiNode(Node):
                         {'action': edge_action, 'edge_id': f'{connect_to}_{name}', 'node': name})
                     break
 
-        # Do NOT append to self._topo_doc here — _publish_and_persist reads the
-        # file as the single source of truth and syncs _topo_doc after writing.
-        # Appending here AND in the thread was the cause of duplicate node names.
         self.topo_nodes = new_nodes
 
         conn_str = f' → {connect_to}' if connect_to else ''
@@ -573,8 +752,6 @@ class NiceGuiNode(Node):
                 installed_src = ('/workspace/install/topological_navigation/share/'
                                  'topological_navigation/config/mixed_actions_map.yaml')
 
-                # Read the on-disk file as the authoritative base — never self._topo_doc,
-                # which may already contain in-memory-only state from a previous drop.
                 if os.path.exists(map_file):
                     with open(map_file) as f: file_doc = _yaml.safe_load(f)
                 elif os.path.exists(installed_src):
@@ -584,7 +761,6 @@ class NiceGuiNode(Node):
                     file_doc = copy.deepcopy(self._topo_doc)
                     self.get_logger().warn('No YAML source — JSON fallback')
 
-                # Guard: skip if this node was already written (e.g. rapid double-drop)
                 existing_names = {e.get('node', {}).get('name')
                                   for e in file_doc.get('nodes', [])}
                 if name in existing_names:
@@ -605,8 +781,6 @@ class NiceGuiNode(Node):
                     _yaml.dump(file_doc, f, default_flow_style=False,
                                allow_unicode=True, sort_keys=False)
 
-                # Sync _topo_doc to the file we just wrote so the next drop reads
-                # a consistent base — this is the only place _topo_doc is updated.
                 self._topo_doc = file_doc
 
                 self.drop_status = (f'{name}{conn_str} at ({x}, {y})'
@@ -644,7 +818,7 @@ class NiceGuiNode(Node):
 
         threading.Thread(target=_publish_and_persist, daemon=True).start()
 
-    # ── track mode ───────────────────────────────────────────────────────────
+    # ── track mode ────────────────────────────────────────────────────────────
 
     def start_track(self, prefix: str, interval: float,
                     row_id: Optional[int], row_role: Optional[str]) -> None:
@@ -689,15 +863,10 @@ class NiceGuiNode(Node):
         self._track_counter = 0; self._track_prefix = ''
         self._track_row_id  = None; self._track_is_row = False; self._track_first = True
 
-    # ── shared topo-map persistence helper ───────────────────────────────────
+    # ── shared topo-map persistence helper ────────────────────────────────────
 
     def _persist_and_reload(self, modify_fn, status_attr: str,
                              success_msg: str) -> None:
-        """
-        Apply `modify_fn(file_doc)` to the on-disk topo-map YAML, write it back,
-        sync `self._topo_doc`, and trigger a map reload (switch service if
-        available, else republish on /topological_map_2). Runs in a thread.
-        """
         map_name = self._topo_doc.get('name', 'mixed_test_map')
         map_file = f'/workspace/maps/{map_name}'
         installed_src = ('/workspace/install/topological_navigation/share/'
@@ -752,13 +921,6 @@ class NiceGuiNode(Node):
     # ── F2C → topo rows ──────────────────────────────────────────────────────
 
     def save_f2c_rows_to_topo(self, prefix: str, row_id_start: int) -> None:
-        """
-        Project each F2C swath's first/last point to the map frame using the
-        current (odom_xy, gps_latlon) as a single anchor, drop a topo node pair
-        per row joined by `limbic_row_follow`, and wire headland-turn edges
-        between consecutive rows + endpoints to the robot's current node so
-        the topo planner has a connected path through the field.
-        """
         prefix = re.sub(r'[^A-Z0-9_]', '',
                         (prefix or '').strip().upper().replace(' ', '_'))
         if not prefix:
@@ -771,9 +933,6 @@ class NiceGuiNode(Node):
         if self.latest_gps is None:
             self.f2c_save_status = 'ERROR: no GPS message on /gnss/fix yet'; return
 
-        # Don't gate on status.status — drivers (notably ublox) often publish -1
-        # even with a valid autonomous fix until their configured fix mode is
-        # achieved. Just check that lat/lon are usable.
         import math
         _lat = self.latest_gps.latitude
         _lon = self.latest_gps.longitude
@@ -787,7 +946,6 @@ class NiceGuiNode(Node):
                 f'ERROR: GPS lat/lon are 0,0 — no fix yet (status={_status})')
             return
         if _status < 0:
-            # Permitted, just note it in the log so you know what you got.
             self.get_logger().warn(
                 f'save_f2c_rows: proceeding with status={_status} '
                 f'(lat={_lat:.7f}, lon={_lon:.7f})')
@@ -795,8 +953,6 @@ class NiceGuiNode(Node):
         if not self._topo_doc:
             self.f2c_save_status = 'ERROR: map not loaded'; return
 
-        # Single anchor: where the robot is RIGHT NOW. All F2C lat/lon offsets
-        # are relative to this; map-frame xy is anchored to current odom xy.
         anchor_x   = self.latest_odom.pose.pose.position.x
         anchor_y   = self.latest_odom.pose.pose.position.y
         anchor_lat = self.latest_gps.latitude
@@ -807,9 +963,6 @@ class NiceGuiNode(Node):
         nav_frame = self._topo_doc.get('transformation', {}).get('topo_frame_id', 'map')
         timestamp = datetime.now(timezone.utc).strftime('%d-%m-%Y_%H-%M-%S')
 
-        # connect_to: where to splice the row chain into the existing graph.
-        # Prefer the localised current node, fall back to the user's selection
-        # in the sidebar, fall back to None (chain dropped standalone).
         connect_to = (self.topo_current
                       if self.topo_current not in ('—', 'none', 'None', '', None)
                       else None)
@@ -820,8 +973,8 @@ class NiceGuiNode(Node):
 
         new_topo_nodes = dict(self.topo_nodes)
         new_entries: list = []
-        added: list = []          # row ids actually added (in order)
-        row_names: dict = {}      # rid -> (in_name, out_name) for chaining
+        added: list = []
+        row_names: dict = {}
         skipped: list = []
 
         verts = [{'x': -0.5, 'y': -0.5}, {'x':  0.5, 'y': -0.5},
@@ -883,14 +1036,10 @@ class NiceGuiNode(Node):
             self.f2c_save_status = 'ERROR: nothing added (all names already taken)'
             return
 
-        # ── Wire headland-turn edges between consecutive rows ────────────────
-        # R{i}_OUT <-> R{i+1}_IN via navigate_to_pose. Bidirectional so the
-        # planner can run rows in any order or reverse direction.
         for a_rid, b_rid in zip(added, added[1:]):
             a_out = row_names[a_rid][1]
             b_in  = row_names[b_rid][0]
 
-            # in-memory
             a_e = list(new_topo_nodes[a_out]['edges'])
             if b_in not in a_e:
                 a_e.append(b_in)
@@ -900,7 +1049,6 @@ class NiceGuiNode(Node):
                 b_e.append(a_out)
                 new_topo_nodes[b_in] = {**new_topo_nodes[b_in], 'edges': b_e}
 
-            # disk: a_out and b_in are both in new_entries, mutate in place
             for entry in new_entries:
                 n = entry['node']
                 if n['name'] == a_out and not any(
@@ -912,28 +1060,21 @@ class NiceGuiNode(Node):
                     n['edges'].append({'action': _NAV_ACTION,
                                        'edge_id': f'{b_in}_{a_out}', 'node': a_out})
 
-        # ── Splice into existing graph via connect_to ────────────────────────
-        # connect_to <-> first IN and connect_to <-> last OUT. The connect_to
-        # node lives in file_doc, not new_entries, so its file-side edge is
-        # patched inside _modify below.
-        graph_splice: list = []  # (existing_node_name, new_node_name) pairs
+        graph_splice: list = []
         if connect_to:
             first_in = row_names[added[0]][0]
             last_out = row_names[added[-1]][1]
 
             for tgt in (first_in, last_out):
-                # in-memory: connect_to → tgt
                 c_e = list(new_topo_nodes[connect_to]['edges'])
                 if tgt not in c_e:
                     c_e.append(tgt)
                     new_topo_nodes[connect_to] = {
                         **new_topo_nodes[connect_to], 'edges': c_e}
-                # in-memory: tgt → connect_to
                 t_e = list(new_topo_nodes[tgt]['edges'])
                 if connect_to not in t_e:
                     t_e.append(connect_to)
                     new_topo_nodes[tgt] = {**new_topo_nodes[tgt], 'edges': t_e}
-                # disk: tgt → connect_to (tgt is in new_entries)
                 for entry in new_entries:
                     n = entry['node']
                     if n['name'] == tgt and not any(
@@ -942,7 +1083,6 @@ class NiceGuiNode(Node):
                             'action': _NAV_ACTION,
                             'edge_id': f'{tgt}_{connect_to}', 'node': connect_to,
                         })
-                # disk: connect_to → tgt — patch in _modify
                 graph_splice.append((connect_to, tgt))
 
         self.topo_nodes = new_topo_nodes
@@ -958,7 +1098,6 @@ class NiceGuiNode(Node):
                 if entry['node']['name'] in existing:
                     continue
                 file_doc.setdefault('nodes', []).append(entry)
-            # connect_to lives in file_doc already — patch its outgoing edges
             for src, tgt in graph_splice:
                 for entry in file_doc.get('nodes', []):
                     n = entry.get('node', {})
@@ -978,19 +1117,9 @@ class NiceGuiNode(Node):
     # ── Repair row connectivity ──────────────────────────────────────────────
 
     def repair_row_connectivity(self, connect_to: Optional[str] = None) -> None:
-        """
-        Add navigate_to_pose edges between consecutive row IN/OUT pairs and,
-        if `connect_to` is given (and exists), splice the chain endpoints into
-        that node. Idempotent: skips edges that already exist.
-
-        Reads row groupings from in-memory topo_nodes (meta.row_id + meta.row_role)
-        and writes the same edge additions to the on-disk YAML via
-        _persist_and_reload.
-        """
         if not self._topo_doc:
             self.f2c_save_status = 'ERROR: map not loaded'; return
 
-        # Group row nodes by row_id from in-memory state
         rows: dict = {}
         for nm, nd in self.topo_nodes.items():
             meta = nd.get('meta', {}) or {}
@@ -1014,9 +1143,6 @@ class NiceGuiNode(Node):
                 f'repair: connect_to={connect_to!r} not in map, ignoring')
             connect_to = None
 
-        # Build the in-memory edge additions and remember them so _modify can
-        # mirror the same set into file_doc. Pairs of (src_name, tgt_name) for
-        # each navigate_to_pose edge to ensure exists.
         wanted_edges: list = []
 
         for a_rid, b_rid in zip(sorted_rids, sorted_rids[1:]):
@@ -1036,7 +1162,6 @@ class NiceGuiNode(Node):
                 wanted_edges.append((connect_to, tgt))
                 wanted_edges.append((tgt, connect_to))
 
-        # Apply to in-memory
         new_topo_nodes = dict(self.topo_nodes)
         added_count = 0
         for src, tgt in wanted_edges:
@@ -1085,7 +1210,6 @@ class NiceGuiNode(Node):
         if not self._topo_doc:
             self.delete_status = 'ERROR: map not loaded'; return
 
-        # In-memory: drop the node and scrub edges pointing at it
         new_nodes = {}
         for nm, nd in self.topo_nodes.items():
             if nm == name:
@@ -1143,7 +1267,7 @@ class NiceGuiNode(Node):
         self._persist_and_reload(_modify, 'delete_status',
                                   f'deleted row {row_id} ({len(targets)} nodes)')
 
-    # ── Confirmation dialogs (UI helpers) ────────────────────────────────────
+    # ── Confirmation dialogs ─────────────────────────────────────────────────
 
     async def confirm_delete_node(self, name: Optional[str]) -> None:
         if not name or name not in self.topo_nodes:
@@ -1229,24 +1353,15 @@ class NiceGuiNode(Node):
             with ui.tab_panel(tab_system):  self._system_content()
 
     # ── Nav tab ───────────────────────────────────────────────────────────────
-    #
-    #  ┌─────────────────────────────────────────────────────┐  ┌──────────┐
-    #  │  [Joystick | E-Stop+pose]  │  Node Map (flex)       │  │ Sidebar  │
-    #  ├────────────────────────────┴───────────────────────-┤  │ full ht  │
-    #  │  Track (flex-1)   │   Drop Node (flex-1)            │  │          │
-    #  └─────────────────────────────────────────────────────┘  └──────────┘
 
     def _nav_content(self) -> None:
 
         with ui.row().classes('w-full gap-3 items-stretch'):
 
-            # ── Main column ───────────────────────────────────────────────────
             with ui.column().classes('flex-1 gap-3').style('min-width:0'):
 
-                # Row 1 — joystick card + node map
                 with ui.row().classes('w-full gap-3 items-stretch'):
 
-                    # Joystick card: joy on left, e-stop+pose on right
                     with ui.card().style('padding:16px 20px;flex-shrink:0'):
                         ui.html('<div class="sec-label mb-3">Joystick</div>')
                         with ui.row().classes('items-center gap-6'):
@@ -1271,15 +1386,12 @@ class NiceGuiNode(Node):
                                     'color:#57606a;text-align:center;'
                                     'max-width:130px;white-space:pre-line')
 
-                    # Node map
                     with ui.card().classes('flex-1').style('padding:12px;min-width:0'):
                         ui.html('<div class="sec-label mb-2">Node Map</div>')
                         map_html = ui.html(_build_svg(self.topo_nodes, None, None))
 
-                # Row 2 — Track + Drop Node
                 with ui.row().classes('w-full gap-3 items-start'):
 
-                    # Track
                     with ui.card().classes('flex-1').style('padding:12px 14px'):
                         with ui.row().classes('items-baseline gap-2 mb-2'):
                             ui.label('Track').classes('font-semibold')
@@ -1318,7 +1430,6 @@ class NiceGuiNode(Node):
                             track_status_lbl = ui.label('').classes(
                                 'text-xs font-mono ml-1').style('color:#57606a')
 
-                    # Drop Node
                     with ui.card().classes('flex-1').style('padding:12px 14px'):
                         with ui.row().classes('items-baseline gap-2 mb-2'):
                             ui.label('Drop Node').classes('font-semibold')
@@ -1351,7 +1462,9 @@ class NiceGuiNode(Node):
                             ).classes('ml-auto').props('color=positive no-caps dense')
                         drop_status_lbl = ui.label('').classes('text-xs font-mono mt-1')
 
-            # ── Sidebar ───────────────────────────────────────────────────────
+                    # OBSTACLE: Mark Obstacle card next to Drop Node
+                    attach_nav_card(self, self._obstacle_mgr)
+
             with ui.card().classes('nav-sidebar').style('padding:14px'):
                 ui.html('<div class="sec-label">Current node</div>')
                 cur_lbl = ui.label('—').classes('text-sm font-mono font-bold')
@@ -1378,8 +1491,6 @@ class NiceGuiNode(Node):
                 with ui.scroll_area().style('flex:1;min-height:0'):
                     node_col = ui.column().style('gap:1px;width:100%')
 
-        # ── wiring ────────────────────────────────────────────────────────────
-
         go_btn.on_click(
             lambda: self.send_nav_goal(self.topo_selected) if self.topo_selected else None)
         stop_btn.on_click(self.cancel_nav_goal)
@@ -1405,7 +1516,6 @@ class NiceGuiNode(Node):
         _prev: dict = {}
 
         def refresh_nav() -> None:
-            # Pose / GPS label
             odom = self.latest_odom
             gps  = self.latest_gps
             if odom is not None:
@@ -1416,7 +1526,6 @@ class NiceGuiNode(Node):
             else:
                 pose_lbl.set_text('no odom')
 
-            # Drop hints
             cur = self.topo_current
             if cur and cur != '—':
                 cur_drop_lbl.set_text(f'→ {cur}'); cur_drop_lbl.style('color:#1a7f37')
@@ -1428,7 +1537,6 @@ class NiceGuiNode(Node):
             drop_status_lbl.style(
                 'color:#cf222e' if self.drop_status.startswith('ERROR') else 'color:#1a7f37')
 
-            # Track hints
             running = self._track_timer is not None
             track_start_btn.set_enabled(not running)
             track_stop_btn.set_enabled(running)
@@ -1445,7 +1553,6 @@ class NiceGuiNode(Node):
                 'color:#cf222e' if self.track_status.startswith('ERROR') else
                 'color:#1a7f37' if running else 'color:#57606a')
 
-            # Map + sidebar — only repaint when something changed
             snap = {'sel': self.topo_selected, 'cur': self.topo_current,
                     'stat': self.topo_nav_status, 'nav': self.topo_navigating,
                     'nodes': id(self.topo_nodes)}
@@ -1499,30 +1606,14 @@ class NiceGuiNode(Node):
         inject_click_js()
 
     # ── Mission tab ───────────────────────────────────────────────────────────
-    #
-    # Layout:
-    #   ┌─────────────────────────────────────────────┬──────────────────────┐
-    #   │  Leaflet map (click to draw polygon)        │  Sidebar controls    │
-    #   │                                             │  tool_width          │
-    #   │                                             │  angle slider        │
-    #   │                                             │  row_id_start        │
-    #   │                                             │  Plan / Clear        │
-    #   │                                             │  status              │
-    #   └─────────────────────────────────────────────┴──────────────────────┘
-    #   ┌────────────────────────────────────────────────────────────────────┐
-    #   │  Mission Queue                                                     │
-    #   └────────────────────────────────────────────────────────────────────┘
 
     def _mission_content(self) -> None:
-        # ── State ─────────────────────────────────────────────────────────────
-        corners_ll: list[tuple[float, float]] = []   # [(lat, lon), ...]
-        swath_layers: list = []                       # leaflet layer handles
-        poly_layer:   list = [None]                   # single polygon layer
+        corners_ll: list[tuple[float, float]] = []
+        swath_layers: list = []
+        poly_layer:   list = [None]
 
-        # ── Layout ────────────────────────────────────────────────────────────
         with ui.row().classes('w-full gap-3 items-start mb-3'):
 
-            # Map
             with ui.card().classes('flex-1').style('padding:10px;min-width:0'):
                 ui.html('<div class="sec-label mb-2">Field boundary — click to draw</div>')
                 gps_center = (
@@ -1536,7 +1627,6 @@ class NiceGuiNode(Node):
                     options={'attribution': 'Esri', 'maxZoom': 20},
                 )
 
-            # Sidebar
             with ui.card().style('width:220px;flex-shrink:0;padding:14px'):
                 ui.html('<div class="sec-label">Tool width</div>')
                 f2c_width = ui.number(
@@ -1562,6 +1652,18 @@ class NiceGuiNode(Node):
                 ui.label('→ {prefix}_R{n}_IN / _OUT').classes('text-xs font-mono').style(
                     'color:#8c959f')
 
+                # OBSTACLE: draw-mode + shape + radius + padding + map-click
+                # dispatch. Boundary-click delegates here to the local F2C
+                # corner-drawing closure.
+                def _boundary_click(lat: float, lon: float) -> None:
+                    corners_ll.append((lat, lon))
+                    mission_map.marker(latlng=(lat, lon))
+                    _redraw_polygon()
+
+                draw_handle = attach_mission_sidebar_controls(
+                    self, self._obstacle_mgr, mission_map, _boundary_click)
+                obstacle_pad = draw_handle.obstacle_pad
+
                 ui.separator().classes('my-3')
 
                 corners_lbl = ui.label('0 corners').classes('text-xs font-mono').style(
@@ -1586,7 +1688,10 @@ class NiceGuiNode(Node):
                 f2c_save_lbl = ui.label('').classes('text-xs font-mono mt-1').style(
                     'color:#57606a;word-break:break-word')
 
-        # ── Map click handler ─────────────────────────────────────────────────
+        # OBSTACLE: map-click is wired by attach_mission_sidebar_controls.
+        # It dispatches to _boundary_click when in boundary mode, to the
+        # manager otherwise. Do NOT add a second mission_map.on('map-click')
+        # handler here — it would fire alongside ours and double-draw.
 
         def _redraw_polygon():
             if poly_layer[0] is not None:
@@ -1607,17 +1712,6 @@ class NiceGuiNode(Node):
                 f'{len(corners_ll)} corner{"s" if len(corners_ll) != 1 else ""}' +
                 (' ✓' if len(corners_ll) >= 3 else ' — need 3+'))
 
-        def on_map_click(e):
-            lat = e.args['latlng']['lat']
-            lon = e.args['latlng']['lng']
-            corners_ll.append((lat, lon))
-            mission_map.marker(latlng=(lat, lon))
-            _redraw_polygon()
-
-        mission_map.on('map-click', on_map_click)
-
-        # ── Clear ─────────────────────────────────────────────────────────────
-
         def do_clear():
             corners_ll.clear()
             for lyr in swath_layers:
@@ -1628,15 +1722,14 @@ class NiceGuiNode(Node):
                 try: poly_layer[0].run_method('remove')
                 except Exception: pass
                 poly_layer[0] = None
+            # OBSTACLE: also tear down any in-progress obstacle polygon
+            draw_handle.clear_in_progress()
             corners_lbl.set_text('0 corners')
             f2c_status.set_text('')
             save_btn.set_enabled(False)
-            # Rebuild map to drop markers (leaflet markers have no easy bulk-remove)
             mission_map.set_center(mission_map.center)
 
         clear_btn.on_click(do_clear)
-
-        # ── Plan ──────────────────────────────────────────────────────────────
 
         async def do_plan():
             if len(corners_ll) < 3:
@@ -1652,26 +1745,26 @@ class NiceGuiNode(Node):
             angle_deg = float(f2c_angle.value or 0)
             row_start = int(f2c_row_id_start.value or 1)
 
+            # OBSTACLE: snapshot obstacle rings and pad
+            obstacle_rings = self._obstacle_mgr.rings_ll()
+            pad_m          = float(obstacle_pad.value or 0.0)
+
             try:
                 from nicegui import run as ng_run
-                # io_bound runs in a thread (same process as ROS+GDAL).
-                # cpu_bound would fork, and forking a process with GDAL/ROS
-                # already loaded segfaults the worker on first F2C call.
                 swaths = await ng_run.io_bound(
-                    _run_f2c, list(corners_ll), width, angle_deg)
+                    _run_f2c, list(corners_ll), obstacle_rings,
+                    width, angle_deg, pad_m)
             except Exception as exc:
                 f2c_status.set_text(f'ERROR: {exc}')
                 f2c_status.style('color:#cf222e')
                 plan_btn.set_enabled(True)
                 return
 
-            # Clear old swaths
             for lyr in swath_layers:
                 try: lyr.run_method('remove')
                 except Exception: pass
             swath_layers.clear()
 
-            # Draw new swaths
             for i, pts in enumerate(swaths):
                 latlngs = [[lat, lon] for lat, lon in pts]
                 lyr = mission_map.generic_layer(
@@ -1681,14 +1774,15 @@ class NiceGuiNode(Node):
                 )
                 swath_layers.append(lyr)
 
-            # Store on self for future ROS publishing
             self._f2c_swaths     = swaths
             self._f2c_row_start  = row_start
             self._f2c_tool_width = width
             self._f2c_angle_deg  = angle_deg
 
+            obs_note = (f' · {len(obstacle_rings)} obs avoided'
+                        if obstacle_rings else '')
             f2c_status.set_text(
-                f'{len(swaths)} rows · {width}m wide · {angle_deg:.0f}°')
+                f'{len(swaths)} rows · {width}m wide · {angle_deg:.0f}°{obs_note}')
             f2c_status.style('color:#1a7f37')
             plan_btn.set_enabled(True)
             save_btn.set_enabled(bool(swaths))
@@ -1703,8 +1797,6 @@ class NiceGuiNode(Node):
         save_btn.on_click(do_save)
 
         async def do_repair():
-            # Best-guess default for the splice base: localised current node,
-            # else whatever the user has highlighted in the sidebar, else blank.
             cur = self.topo_current
             default_base = ''
             if cur not in ('—', 'none', 'None', '', None) and cur in self.topo_nodes:
@@ -1754,7 +1846,6 @@ class NiceGuiNode(Node):
 
         repair_btn.on_click(do_repair)
 
-        # Status pump for the save button — runs lightly, only updates on change.
         _save_prev = ['']
         def _refresh_save_status():
             cur = self.f2c_save_status
@@ -1836,6 +1927,9 @@ class NiceGuiNode(Node):
                                 ui.button('✕', on_click=lambda _, r=r: self.confirm_delete_row(r)).props(
                                     'flat dense').classes('text-xs').style('color:#cf222e')
             ui.timer(1.0, refresh_mission)
+
+        # OBSTACLE: obstacle list + map rendering, full width below the queue.
+        attach_mission_obstacle_panel(draw_handle)
 
     def _run_mission(self, queue: list, status_lbl) -> None:
         if not queue:
