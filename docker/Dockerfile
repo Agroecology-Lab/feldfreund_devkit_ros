@@ -148,8 +148,8 @@ RUN GIT_TERMINAL_PROMPT=0 git clone --depth 1 \
         https://github.com/Agroecology-Lab/lizard /root/.lizard && \
     chmod +x /root/.lizard/espresso.py && \
     pip install --break-system-packages --ignore-installed --retries 10 \
+      shapely \
       -r /root/.lizard/requirements.txt
-
 # ============================================================
 # Stage 5: Python Dependencies
 # ============================================================
@@ -312,7 +312,6 @@ RUN apt-get update && \
 # Stage 10: colcon Build
 # ============================================================
 RUN apt-get update && \
-    apt --fix-broken install -y && \
     apt-get install -f -y && \
     for i in 1 2 3 4 5; do \
       apt-get install -y --no-install-recommends \
