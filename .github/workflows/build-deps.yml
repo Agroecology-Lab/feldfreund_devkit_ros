@@ -2,6 +2,11 @@ name: Build and Push Docker Testing Image
 
 on:
   workflow_dispatch:
+  push:
+    branches: [robbrit/set-up-ci]
+    paths:
+      - .github/workflows/build-deps.yml
+      - ci/build-fields2cover.sh
 
 env:
   REGISTRY: ghcr.io
