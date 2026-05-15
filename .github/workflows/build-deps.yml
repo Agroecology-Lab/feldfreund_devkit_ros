@@ -1,4 +1,4 @@
-name: Build and Push Docker Testing Image
+name: Build Upstream Dependency Artifacts
 
 on:
   workflow_dispatch:
@@ -13,7 +13,7 @@ env:
   IMAGE_NAME: agroecology-lab/sowbot-test
 
 jobs:
-  build-and-push:
+  build-deps:
     runs-on: ubuntu-latest
     timeout-minutes: 60
     permissions:
@@ -29,7 +29,7 @@ jobs:
 
       - name: Build upstream dependencies
         run: |
-          apt-get update
+          sudo apt-get update
           ./ci/build-fields2cover.sh
 
       - name: Upload dependencies

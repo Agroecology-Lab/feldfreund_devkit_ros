@@ -7,7 +7,7 @@ set -euo pipefail
 F2C_REF=v2.0.0
 CLONE_DIR=/tmp/Fields2Cover
 
-apt-get install -y \
+sudo apt-get install -y \
   libgdal-dev \
   libtbb-dev \
   swig
