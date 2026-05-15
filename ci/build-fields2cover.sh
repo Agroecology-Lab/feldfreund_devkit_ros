@@ -7,9 +7,11 @@ set -euo pipefail
 F2C_REF=v2.0.0
 CLONE_DIR=/tmp/Fields2Cover
 
+sudo apt-get update
 sudo apt-get install -y \
   libgdal-dev \
   libtbb-dev \
+  libtinyxml2-dev \
   swig
 
 git clone --depth 1 --branch ${F2C_REF} \
