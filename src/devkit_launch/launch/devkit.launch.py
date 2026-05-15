@@ -394,6 +394,23 @@ def generate_launch_description():
             output='screen',
         ),
 
+        # ── Static base_link -> imu_link TF (no MCU only) ────────────────────
+        # When MCU is virtual there is no IMU driver publishing this transform.
+        # Fusioncore requires it to exist before it will activate. An identity
+        # transform is correct for bench/dev — assumes IMU is at robot centre.
+        # When a real MCU is present the IMU driver owns this TF; do not
+        # compete with it.
+        Node(
+            condition=IfCondition(
+                PythonExpression(["'", mcu_port, "' == 'virtual'"])
+            ),
+            package='tf2_ros',
+            executable='static_transform_publisher',
+            name='base_link_to_imu_link_static',
+            arguments=['0', '0', '0', '0', '0', '0', 'base_link', 'imu_link'],
+            output='screen',
+        ),
+
         # ── Devkit Driver ────────────────────────────────────────────────────
         IncludeLaunchDescription(
             PythonLaunchDescriptionSource(
