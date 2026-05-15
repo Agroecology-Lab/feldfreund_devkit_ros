@@ -1,12 +1,35 @@
+# Drop-in test map with real metric positions — no GPS required.
+#
+# Layout (all positions in map-frame metres):
+#
+#   HOME(0,0) ── HL_W(5,0) ──────────────────── HL_E(33,0)
+#                  │  R1_IN(5, 4) ──row──► R1_OUT(33, 4) ─┐
+#                  │  R2_IN(5, 8) ──row──► R2_OUT(33, 8) ─┤
+#                  │  R3_IN(5,-4) ──row──► R3_OUT(33,-4) ─┤
+#                  └──R4_IN(5,-8) ──row──► R4_OUT(33,-8) ─┘
+#                                                          │
+#                       HL_W ◄────────────────────────────┘
+#
+# Row edges use limbic_row_follow; all headland moves use navigate_to_pose.
+# Robot flow per row:
+#   HL_W → R{n}_IN (navigate_to_pose)
+#         → R{n}_OUT (limbic_row_follow)
+#         → HL_E    (navigate_to_pose)
+#         → HL_W    (navigate_to_pose)  ← ready for next row
+#
+#
+# GPS origin matches existing mixed_test_map origin so the
+# Leaflet map renders in the right place.
+
 meta:
-  last_updated: 09-05-2026_00-00-00
+  last_updated: 15-05-2026_12-00-00
   origin:
     latitude: 53.312012987
-    longitude: -0.451990580
+    longitude: -0.45199058
     altitude: 0
-metric_map: mixed_test_map
-name: mixed_test_map
-pointset: mixed_test_map
+metric_map: test_map
+name: test_map
+pointset: test_map
 transformation:
   topo_frame_id: map
   parent: map
@@ -19,6 +42,7 @@ transformation:
     x: 0.0
     y: 0.0
     z: 0.0
+
 definitions:
   default_bt: "<root main_tree_to_execute=\"MainTree\">\n  <BehaviorTree ID=\"MainTree\"\
     >\n    <PipelineSequence name=\"NavigateWithReplanning\">\n      <ComputePathToPose\
@@ -35,6 +59,7 @@ definitions:
     \ goals=\"{goals}\" path=\"{path}\" planner_id=\"GridBased\"/>\n      <FollowPath\
     \ path=\"{path}\" controller_id=\"FollowPath\"/>\n    </PipelineSequence>\n  </BehaviorTree>\n\
     </root>\n"
+
 actions:
   navigate_to_pose:
     composable: false
@@ -85,21 +110,22 @@ actions:
         header:
           frame_id: ${node.nav_frame}
         pose: ${node.pose}
-      behavior_tree: ""
+      behavior_tree: ''
+
 nodes:
+
+# ── Infrastructure ────────────────────────────────────────────────────────────
+
 - meta:
-    map: mixed_test_map
-    node: N1
-    pointset: mixed_test_map
+    map: fake_test_map
+    node: HOME
+    pointset: fake_test_map
   node:
     edges:
     - action: navigate_to_pose
-      edge_id: N1_N2
-      node: N2
-    - action: navigate_to_pose
-      edge_id: N1_N0
-      node: N0
-    name: N1
+      edge_id: HOME_HL_W
+      node: HL_W
+    name: HOME
     nav_frame: map
     pose:
       orientation:
@@ -112,30 +138,48 @@ nodes:
         y: 0.0
         z: 0.0
     properties:
-      xy_goal_tolerance: 0.3
-      yaw_goal_tolerance: 0.1
+      xy_goal_tolerance: 0.5
+      yaw_goal_tolerance: 0.2
+      dropped_by: fake_map
+      gps_lat: 53.3120130
+      gps_lon: -0.4519906
+      gps_fix_type: 5
+      gps_hdop: null
     verts:
-    - x: -1.0
-      y: -1.0
-    - x: 1.0
-      y: -1.0
-    - x: 1.0
-      y: 1.0
-    - x: -1.0
-      y: 1.0
+    - x: -1.5
+      y: -1.5
+    - x: 1.5
+      y: -1.5
+    - x: 1.5
+      y: 1.5
+    - x: -1.5
+      y: 1.5
+
 - meta:
-    map: mixed_test_map
-    node: N2
-    pointset: mixed_test_map
+    map: fake_test_map
+    node: HL_W
+    pointset: fake_test_map
   node:
     edges:
     - action: navigate_to_pose
-      edge_id: N2_N3
-      node: N3
+      edge_id: HL_W_HOME
+      node: HOME
     - action: navigate_to_pose
-      edge_id: N2_N1
-      node: N1
-    name: N2
+      edge_id: HL_W_HL_E
+      node: HL_E
+    - action: navigate_to_pose
+      edge_id: HL_W_R1_IN
+      node: R1_IN
+    - action: navigate_to_pose
+      edge_id: HL_W_R2_IN
+      node: R2_IN
+    - action: navigate_to_pose
+      edge_id: HL_W_R3_IN
+      node: R3_IN
+    - action: navigate_to_pose
+      edge_id: HL_W_R4_IN
+      node: R4_IN
+    name: HL_W
     nav_frame: map
     pose:
       orientation:
@@ -144,12 +188,17 @@ nodes:
         y: 0.0
         z: 0.0
       position:
-        x: 3.0
+        x: 5.0
         y: 0.0
         z: 0.0
     properties:
       xy_goal_tolerance: 0.3
       yaw_goal_tolerance: 0.1
+      dropped_by: fake_map
+      gps_lat: 53.3120130
+      gps_lon: -0.4519153
+      gps_fix_type: 5
+      gps_hdop: null
     verts:
     - x: -1.0
       y: -1.0
@@ -159,22 +208,17 @@ nodes:
       y: 1.0
     - x: -1.0
       y: 1.0
+
 - meta:
-    map: mixed_test_map
-    node: N3
-    pointset: mixed_test_map
+    map: fake_test_map
+    node: HL_E
+    pointset: fake_test_map
   node:
     edges:
     - action: navigate_to_pose
-      edge_id: N3_N4
-      node: N4
-    - action: navigate_to_pose
-      edge_id: N3_N2
-      node: N2
-    - action: navigate_to_pose
-      edge_id: N3_N10
-      node: N10
-    name: N3
+      edge_id: HL_E_HL_W
+      node: HL_W
+    name: HL_E
     nav_frame: map
     pose:
       orientation:
@@ -183,12 +227,63 @@ nodes:
         y: 0.0
         z: 0.0
       position:
-        x: 6.0
+        x: 33.0
         y: 0.0
+        z: 0.0
+    properties:
+      xy_goal_tolerance: 0.3
+      yaw_goal_tolerance: 0.1
+      dropped_by: fake_map
+      gps_lat: 53.3120130
+      gps_lon: -0.4514939
+      gps_fix_type: 5
+      gps_hdop: null
+    verts:
+    - x: -1.0
+      y: -1.0
+    - x: 1.0
+      y: -1.0
+    - x: 1.0
+      y: 1.0
+    - x: -1.0
+      y: 1.0
+
+# ── Row 1  (y = +4 m) ─────────────────────────────────────────────────────────
+
+- meta:
+    map: fake_test_map
+    node: R1_IN
+    pointset: fake_test_map
+  node:
+    edges:
+    - action: limbic_row_follow
+      edge_id: R1_IN_R1_OUT
+      node: R1_OUT
+    - action: navigate_to_pose
+      edge_id: R1_IN_HL_W
+      node: HL_W
+    name: R1_IN
+    nav_frame: map
+    pose:
+      orientation:
+        w: 1.0
+        x: 0.0
+        y: 0.0
+        z: 0.0
+      position:
+        x: 5.0
+        y: 4.0
         z: 0.0
     properties:
       xy_goal_tolerance: 0.1
       yaw_goal_tolerance: 0.05
+      dropped_by: fake_map
+      gps_lat: 53.3120490
+      gps_lon: -0.4519153
+      gps_fix_type: 5
+      gps_hdop: null
+      row_id: 1
+      row_role: entry
     verts:
     - x: -0.5
       y: -0.5
@@ -198,19 +293,17 @@ nodes:
       y: 0.5
     - x: -0.5
       y: 0.5
+
 - meta:
-    map: mixed_test_map
-    node: N4
-    pointset: mixed_test_map
+    map: fake_test_map
+    node: R1_OUT
+    pointset: fake_test_map
   node:
     edges:
     - action: navigate_to_pose
-      edge_id: N4_N5
-      node: N5
-    - action: navigate_to_pose
-      edge_id: N4_N3
-      node: N3
-    name: N4
+      edge_id: R1_OUT_HL_E
+      node: HL_E
+    name: R1_OUT
     nav_frame: map
     pose:
       orientation:
@@ -219,12 +312,19 @@ nodes:
         y: 0.0
         z: 0.0
       position:
-        x: 9.0
-        y: 0.0
+        x: 33.0
+        y: 4.0
         z: 0.0
     properties:
       xy_goal_tolerance: 0.1
       yaw_goal_tolerance: 0.05
+      dropped_by: fake_map
+      gps_lat: 53.3120490
+      gps_lon: -0.4514939
+      gps_fix_type: 5
+      gps_hdop: null
+      row_id: 1
+      row_role: exit
     verts:
     - x: -0.5
       y: -0.5
@@ -234,87 +334,22 @@ nodes:
       y: 0.5
     - x: -0.5
       y: 0.5
+
+# ── Row 2  (y = +8 m) ─────────────────────────────────────────────────────────
+
 - meta:
-    map: mixed_test_map
-    node: N5
-    pointset: mixed_test_map
+    map: fake_test_map
+    node: R2_IN
+    pointset: fake_test_map
   node:
     edges:
-    - action: goal_align
-      edge_id: N5_N6
-      node: N6
+    - action: limbic_row_follow
+      edge_id: R2_IN_R2_OUT
+      node: R2_OUT
     - action: navigate_to_pose
-      edge_id: N5_N4
-      node: N4
-    name: N5
-    nav_frame: map
-    pose:
-      orientation:
-        w: 0.707
-        x: 0.0
-        y: 0.0
-        z: 0.707
-      position:
-        x: 12.0
-        y: 0.0
-        z: 0.0
-    properties:
-      xy_goal_tolerance: 0.05
-      yaw_goal_tolerance: 0.02
-    verts:
-    - x: -0.5
-      y: -0.5
-    - x: 0.5
-      y: -0.5
-    - x: 0.5
-      y: 0.5
-    - x: -0.5
-      y: 0.5
-- meta:
-    map: mixed_test_map
-    node: N6
-    pointset: mixed_test_map
-  node:
-    edges:
-    - action: goal_align
-      edge_id: N6_N5
-      node: N5
-    name: N6
-    nav_frame: map
-    pose:
-      orientation:
-        w: 0.707
-        x: 0.0
-        y: 0.0
-        z: 0.707
-      position:
-        x: 15.0
-        y: 0.0
-        z: 0.0
-    properties:
-      xy_goal_tolerance: 0.05
-      yaw_goal_tolerance: 0.02
-    verts:
-    - x: -0.5
-      y: -0.5
-    - x: 0.5
-      y: -0.5
-    - x: 0.5
-      y: 0.5
-    - x: -0.5
-      y: 0.5
-- meta:
-    map: mixed_test_map
-    node: N0
-    pointset: mixed_test_map
-    dropped_by: webui
-    timestamp: 02-05-2026_09-41-56
-  node:
-    edges:
-    - action: navigate_to_pose
-      edge_id: N0_N1
-      node: N1
-    name: N0
+      edge_id: R2_IN_HL_W
+      node: HL_W
+    name: R2_IN
     nav_frame: map
     pose:
       orientation:
@@ -323,33 +358,39 @@ nodes:
         y: 0.0
         z: 0.0
       position:
-        x: 0.0
-        y: 0.0
+        x: 5.0
+        y: 8.0
         z: 0.0
     properties:
-      xy_goal_tolerance: 0.3
-      yaw_goal_tolerance: 0.1
+      xy_goal_tolerance: 0.1
+      yaw_goal_tolerance: 0.05
+      dropped_by: fake_map
+      gps_lat: 53.3120849
+      gps_lon: -0.4519153
+      gps_fix_type: 5
+      gps_hdop: null
+      row_id: 2
+      row_role: entry
     verts:
-    - x: -1.0
-      y: -1.0
-    - x: 1.0
-      y: -1.0
-    - x: 1.0
-      y: 1.0
-    - x: -1.0
-      y: 1.0
+    - x: -0.5
+      y: -0.5
+    - x: 0.5
+      y: -0.5
+    - x: 0.5
+      y: 0.5
+    - x: -0.5
+      y: 0.5
+
 - meta:
-    map: mixed_test_map
-    node: N10
-    pointset: mixed_test_map
-    dropped_by: webui
-    timestamp: 02-05-2026_09-44-30
+    map: fake_test_map
+    node: R2_OUT
+    pointset: fake_test_map
   node:
     edges:
     - action: navigate_to_pose
-      edge_id: N10_N3
-      node: N3
-    name: N10
+      edge_id: R2_OUT_HL_E
+      node: HL_E
+    name: R2_OUT
     nav_frame: map
     pose:
       orientation:
@@ -358,18 +399,199 @@ nodes:
         y: 0.0
         z: 0.0
       position:
-        x: 6.0
-        y: 0.0
+        x: 33.0
+        y: 8.0
         z: 0.0
     properties:
-      xy_goal_tolerance: 0.3
-      yaw_goal_tolerance: 0.1
+      xy_goal_tolerance: 0.1
+      yaw_goal_tolerance: 0.05
+      dropped_by: fake_map
+      gps_lat: 53.3120849
+      gps_lon: -0.4514939
+      gps_fix_type: 5
+      gps_hdop: null
+      row_id: 2
+      row_role: exit
     verts:
-    - x: -1.0
-      y: -1.0
-    - x: 1.0
-      y: -1.0
-    - x: 1.0
-      y: 1.0
-    - x: -1.0
-      y: 1.0
+    - x: -0.5
+      y: -0.5
+    - x: 0.5
+      y: -0.5
+    - x: 0.5
+      y: 0.5
+    - x: -0.5
+      y: 0.5
+
+# ── Row 3  (y = -4 m) ─────────────────────────────────────────────────────────
+
+- meta:
+    map: fake_test_map
+    node: R3_IN
+    pointset: fake_test_map
+  node:
+    edges:
+    - action: limbic_row_follow
+      edge_id: R3_IN_R3_OUT
+      node: R3_OUT
+    - action: navigate_to_pose
+      edge_id: R3_IN_HL_W
+      node: HL_W
+    name: R3_IN
+    nav_frame: map
+    pose:
+      orientation:
+        w: 1.0
+        x: 0.0
+        y: 0.0
+        z: 0.0
+      position:
+        x: 5.0
+        y: -4.0
+        z: 0.0
+    properties:
+      xy_goal_tolerance: 0.1
+      yaw_goal_tolerance: 0.05
+      dropped_by: fake_map
+      gps_lat: 53.3119770
+      gps_lon: -0.4519153
+      gps_fix_type: 5
+      gps_hdop: null
+      row_id: 3
+      row_role: entry
+    verts:
+    - x: -0.5
+      y: -0.5
+    - x: 0.5
+      y: -0.5
+    - x: 0.5
+      y: 0.5
+    - x: -0.5
+      y: 0.5
+
+- meta:
+    map: fake_test_map
+    node: R3_OUT
+    pointset: fake_test_map
+  node:
+    edges:
+    - action: navigate_to_pose
+      edge_id: R3_OUT_HL_E
+      node: HL_E
+    name: R3_OUT
+    nav_frame: map
+    pose:
+      orientation:
+        w: 1.0
+        x: 0.0
+        y: 0.0
+        z: 0.0
+      position:
+        x: 33.0
+        y: -4.0
+        z: 0.0
+    properties:
+      xy_goal_tolerance: 0.1
+      yaw_goal_tolerance: 0.05
+      dropped_by: fake_map
+      gps_lat: 53.3119770
+      gps_lon: -0.4514939
+      gps_fix_type: 5
+      gps_hdop: null
+      row_id: 3
+      row_role: exit
+    verts:
+    - x: -0.5
+      y: -0.5
+    - x: 0.5
+      y: -0.5
+    - x: 0.5
+      y: 0.5
+    - x: -0.5
+      y: 0.5
+
+# ── Row 4  (y = -8 m) ─────────────────────────────────────────────────────────
+
+- meta:
+    map: fake_test_map
+    node: R4_IN
+    pointset: fake_test_map
+  node:
+    edges:
+    - action: limbic_row_follow
+      edge_id: R4_IN_R4_OUT
+      node: R4_OUT
+    - action: navigate_to_pose
+      edge_id: R4_IN_HL_W
+      node: HL_W
+    name: R4_IN
+    nav_frame: map
+    pose:
+      orientation:
+        w: 1.0
+        x: 0.0
+        y: 0.0
+        z: 0.0
+      position:
+        x: 5.0
+        y: -8.0
+        z: 0.0
+    properties:
+      xy_goal_tolerance: 0.1
+      yaw_goal_tolerance: 0.05
+      dropped_by: fake_map
+      gps_lat: 53.3119411
+      gps_lon: -0.4519153
+      gps_fix_type: 5
+      gps_hdop: null
+      row_id: 4
+      row_role: entry
+    verts:
+    - x: -0.5
+      y: -0.5
+    - x: 0.5
+      y: -0.5
+    - x: 0.5
+      y: 0.5
+    - x: -0.5
+      y: 0.5
+
+- meta:
+    map: fake_test_map
+    node: R4_OUT
+    pointset: fake_test_map
+  node:
+    edges:
+    - action: navigate_to_pose
+      edge_id: R4_OUT_HL_E
+      node: HL_E
+    name: R4_OUT
+    nav_frame: map
+    pose:
+      orientation:
+        w: 1.0
+        x: 0.0
+        y: 0.0
+        z: 0.0
+      position:
+        x: 33.0
+        y: -8.0
+        z: 0.0
+    properties:
+      xy_goal_tolerance: 0.1
+      yaw_goal_tolerance: 0.05
+      dropped_by: fake_map
+      gps_lat: 53.3119411
+      gps_lon: -0.4514939
+      gps_fix_type: 5
+      gps_hdop: null
+      row_id: 4
+      row_role: exit
+    verts:
+    - x: -0.5
+      y: -0.5
+    - x: 0.5
+      y: -0.5
+    - x: 0.5
+      y: 0.5
+    - x: -0.5
+      y: 0.5
