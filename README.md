@@ -9,30 +9,28 @@ Reference open hardware stack(s) under development at [Sowbot.co.uk](https://sow
 
 ## Sowbot Roadmap
 
-Branch: `sowbot` | ROS 2 Jazzy | Upstream: [zauberzeug/feldfreund\_devkit\_ros](https://github.com/zauberzeug/feldfreund_devkit_ros)  
-Open-source precision seeding and weeding robot — [sowbot.co.uk](https://sowbot.co.uk) | [Agroecology Lab](https://agroecologylab.org.uk)  
+Branch: `caatinga-dev` | ROS 2 Jazzy | Upstream: [zauberzeug/feldfreund\_devkit\_ros](https://github.com/zauberzeug/feldfreund_devkit_ros)  
 **Collaborators welcome.** See [CONTRIBUTING.md](CONTRIBUTING.md). Contact: [sowbot.co.uk](https://sowbot.co.uk)
 
----
 | # | Feature | Description | Status | Phase |
 |---|---------|-------------|--------|-------|
 | **FOUNDATION** | | | | **2025** |
 | F1 | Containerised deployment | Full ROS 2 Jazzy stack managed via Docker and `manage.py`. Live volume mapping to `/workspace`. Build, full-build, and runtime modes. | Done | 2025 |
 | F2 | Stable device addressing | `fixusb.py` with Jetson/generic architecture detection, kernel `low_latency` mode, and udev symlink generation. Writes `.env` consumed by all launch files. | Done | 2025 |
-| F3 | Teleop dashboard | NiceGUI web cockpit on `:80` for joystick control and GPS health monitoring. | Done | 2025 |
-| F4 | ublox DGNSS driver | Modified `ublox_dgnss` providing high-bandwidth UBX binary data. Dual F9P moving-base configuration with dynamic port assignment via `fixusb.py`. | Active | 2025 |
+| F3 | Teleop dashboard | NiceGUI web cockpit on `:80`. Three-tab interface: **Nav** (joystick, e-stop, topo map, node-drop, track mode), **Mission** (fields2cover corner entry, row plan generator stub, reorderable mission queue), **System** (telemetry, safety indicators, GPS leaflet map). | Done | 2025 |
+| F4 | ublox DGNSS driver | Dual F9P moving-base configuration with dynamic port assignment via `fixusb.py`. | Done | 2026 |
 | F5 | Diagnostics TUI | `agbot-diagnostic.py` terminal status view of all hardware topics. Run inside container via `login.sh`. | Done | 2025 |
 | **MVP FIELD** | | | | **2026** |
-| M1 | AOC platform integration | The first non-CUDA, low-cost open hardware entry in the AOC ecosystem. Demonstrates AOC platform abstraction on affordable ARM hardware accessible to smallholders. | In progress | 2026 |
-| M2 | Topological navigation + nav2 | LCAS `topological_navigation` (`aoc_refactor` branch) cloned and building in Dockerfile. Self-contained `navigation2.py` with A\* route planning, explicit state machine, and `row_traversal` / `NavigateToPose` / `goal_align` edge actions. `fake_nav2_server` simulator enables full pipeline testing without hardware. Pending: Nav2 topic remapping shim and Jazzy field validation (Issue #8 gate). | In progress  | 2026 |
-| M3 | Open-field row-crop scenario | `strawberry_polytunnel.tmap2.yaml` (Riseholme) serves as format reference. Caatinga farm maps (`meu_mapa.pgm`, `novo_mapa_fazenda.pgm`) committed to [caatingarobotics](https://github.com/samuk/caatingarobotics). AOC scenario definition for Caatinga semi-arid row-crop conditions pending tmap2 authoring from real field survey. | ~20% Done | 2026 |
-| M4 | RTK-GNSS localisation | Dual u-blox F9P moving-base. NAV-RELPOSNED heading vector fused with wheel odometry in `robot_localization` EKF (`gps_ekf.yaml` authored in caatingarobotics). Pending: topic remapping from `ublox_dgnss` native topics (`ublox_nav_sat_fix_hp`, `ubx_nav_rel_pos_ned`) to EKF inputs (`/gps/fix`, `/imu`). Heading validated at antenna separation >= 0.5 m. | ~40% Done | 2026 |
+| M1 | AOC platform integration | Demonstrates AOC platform abstraction on affordable ARM hardware accessible to smallholders. | In progress | 2026 |
+| M2 | Topological navigation + nav2 | LCAS `topological_navigation` (`aoc_refactor` branch) building in Dockerfile; RViz visualisation confirmed working. Self-contained `navigation2.py` with A\* route planning, explicit state machine, and `row_traversal` / `NavigateToPose` / `goal_align` edge actions. `fake_nav2_server` simulator enables full pipeline testing without hardware. Nav2 topic remapping handled via [fusioncore](https://github.com/manankharwar/fusioncore) (see M2a). Pending: Jazzy field validation. | In progress | 2026 |
+| M2a | fusioncore nav2 bridge | [fusioncore](https://github.com/manankharwar/fusioncore) provides the Nav2 topic remapping shim between LCAS `topological_navigation` and Nav2. Cloned, building in Dockerfile, and `fusioncore_node` launched via `devkit.launch.py`. Pending: end-to-end test on live hardware. | In progress | 2026 |
+| M3 | Open-field row-crop scenario | `strawberry_polytunnel.tmap2.yaml` (Riseholme) serves as format reference. Caatinga farm maps. In-cockpit live node-drop workflow implemented in UI: validates name + pose, writes updated YAML to `/workspace/maps/`, calls `switch_topological_map` with fallback to direct topic publish. Pending: tmap2 authoring from real field survey. | ~50% Done | 2026 |
+| M4 | RTK-GNSS localisation | Dual u-blox F9P moving-base configuration. `ublox_mb+r_rover` publishes `/rover/ublox_nav_sat_fix_hp` and `/rover/ubx_nav_rel_pos_ned` (NAV-RELPOSNED heading vector). `topic_tools relay` bridges fix to `/gnss/fix`; `relposned_heading_shim` converts NAV-RELPOSNED to `compass_msgs/Compass` on `/gnss/heading` (ENU radians; publishes only when `relPosValid` + `relPosHeadingValid` flags set and baseline ≥ 0.3 m). [fusioncore](https://github.com/manankharwar/fusioncore) UKF (`fusioncore_ros`) fuses `/gnss/fix` + `/gnss/heading` + `/odom/wheels` → `/fusion/odom` + `odom→base_link`. `ublox_single.launch.py` added for single-receiver development/testing without full moving-base setup. Pending: antenna lever-arm offset measurement (`fusioncore.yaml`), test on live hardware. | ~70% Done | 2026 |
 | M5 | Dual-SBC ROS 2 stack | Both Avaota A1 boards (8x Cortex-A55, T527) run ROS 2 Jazzy with `rmw_zenoh_cpp`. Static peer Zenoh session over dedicated 1 GbE crossover. Multicast discovery disabled. Pending: `zenoh_config.json` peer config committed to both repos. | Planned | 2026 |
 | M6 | NPU perception (Neo board) | Full `camera_source_node` → `yolo_inference_node` → `infestation_analytics_node` pipeline implemented in [caatingarobotics](https://github.com/samuk/caatingarobotics) `caatinga_vision` package. 1 m grid infestation mapping, pump-rate spray recommendations, session-logged CSV/JSON output. Pending: T527 AIPU model conversion, Zenoh bridge to publish `/aoc/conditions` to Limbic System. 200 ms capture-to-publish SLA. | ~30% Done | 2026 |
-| M7 | Sentor safety monitoring | [LCAS Sentor](https://github.com/LCAS/sentor) topic and node health monitoring. Publishes `/safety/heartbeat` (false on estop/bumper trigger or driver loss) and `/warning/heartbeat` (false on camera, odometry, battery, or perception loss). Installed and building. `sowbot_monitor.yaml` authored and wired into `devkit.launch.py`. Pending: smoke-test against live hardware, BMS voltage cutoff confirmation. | ~40% Done | 2026 |
-| M8 | Visual crop-row navigation | `sowbot_row_follow` package in [caatingarobotics](https://github.com/samuk/caatingarobotics). ExG vegetation index + Otsu threshold, scan-window line fitting, Cherubini & Chaumette visual servoing. Dervived from Visual servoing-based navigation for monitoring row-crop fields - Ahmadi, Alireza and Nardi, Lorenzo and Chebrolu, Nived and Stachniss, Cyrill. Validated on USB camera at 10 Hz: `/aoc/conditions/row_offset` and `/aoc/heartbeat/neo_vision` publishing live. Camera calibration (`camera_height_m`, `camera_tilt_deg`) required before field use; currently using BonnBot defaults. | ~60% Done | 2026 |
-| M9 | Vizanti web visualisation | [Vizanti](https://github.com/MoffKalast/vizanti/tree/ros2) web-based mission planner and live telemetry for field operators. | Research | 2026 |
-| **PRODUCTION** | | | | **2027** |
+| M7 | Sentor safety monitoring | [LCAS Sentor](https://github.com/LCAS/sentor) topic and node health monitoring. Publishes `/safety/heartbeat` (false on estop/bumper trigger or driver loss) and `/warning/heartbeat` (false on camera, odometry, battery, or perception loss). Cloned and building in Dockerfile. Pending: `sowbot_monitor.yaml` authoring, wiring into `devkit.launch.py`, and smoke-test against live hardware. | ~40% Done | 2026 |
+| M8 | Visual crop-row navigation | `sowbot_row_follow` package vendored in this repo (derived from [Agricultural-Robotics-Bonn/visual-multi-crop-row-navigation](https://github.com/Agricultural-Robotics-Bonn/visual-multi-crop-row-navigation)). ExG vegetation index + Otsu threshold, scan-window line fitting, Cherubini & Chaumette visual servoing. Validated on USB camera at 10 Hz: publishes `/aoc/conditions/row_offset`, `/aoc/conditions/row_heading_error`, and `/aoc/heartbeat/neo_vision` live. Camera calibration (`camera_height_m`, `camera_tilt_deg`) required before field use; currently using BonnBot defaults. | ~70% Done | 2026 |
+| **PRODUCTION** | | | | **~2027** |
 | P1 | STM32H7 + copper-rs MCU | Replace ESP32/Lizard DSL with STM32H745 running [copper-rs](https://github.com/copper-project/copper-rs) statically-scheduled Rust firmware. Hard real-time motor PID, hardware safety interlocks. | Research | 2027 |
 | P2 | CANopen bus | ISO 11898 FDCAN at 500 kbit/s arbitration / 2 Mbit/s data phase. [lely-core](https://github.com/lely-industries/lely-core) CANopen master on Limbic T527 native M_CAN peripheral. DSP402 drive profile. | Research | 2027 |
 | P3 | RT kernel + core isolation | PREEMPT_RT kernel on the Limbic System (Avaota A1 / T527) running LCAS `topological_navigation` (`aoc_refactor`) and Nav2. `isolcpus=4-7` with RTK EKF on core 2 (SCHED_FIFO 60), AOC navigation on cores 4-6, watchdog on core 5. GbE/CAN IRQ affinity pinned to core 0. | Planned | 2027 |
@@ -43,7 +41,6 @@ Open-source precision seeding and weeding robot — [sowbot.co.uk](https://sowbo
 | **DATASETS & COLLABORATION** | | | | **Ongoing** |
 | D1 | UK open-field dataset | Field imagery and GNSS logs from UK agroecological farm conditions. Published under CC licence for training and benchmarking. | Planned | 2026 |
 | D2 | Caatinga biome dataset | Semi-arid row-crop imagery from Brazilian Caatinga conditions contributed by [caatingarobotics](https://github.com/joaodemouragy-hash/caatingarobotics). Validated on T527 AIPU. | Active | 2026 |
----
 
 ### Collaboration
 
@@ -82,7 +79,7 @@ This repo may contain traces of LLM slop, We've done our best to mitigate this. 
 ### 1. Clone the Repository
 Open a terminal on your host machine and download the workspace:
 ```bash
-git clone -b sowbot https://github.com/Agroecology-Lab/feldfreund_devkit_ros.git
+git clone -b caatinga-dev https://github.com/Agroecology-Lab/feldfreund_devkit_ros.git
 cd feldfreund_devkit_ros
 ```
 
@@ -93,7 +90,7 @@ Use the management script to build the ROS 2 workspace and launch the robot stac
 xhost +local:docker
 ./manage.py 
 ```
-*Note: manage.py automatically detects hardware ports (ESP32 & u-blox), updates your .env configuration, and launches the container with live volume mapping to /workspace.*
+Access http://localhost to access the WebUI
 
 
 ## Management & Tools
@@ -129,18 +126,6 @@ You can also make it verbose with:
 python3 agbot-diagnostic.py full
 ```
 
-### Proposed GNSS Topic Mapping: Septentrio vs. Dual u-blox F9P (Moving Base)
-
-| Septentrio Topic | `ublox_dgnss` Topic (Rover-Rover) | Source UBX Message | Functional Description |
-| :--- | :--- | :--- | :--- |
-| `/pvtgeodetic` | `/ubx_nav_pvt` | **NAV-PVT** | Geodetic position, velocity, and time. |
-| `/gpsfix` | `/ublox_nav_sat_fix_hp` | **NAV-PVT + NAV-HPPOSLLH** | High-precision global position fix. |
-| `/poscovgeodetic` | `/ubx_nav_cov` | **NAV-COV** | Position and velocity covariance matrix. |
-| `/atteuler` | `/ubx_nav_rel_pos_ned` | **NAV-RELPOSNED** | **Heading/Yaw** derived from the relative vector. |
-| `/attcoveuler` | `/ubx_nav_rel_pos_ned` | **NAV-RELPOSNED** | Accuracy/Variance of the heading calculation. |
-| `/aimplusstatus` | `/ubx_mon_rf` | **MON-RF** | Jamming/Interference monitoring indicators. |
-
-
 ## Sketch of MVP 2026 architecture
 
 ### 1. The Lizard Brain (RT Microcontroller)
@@ -166,14 +151,7 @@ python3 agbot-diagnostic.py full
 * **Function:** NPU-accelerated inference (YOLO/Object tracking) and sensor fusion.
 * **Connectivity:** Native Zenoh integration via `rmw_zenoh_cpp`. Publishes environment states and "Conditions" to the Zenoh network.
 
-# Navigation detail for 2026
-
-| Layer          | Component                                      | Role                                                        |
-|----------------|------------------------------------------------|-------------------------------------------------------------|
-| **Task**       | LCAS topological_navigation                    | "Visit crop rows A, B, C" — graph of named farm locations   |
-| **Navigation** | Nav2 (fazenda_completa)                        | Moves between poses                                         |
-| **Localisation**| GPS + EKF (navsat_transform + ekf_node)       | Outdoor positioning                                         |
-| **Simulation** | Gazebo (sim.launch.py + minha_fazenda.world)   | Simulated environment                                       |
+                          |
 
 ## Sketch of possible eventual ~2027 architecture
 
@@ -207,7 +185,6 @@ python3 agbot-diagnostic.py full
 * **Role:** Asynchronous Perception.
 * **Function:** NPU-accelerated inference (YOLO/Object tracking) and sensor fusion.
 * **Connectivity:** Native Zenoh integration via `rmw_zenoh_cpp`. Publishes environment states and "Conditions" to the Zenoh network.
-
 
 
 ## Feldfreund DevKit ROS 

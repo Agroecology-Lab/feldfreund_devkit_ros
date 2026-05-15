@@ -1,5 +1,5 @@
 #!/bin/bash
-# 🦎 Official Lizard Flasher (Agroecology Lab Specialist Version)
+# 🦎  Lizard Flasher (Agroecology Lab Version)
 
 # 1. Hardware Access & Environment Validation
 if [ -f "fixusb.py" ]; then
@@ -47,7 +47,7 @@ python3 -m esptool --chip esp32s3 --port "$MCU_PORT" --baud 921600 \
     0x8000 "$PARTITIONS" \
     0x20000 "$FIRMWARE"
 
-# 5. The "Lizard Kick" (Critical for ThinkPad X1 USB stability)
+# 5. The "Lizard Kick" (USB stability)
 echo "⚡ Stabilising TTY and triggering hardware boot..."
 sudo stty -F "$MCU_PORT" -hupcl raw 115200
 python3 -c "import serial, time; s=serial.Serial('$MCU_PORT'); s.dtr=0; s.rts=0; time.sleep(0.5); s.dtr=1; s.rts=1; s.close()"
