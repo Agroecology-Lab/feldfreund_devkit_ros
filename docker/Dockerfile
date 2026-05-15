@@ -13,16 +13,6 @@ RUN sed -i \
     sed -i 's/^Suites: noble$/Suites: noble noble-updates noble-security/' \
     /etc/apt/sources.list.d/ubuntu.sources || true
 
-RUN apt-get update && apt-get install -y locales tzdata && \
-    locale-gen en_US.UTF-8 && \
-    update-locale LC_ALL=en_US.UTF-8 LANG=en_US.UTF-8 && \
-    ln -fs /usr/share/zoneinfo/UTC /etc/localtime && \
-    dpkg-reconfigure --frontend noninteractive tzdata
-
-ENV LANG=en_US.UTF-8
-ENV LC_ALL=en_US.UTF-8
-ENV DEBIAN_FRONTEND=noninteractive
-
 # ============================================================
 # Stage 2: Third-party APT Repositories
 # ============================================================
@@ -53,73 +43,76 @@ RUN find /etc/apt/sources.list.d/ -name "*.list" -exec \
 # Stage 3: System & ROS Binary Dependencies
 # ============================================================
 
-# 3.1 Base system tools
 RUN apt-get update && \
-    apt-get install -y --fix-missing --no-install-recommends \
+    apt-get install -y locales tzdata && \
+    locale-gen en_US.UTF-8 && \
+    update-locale LC_ALL=en_US.UTF-8 LANG=en_US.UTF-8 && \
+    ln -fs /usr/share/zoneinfo/UTC /etc/localtime && \
+    dpkg-reconfigure --frontend noninteractive tzdata
+
+ENV LANG=en_US.UTF-8
+ENV LC_ALL=en_US.UTF-8
+ENV DEBIAN_FRONTEND=noninteractive
+
+# 3.1 Base system tools
+RUN apt-get install -y --fix-missing --no-install-recommends \
       wget ca-certificates unzip git \
-      python3-pip python3-rosdep \
-      curl gnupg2 \
-      libusb-1.0-0-dev \
+      python3-pip \
+      python3-rosdep \
+      python3-dev \
+      python3-sympy \
+      python3-fonttools \
+      python3-ufolib2 \
+      python3-matplotlib \
+      python3-serial \
+      python3-requests \
+      python3-yaml \
+      curl \
+      gnupg2 \
       usbutils \
       libgl1 \
       libegl1 \
-      nano \
-      htop \
-      libxcb-shape0 \
-      libgles2 && \
-    apt-get clean && rm -rf /var/lib/apt/lists/*
-
-# 3.2 ROS Jazzy binaries (with retries)
-#     NOTE: ros-jazzy-fields2cover intentionally excluded here —
-#     we build from source with BUILD_PYTHON=ON in Stage 3.5 instead.
-RUN for i in 1 2 3 4 5; do \
-      apt-get update && \
-      apt-get install -y --fix-missing --no-install-recommends \
-        libinput-bin \
-        ros-jazzy-navigation2 \
-        ros-jazzy-nav2-amcl \
-        ros-jazzy-nav2-bringup \
-        ros-jazzy-nav2-behavior-tree \
-        ros-jazzy-nav2-bt-navigator \
-        ros-jazzy-septentrio-gnss-driver \
-        ros-jazzy-rmw-cyclonedds-cpp \
-        ros-jazzy-rosbag2-storage-mcap \
-        ros-jazzy-rtcm-msgs \
-        ros-jazzy-nmea-msgs \
-        ros-jazzy-libcurl-vendor \
-        ros-jazzy-topic-tools \
-        ros-jazzy-usb-cam \
-        ros-jazzy-image-transport \
-        ros-jazzy-foxglove-bridge \
-        ros-jazzy-tf2-geometry-msgs \
-        ros-jazzy-tf-transformations \
-        ros-jazzy-interactive-markers \
-        ros-jazzy-control-msgs \
-        ros-jazzy-controller-manager-msgs \
-        ros-jazzy-rviz2 \
-        python3-sympy \
-        python3-fonttools \
-        python3-ufolib2 \
-        python3-matplotlib \
-        python3-serial python3-requests python3-yaml && \
-      break || (echo "Stage 3.2 attempt $i failed, retrying in 15s..." && sleep 15); \
-    done && \
-    apt-get clean && rm -rf /var/lib/apt/lists/*
-
-# ============================================================
-# Stage 3.5: Fields2Cover — build from source with Python bindings
-# ============================================================
-RUN apt-get update && \
-    apt --fix-broken install -y && \
-    apt-get install -y --no-install-recommends \
-      cmake \
       libgdal-dev \
       libeigen3-dev \
       libboost-all-dev \
       libtbb-dev \
-      swig \
-      python3-dev && \
-    apt-get clean && rm -rf /var/lib/apt/lists/*
+      libusb-1.0-0-dev \
+      nano \
+      htop \
+      libxcb-shape0 \
+      libgles2 \
+      libinput-bin \
+      ros-jazzy-navigation2 \
+      ros-jazzy-nav2-amcl \
+      ros-jazzy-nav2-bringup \
+      ros-jazzy-nav2-behavior-tree \
+      ros-jazzy-nav2-bt-navigator \
+      ros-jazzy-septentrio-gnss-driver \
+      ros-jazzy-rmw-cyclonedds-cpp \
+      ros-jazzy-rosbag2-storage-mcap \
+      ros-jazzy-rtcm-msgs \
+      ros-jazzy-nmea-msgs \
+      ros-jazzy-libcurl-vendor \
+      ros-jazzy-topic-tools \
+      ros-jazzy-usb-cam \
+      ros-jazzy-image-transport \
+      ros-jazzy-foxglove-bridge \
+      ros-jazzy-tf2-geometry-msgs \
+      ros-jazzy-tf-transformations \
+      ros-jazzy-interactive-markers \
+      ros-jazzy-control-msgs \
+      ros-jazzy-controller-manager-msgs \
+      ros-jazzy-rviz2 \
+      cmake \
+      swig
+
+# 3.2 ROS Jazzy binaries (with retries)
+#     NOTE: ros-jazzy-fields2cover intentionally excluded here —
+#     we build from source with BUILD_PYTHON=ON in Stage 3.5 instead.
+
+# ============================================================
+# Stage 3.5: Fields2Cover — build from source with Python bindings
+# ============================================================
 
 ARG F2C_REF=v2.0.0
 
@@ -254,12 +247,9 @@ RUN for i in 1 2 3 4 5; do \
 # ============================================================
 # Stage 9: rosdep — Automated Dependency Resolution
 # ============================================================
-RUN apt-get update && \
-    apt-get install -y --fix-broken && \
-    if [ ! -d /etc/ros/rosdep/sources.list.d ]; then rosdep init; fi && \
+RUN if [ ! -d /etc/ros/rosdep/sources.list.d ]; then rosdep init; fi && \
     rosdep update && \
     for i in 1 2 3 4 5; do \
-      apt-get update && \
       rosdep install --from-paths src --ignore-src -y \
         --rosdistro jazzy \
         --skip-keys "\
@@ -305,34 +295,15 @@ RUN apt-get update && \
           yolox \
           sentor" && \
       break || (echo "rosdep attempt $i failed, retrying in 15s..." && sleep 15); \
-    done && \
-    rm -rf /var/lib/apt/lists/*
+    done
 
 # ============================================================
 # Stage 10: colcon Build
 # ============================================================
-RUN apt-get update && \
-    apt-get install -f -y && \
-    for i in 1 2 3 4 5; do \
-      apt-get install -y --no-install-recommends \
-        ros-jazzy-rmw-cyclonedds-cpp \
-        ros-jazzy-rtcm-msgs \
-        ros-jazzy-nmea-msgs \
-        ros-jazzy-libcurl-vendor \
-        ros-jazzy-interactive-markers \
-        ros-jazzy-tf-transformations \
-        ros-jazzy-rviz2 \
-        ros-jazzy-nav2-bringup \
-        ros-jazzy-navigation2 \
-        ros-jazzy-topic-tools \
-        usbutils libusb-1.0-0-dev && \
-      break || (echo "Stage 10 apt attempt $i failed, retrying in 15s..." && sleep 15); \
-    done && \
-    pip install --break-system-packages --no-cache-dir transforms3d && \
+RUN pip install --break-system-packages --no-cache-dir transforms3d && \
     . /opt/ros/jazzy/setup.sh && \
     colcon build --symlink-install \
-      --cmake-args -DCMAKE_BUILD_TYPE=Release && \
-    apt-get clean && rm -rf /var/lib/apt/lists/*
+      --cmake-args -DCMAKE_BUILD_TYPE=Release
 
 # ============================================================
 # Stage 11: Runtime Environment
