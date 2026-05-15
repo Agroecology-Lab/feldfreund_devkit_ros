@@ -11,7 +11,6 @@ sudo apt-get update
 sudo apt-get install -y \
   libgdal-dev \
   libtbb-dev \
-  libtinyxml2-dev \
   swig
 
 git clone --depth 1 --branch ${F2C_REF} \
