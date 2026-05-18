@@ -284,11 +284,25 @@ def _f2c_xy_to_latlon(x: float, y: float,
 #
 # Obstacle rings are still added to the F2C Cell as a hint — belt and
 # braces — but the safety net is the shapely post-clip.
+#
+# HEADLAND: optional Minkowski erosion of the field by headland_width_m
+# before swath generation, so swaths don't start/end exactly at the
+# field boundary. Done via F2C's HG_Const_gen; wrapped in try/except
+# because the headland call can fail on degenerate / very narrow fields.
+#
+# SNAKE: optional boustrophedon ordering — every second swath reversed
+# so end-of-swath-N is near start-of-swath-N+1. Done in Python rather
+# than via f2c.RP_Snake to avoid depending on which route-planner API
+# the local F2C build exposes. Snake-flip happens *before* shapely
+# clipping so direction is preserved per-fragment when an obstacle
+# splits a swath into pieces.
 def _run_f2c(corners_ll: list,
              obstacle_rings: list,
              tool_width: float,
              angle_deg: float,
-             obstacle_pad_m: float = 0.0) -> list:
+             obstacle_pad_m: float = 0.0,
+             headland_width_m: float = 0.0,
+             snake_order: bool = True) -> list:
     import math, sys
     import fields2cover as f2c
 
@@ -297,6 +311,7 @@ def _run_f2c(corners_ll: list,
 
     _log(f'called: {len(corners_ll)} boundary pts, '
          f'{len(obstacle_rings)} obstacles, pad={obstacle_pad_m}m, '
+         f'headland={headland_width_m}m, snake={snake_order}, '
          f'width={tool_width}m, angle={angle_deg}°')
 
     try:
@@ -310,6 +325,7 @@ def _run_f2c(corners_ll: list,
 
     lat0, lon0 = corners_ll[0]
 
+    # ── Outer boundary ────────────────────────────────────────────────
     outer = f2c.LinearRing()
     for lat, lon in corners_ll:
         x, y = _f2c_latlon_to_xy(lat, lon, lat0, lon0)
@@ -318,6 +334,7 @@ def _run_f2c(corners_ll: list,
     cell = f2c.Cell()
     cell.addRing(outer)
 
+    # ── Obstacles: shapely polys for post-clip + F2C hole hints ──────
     obstacle_polys_xy: list = []
     for idx, ring_ll in enumerate(obstacle_rings):
         if len(ring_ll) < 3:
@@ -352,9 +369,30 @@ def _run_f2c(corners_ll: list,
 
     _log(f'built cell with {len(obstacle_polys_xy)} shapely obstacles')
 
+    # ── Headland inset ───────────────────────────────────────────────
+    # Shrinks the cover area by headland_width_m on all sides so the
+    # robot has room to turn at field edges instead of starting/ending
+    # swaths at the boundary itself. Skipped when 0 — preserves the
+    # original behaviour for backwards compatibility with saved fields.
+    swath_cell = cell
+    if headland_width_m > 0:
+        try:
+            hg = f2c.HG_Const_gen()
+            inner = hg.generateHeadlands(f2c.Cells(cell), headland_width_m)
+            if inner.size() > 0:
+                swath_cell = inner.getGeometry(0)
+                _log(f'headland: inset {headland_width_m}m → '
+                     f'{inner.size()} sub-cell(s)')
+            else:
+                _log(f'headland: inset {headland_width_m}m produced 0 '
+                     f'cells (too wide?) — using full boundary')
+        except Exception as e:
+            _log(f'headland generation failed: {e} — using full boundary')
+
+    # ── Swath generation ─────────────────────────────────────────────
     angle_rad = math.radians(angle_deg % 180)
     sg     = f2c.SG_BruteForce()
-    swaths = sg.generateSwaths(angle_rad, tool_width, cell)
+    swaths = sg.generateSwaths(angle_rad, tool_width, swath_cell)
 
     raw_xy: list = []
     for i in range(swaths.size()):
@@ -367,6 +405,20 @@ def _run_f2c(corners_ll: list,
             raw_xy.append(pts)
     _log(f'F2C produced {len(raw_xy)} raw swaths')
 
+    # ── Snake ordering (Python-side boustrophedon) ───────────────────
+    # F2C's BruteForce returns swaths spatially sorted along the
+    # perpendicular to `angle`. Reversing every other one means the end
+    # of swath N is near the start of swath N+1 — minimising inter-row
+    # travel and giving the topo graph a natural chain order.
+    #
+    # Done before shapely clipping so direction is preserved when an
+    # obstacle splits a swath into multiple fragments.
+    if snake_order and raw_xy:
+        raw_xy = [list(reversed(pts)) if i % 2 == 1 else list(pts)
+                  for i, pts in enumerate(raw_xy)]
+        _log(f'snake-flipped {len(raw_xy)} swaths')
+
+    # ── Post-clip swaths against obstacle union ──────────────────────
     if has_shapely and obstacle_polys_xy:
         obstacles_union = unary_union(obstacle_polys_xy)
         _log(f'obstacle union: type={obstacles_union.geom_type} '
@@ -401,99 +453,13 @@ def _run_f2c(corners_ll: list,
         _log(f'NO CLIPPING: has_shapely={has_shapely}, '
              f'obstacle_polys_xy={len(obstacle_polys_xy)}')
 
+    # ── Project back to lat/lon ──────────────────────────────────────
     result: list = []
     for pts_xy in raw_xy:
         pts_ll = [_f2c_xy_to_latlon(x, y, lat0, lon0) for x, y in pts_xy]
         if len(pts_ll) >= 2:
             result.append(pts_ll)
     _log(f'returning {len(result)} swaths to UI')
-    return result
-    
-    # ── Outer boundary ────────────────────────────────────────────────────
-    outer = f2c.LinearRing()
-    for lat, lon in corners_ll:
-        x, y = _f2c_latlon_to_xy(lat, lon, lat0, lon0)
-        outer.addPoint(f2c.Point(x, y, 0))
-    outer.closeRing()
-
-    cell = f2c.Cell()
-    cell.addRing(outer)
-
-    # ── Obstacles: build shapely polys for post-clip, plus add as F2C holes
-    # (CW winding) in case the local build does honour them — costs nothing
-    # to add and helps the F2C output if it does.
-    obstacle_polys_xy: list = []
-    for ring_ll in obstacle_rings:
-        if len(ring_ll) < 3:
-            continue
-        pts_xy = [_f2c_latlon_to_xy(lat, lon, lat0, lon0)
-                  for lat, lon in ring_ll]
-
-        if has_shapely:
-            poly = Polygon(pts_xy)
-            if obstacle_pad_m > 0:
-                poly = poly.buffer(obstacle_pad_m,
-                                   join_style=2, resolution=8)
-            if poly.is_empty or poly.geom_type != 'Polygon':
-                continue
-            obstacle_polys_xy.append(poly)
-            # Use the buffered exterior for the F2C hole too, so the hint
-            # matches what we'll post-clip against.
-            pts_xy = list(poly.exterior.coords)
-
-        hole = f2c.LinearRing()
-        # CW winding for interior ring (opposite the CCW outer boundary).
-        for x, y in reversed(pts_xy):
-            hole.addPoint(f2c.Point(x, y, 0))
-        hole.closeRing()
-        cell.addRing(hole)
-
-    # ── F2C swath generation ──────────────────────────────────────────────
-    angle_rad = math.radians(angle_deg % 180)
-    sg        = f2c.SG_BruteForce()
-    swaths    = sg.generateSwaths(angle_rad, tool_width, cell)
-
-    raw_xy: list = []
-    for i in range(swaths.size()):
-        path = swaths.at(i).getPath()
-        pts  = []
-        for j in range(path.size()):
-            pt = path.getGeometry(j)
-            pts.append((pt.getX(), pt.getY()))
-        if len(pts) >= 2:
-            raw_xy.append(pts)
-
-    # ── Post-clip swaths against obstacle union ──────────────────────────
-    # This is the guarantee. Each swath is a LineString, the obstacles
-    # form a single (possibly multi-) polygon, and line.difference(poly)
-    # returns the line with the in-polygon portion removed. A swath that
-    # would pass through an obstacle gets broken into 2+ shorter swaths
-    # with a gap around the obstacle.
-    #
-    # Fragments shorter than half the tool width are dropped — they can't
-    # be driven meaningfully and just clutter the output / topo graph.
-    if has_shapely and obstacle_polys_xy:
-        obstacles_union = unary_union(obstacle_polys_xy)
-        clipped: list = []
-        for pts in raw_xy:
-            line = LineString(pts)
-            remaining = line.difference(obstacles_union)
-            if remaining.is_empty:
-                continue
-            geoms = (list(remaining.geoms)
-                     if isinstance(remaining, MultiLineString)
-                     else [remaining])
-            for sub in geoms:
-                if sub.length > tool_width * 0.5:
-                    clipped.append(list(sub.coords))
-        raw_xy = clipped
-
-    # ── Project back to lat/lon ──────────────────────────────────────────
-    result: list = []
-    for pts_xy in raw_xy:
-        pts_ll = [_f2c_xy_to_latlon(x, y, lat0, lon0) for x, y in pts_xy]
-        if len(pts_ll) >= 2:
-            result.append(pts_ll)
     return result
 
 
@@ -1640,6 +1606,21 @@ class NiceGuiNode(Node):
                 f2c_angle.on('update:model-value',
                              lambda e: angle_lbl.set_text(f'{int(e.args)}°'))
 
+                # HEADLAND: shrink cover area by this much on all sides so
+                # swaths don't start/end at the field boundary. 0 = off.
+                ui.html('<div class="sec-label mt-3">Headland width</div>')
+                f2c_headland = ui.number(
+                    value=0.0, min=0.0, max=5.0, step=0.1, precision=2,
+                    suffix='m',
+                ).classes('w-full')
+                ui.label('0 = no inset; ≈ tool width for one-row headland').classes(
+                    'text-xs').style('color:#8c959f')
+
+                # SNAKE: reverse every other swath so end-of-N is near
+                # start-of-N+1. Default on.
+                ui.html('<div class="sec-label mt-3">Snake order</div>')
+                f2c_snake = ui.checkbox('reverse every other row', value=True)
+
                 ui.html('<div class="sec-label mt-3">First row ID</div>')
                 f2c_row_id_start = ui.number(
                     value=1, min=1, step=1, precision=0,
@@ -1741,9 +1722,11 @@ class NiceGuiNode(Node):
             f2c_status.set_text('Running F2C…')
             f2c_status.style('color:#57606a')
 
-            width     = float(f2c_width.value or 1.2)
-            angle_deg = float(f2c_angle.value or 0)
-            row_start = int(f2c_row_id_start.value or 1)
+            width      = float(f2c_width.value or 1.2)
+            angle_deg  = float(f2c_angle.value or 0)
+            row_start  = int(f2c_row_id_start.value or 1)
+            headland_m = float(f2c_headland.value or 0.0)
+            snake      = bool(f2c_snake.value)
 
             # OBSTACLE: snapshot obstacle rings and pad
             obstacle_rings = self._obstacle_mgr.rings_ll()
@@ -1753,7 +1736,8 @@ class NiceGuiNode(Node):
                 from nicegui import run as ng_run
                 swaths = await ng_run.io_bound(
                     _run_f2c, list(corners_ll), obstacle_rings,
-                    width, angle_deg, pad_m)
+                    width, angle_deg, pad_m,
+                    headland_m, snake)
             except Exception as exc:
                 f2c_status.set_text(f'ERROR: {exc}')
                 f2c_status.style('color:#cf222e')
@@ -1779,10 +1763,13 @@ class NiceGuiNode(Node):
             self._f2c_tool_width = width
             self._f2c_angle_deg  = angle_deg
 
+            hl_note  = f' · {headland_m}m headland' if headland_m > 0 else ''
+            snk_note = ' · snake' if snake else ''
             obs_note = (f' · {len(obstacle_rings)} obs avoided'
                         if obstacle_rings else '')
             f2c_status.set_text(
-                f'{len(swaths)} rows · {width}m wide · {angle_deg:.0f}°{obs_note}')
+                f'{len(swaths)} rows · {width}m wide · {angle_deg:.0f}°'
+                f'{hl_note}{snk_note}{obs_note}')
             f2c_status.style('color:#1a7f37')
             plan_btn.set_enabled(True)
             save_btn.set_enabled(bool(swaths))
