@@ -10,3 +10,5 @@ docker run -it --rm --net=host --privileged \
     export DISPLAY=:99 &&
     gz sim empty.sdf
   "
+
+http://localhost:6080/vnc.html
