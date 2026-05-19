@@ -320,6 +320,7 @@ RUN apt-get update && \
    	x11vnc \
         websockify \
         novnc \ 
+        gz-harmonic \
         ros-jazzy-rmw-cyclonedds-cpp \
         ros-jazzy-rtcm-msgs \
         ros-jazzy-nmea-msgs \
