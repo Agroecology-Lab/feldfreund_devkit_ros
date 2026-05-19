@@ -97,8 +97,6 @@ RUN for i in 1 2 3 4 5; do \
         ros-jazzy-control-msgs \
         ros-jazzy-controller-manager-msgs \
         ros-jazzy-rviz2 \
-        ros-jazzy-rqt \
-        ros-jazzy-rqt-common-plugins \
         python3-sympy \
         python3-fonttools \
         python3-ufolib2 \
@@ -194,7 +192,7 @@ ENV MESA_GL_VERSION_OVERRIDE=3.3
 # ============================================================
 # Stage 7: Workspace — Local Sources
 # ============================================================
-ARG CACHEBUST=1  # Restarts Docker build from here on ./manage.py build You may want to move it earlier or later in local development
+ARG CACHEBUST=1         
 WORKDIR /workspace
 COPY ./src/devkit_driver    ./src/devkit_driver
 COPY ./src/devkit_launch    ./src/devkit_launch
@@ -247,7 +245,7 @@ RUN for i in 1 2 3 4 5; do \
         https://github.com/LCAS/sentor src/sentor && break || \
       (echo "sentor attempt $i failed, retrying in 15s..." && sleep 15); \
     done
-
+    
 RUN for i in 1 2 3 4 5; do \
       GIT_TERMINAL_PROMPT=0 git clone --depth 1 -b main \
         https://github.com/nilseuropa/ros2graph_explorer src/ros2graph_explorer && break || \
@@ -318,6 +316,10 @@ RUN apt-get update && \
     apt-get install -f -y && \
     for i in 1 2 3 4 5; do \
       apt-get install -y --no-install-recommends \
+        xvfb \
+   	x11vnc \
+        websockify \
+        novnc \ 
         ros-jazzy-rmw-cyclonedds-cpp \
         ros-jazzy-rtcm-msgs \
         ros-jazzy-nmea-msgs \
