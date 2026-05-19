@@ -138,11 +138,6 @@ class DevkitManager:
                 os.system(f"stty -F {mcu_port} 115200 && (echo 's' > {mcu_port} &)")
 
         ros_command = (
-            "Xvfb :99 -screen 0 1920x1080x24 -nolisten tcp & "
-            "sleep 1 && "
-            "x11vnc -display :99 -nopw -forever -shared -quiet & "
-            "websockify --web /usr/share/novnc 6080 localhost:5900 & "
-            "export DISPLAY=:99 && "
             "source /opt/ros/jazzy/setup.bash && "
             "if [ -f /workspace/install/setup.bash ]; then source /workspace/install/setup.bash; fi && "
             f"ros2 launch devkit_launch devkit.launch.py sim:={is_sim} rover_port:={r_port} mcu_port:={mcu_port} " +
@@ -161,7 +156,6 @@ class DevkitManager:
             '--env', 'QT_X11_NO_MITSHM=1',
             '--env', 'GALLIUM_DRIVER=llvmpipe',
             '--env', 'MESA_LOADER_DRIVER_OVERRIDE=llvmpipe',
-            '--env', 'LIBGL_ALWAYS_SOFTWARE=1',
             '-v', '/tmp/.X11-unix:/tmp/.X11-unix:rw',
             '--env-file', str(env_file) if env_file.exists() else '/dev/null',
             '-v', '/dev:/dev',
