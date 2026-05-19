@@ -1924,7 +1924,7 @@ class NiceGuiNode(Node):
         status_lbl.set_text(f'Mission executor not yet implemented — queue: rows {queue}')
         status_lbl.style('color:#9a6700')
 
-   # ── System tab ────────────────────────────────────────────────────────────
+ # ── System tab ────────────────────────────────────────────────────────────
 
     def _system_content(self) -> None:
         with ui.row().classes('items-stretch w-full gap-3'):
@@ -2034,15 +2034,85 @@ class NiceGuiNode(Node):
 
                 ui.separator().classes('w-full my-1')
 
+                # ── RViz ─────────────────────────────────────────────────
+                _rviz_proc: list = [None]
+                _rviz_lbl = ui.label('').classes('text-xs font-mono').style('color:#57606a')
+                def _start_rviz():
+                    import subprocess, time
+                    if _rviz_proc[0] is not None and _rviz_proc[0].poll() is None:
+                        _rviz_lbl.set_text('already running')
+                        return
+                    try:
+                        subprocess.Popen(
+                            ['Xvfb', ':98', '-screen', '0', '1920x1080x24', '-nolisten', 'tcp'],
+                            stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
+                        )
+                        time.sleep(0.5)
+                        subprocess.Popen(
+                            ['x11vnc', '-display', ':98', '-nopw', '-forever', '-shared',
+                             '-quiet', '-rfbport', '5901'],
+                            stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
+                        )
+                        subprocess.Popen(
+                            ['websockify', '--web', '/usr/share/novnc', '6081', 'localhost:5901'],
+                            stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
+                        )
+                        time.sleep(0.5)
+                        _rviz_proc[0] = subprocess.Popen(
+                            ['ros2', 'run', 'rviz2', 'rviz2'],
+                            stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
+                            env={**os.environ, 'DISPLAY': ':98'},
+                        )
+                        _rviz_lbl.set_text(f'started (pid {_rviz_proc[0].pid})')
+                        _rviz_lbl.style('color:#1a7f37')
+                    except Exception as exc:
+                        _rviz_lbl.set_text(f'ERROR: {exc}')
+                        _rviz_lbl.style('color:#cf222e')
+                def _stop_rviz():
+                    if _rviz_proc[0] is not None:
+                        _rviz_proc[0].terminate()
+                        _rviz_proc[0] = None
+                        _rviz_lbl.set_text('stopped')
+                        _rviz_lbl.style('color:#57606a')
+                ui.button('Launch RViz', on_click=_start_rviz).props(
+                    'outline no-caps').classes('px-4')
+                ui.button('Stop RViz', on_click=_stop_rviz).props(
+                    'outline no-caps').classes('px-4')
+                ui.html(
+                    '<a href="http://localhost:6081/vnc.html" target="_blank" '
+                    'style="font-size:13px;color:var(--blue);text-decoration:none;'
+                    'padding:6px 12px;border:1px solid var(--blue);border-radius:4px;'
+                    'font-family:\'Courier New\',monospace;">'
+                    '↗ RViz (noVNC)</a>'
+                )
+                _rviz_lbl
+
+                ui.separator().classes('w-full my-1')
+
                 # ── Gazebo Sim ───────────────────────────────────────────
                 _gazebo_proc: list = [None]
                 _gazebo_lbl = ui.label('').classes('text-xs font-mono').style('color:#57606a')
                 def _start_gazebo():
-                    import subprocess
+                    import subprocess, time
                     if _gazebo_proc[0] is not None and _gazebo_proc[0].poll() is None:
                         _gazebo_lbl.set_text('already running')
                         return
                     try:
+                        subprocess.Popen(
+                            ['Xvfb', ':99', '-screen', '0', '1920x1080x24', '-nolisten', 'tcp'],
+                            stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
+                        )
+                        time.sleep(0.5)
+                        subprocess.Popen(
+                            ['x11vnc', '-display', ':99', '-nopw', '-forever', '-shared',
+                             '-quiet', '-rfbport', '5900'],
+                            stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
+                        )
+                        subprocess.Popen(
+                            ['websockify', '--web', '/usr/share/novnc', '6080', 'localhost:5900'],
+                            stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
+                        )
+                        time.sleep(0.5)
                         _gazebo_proc[0] = subprocess.Popen(
                             ['ros2', 'launch', 'agro_robot_sim', 'fazenda_completa.launch.py'],
                             stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
@@ -2054,7 +2124,6 @@ class NiceGuiNode(Node):
                         _gazebo_lbl.set_text(f'ERROR: {exc}')
                         _gazebo_lbl.style('color:#cf222e')
                 def _stop_gazebo():
-                    import subprocess
                     if _gazebo_proc[0] is not None:
                         _gazebo_proc[0].terminate()
                         _gazebo_proc[0] = None
@@ -2072,8 +2141,6 @@ class NiceGuiNode(Node):
                     '↗ Gazebo (noVNC)</a>'
                 )
                 _gazebo_lbl
-
-    # ── shared ────────────────────────────────────────────────────────────────
 
     def toggle_estop(self) -> None:
         self.soft_estop_active = not self.soft_estop_active
