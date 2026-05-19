@@ -1,10 +1,12 @@
 #!/usr/bin/env python3
 import os
-import signal
 import subprocess
 import sys
+import signal
 import time
+import shutil
 from pathlib import Path
+from typing import List, Dict
 
 
 class DevkitManager:
@@ -14,12 +16,12 @@ class DevkitManager:
         self.root_dir = Path(__file__).parent.resolve()
         signal.signal(signal.SIGINT, self._handle_exit)
 
-    def _log(self, msg: str, level: str = 'INFO'):
+    def _log(self, msg: str, level: str = "INFO"):
         print(f"[{time.strftime('%H:%M:%S')}] [{level}] {msg}")
 
     def _handle_exit(self, signum, frame):
-        self._log('Shutdown signal received. Stopping container...', 'WARN')
-        subprocess.run(['docker', 'stop', self.container_name], capture_output=True, check=False)
+        self._log("Shutdown signal received. Stopping container...", "WARN")
+        subprocess.run(['docker', 'stop', self.container_name], capture_output=True)
         sys.exit(0)
 
     def build(self, full_clean: bool = False):
@@ -27,21 +29,21 @@ class DevkitManager:
         build_cmd = ['docker', 'build', '-t', self.image_name, '-f', 'docker/Dockerfile', '.']
 
         if full_clean:
-            self._log('Full rebuild requested: Purging Docker cache...', 'WARN')
+            self._log("Full rebuild requested: Purging Docker cache...", "WARN")
             build_cmd.insert(2, '--no-cache')
 
-        if subprocess.run(build_cmd, check=False).returncode != 0:
-            self._log('Build failed.', 'ERROR')
+        if subprocess.run(build_cmd).returncode != 0:
+            self._log("Build failed.", "ERROR")
             sys.exit(1)
 
-    def _get_env_config(self) -> dict[str, str]:
+    def _get_env_config(self) -> Dict[str, str]:
         env_file = self.root_dir / '.env'
         if not env_file.exists():
             return {}
         return {k.strip(): v.strip() for line in env_file.read_text().splitlines()
                 if '=' in line and not line.startswith('#') for k, v in [line.split('=', 1)]}
 
-    def _find_ublox_interfaces(self) -> list[str]:
+    def _find_ublox_interfaces(self) -> List[str]:
         """Returns sysfs interface names for bound ublox cdc_acm devices."""
         ifaces = []
         cdc_path = Path('/sys/bus/usb/drivers/cdc_acm')
@@ -62,36 +64,34 @@ class DevkitManager:
                 pass
         return ifaces
 
-    def _cdc_acm_bind(self, ifaces: list[str]):
+    def _cdc_acm_bind(self, ifaces: List[str]):
         for iface in ifaces:
             subprocess.run(
                 ['sudo', 'sh', '-c', f'echo "{iface}" > /sys/bus/usb/drivers/cdc_acm/bind'],
-                stderr=subprocess.DEVNULL,
-                check=False)
+                stderr=subprocess.DEVNULL)
 
-    def _cdc_acm_unbind(self, ifaces: list[str]):
+    def _cdc_acm_unbind(self, ifaces: List[str]):
         for iface in ifaces:
             subprocess.run(
                 ['sudo', 'sh', '-c', f'echo "{iface}" > /sys/bus/usb/drivers/cdc_acm/unbind'],
-                stderr=subprocess.DEVNULL,
-                check=False)
+                stderr=subprocess.DEVNULL)
 
     def _usb_reset_f9p(self, usb_path: str):
         """Hard-resets F9P to clear stale libusb state."""
         if not usb_path or usb_path == 'virtual':
             return
-        if subprocess.run(['which', 'usbreset'], capture_output=True, check=False).returncode != 0:
-            self._log('usbreset not found. Install with: sudo apt install usbutils', 'WARN')
+        if subprocess.run(['which', 'usbreset'], capture_output=True).returncode != 0:
+            self._log("usbreset not found. Install with: sudo apt install usbutils", "WARN")
             return
         self._log(f"USB reset of F9P at {usb_path}...")
-        result = subprocess.run(['sudo', 'usbreset', usb_path], capture_output=True, text=True, check=False)
+        result = subprocess.run(['sudo', 'usbreset', usb_path], capture_output=True, text=True)
         if result.returncode == 0:
-            self._log('F9P USB reset complete.')
+            self._log("F9P USB reset complete.")
             time.sleep(1.0)
         else:
-            self._log(f"USB reset failed: {result.stderr.strip()}", 'WARN')
+            self._log(f"USB reset failed: {result.stderr.strip()}", "WARN")
 
-    def run(self, extra_args: list[str]):
+    def run(self, extra_args: List[str]):
         """Runs the ROS 2 stack within Docker."""
         env_file = self.root_dir / '.env'
 
@@ -108,20 +108,21 @@ class DevkitManager:
                     except Exception:
                         pass
                 if ublox_ifaces:
-                    self._log('Binding cdc_acm for GPS detection...')
+                    self._log("Binding cdc_acm for GPS detection...")
                     self._cdc_acm_bind(ublox_ifaces)
-                    subprocess.run(['sudo', sys.executable, 'fixusb.py'], check=True)
+
+            subprocess.run(['sudo', 'python3', 'fixusb.py'], check=True)
 
             # Restore ownership of .env to the actual user
             real_user = os.environ.get('SUDO_USER') or os.environ.get('USER') or os.getlogin()
             if env_file.exists():
-                subprocess.run(['sudo', 'chown', f'{real_user}:', str(env_file)], capture_output=True, check=False)
+                subprocess.run(['sudo', 'chown', f'{real_user}:', str(env_file)], capture_output=True)
                 self._log(f"Restored {env_file.name} ownership to {real_user}")
 
             # Unbind so ublox_dgnss can claim the device via libusb
             ifaces_to_unbind = self._find_ublox_interfaces()
             if ifaces_to_unbind:
-                self._log('Unbinding cdc_acm for libusb access...')
+                self._log("Unbinding cdc_acm for libusb access...")
                 self._cdc_acm_unbind(ifaces_to_unbind)
                 time.sleep(0.5)
 
@@ -137,13 +138,18 @@ class DevkitManager:
                 os.system(f"stty -F {mcu_port} 115200 && (echo 's' > {mcu_port} &)")
 
         ros_command = (
-            'source /opt/ros/jazzy/setup.bash && '
-            'if [ -f /workspace/install/setup.bash ]; then source /workspace/install/setup.bash; fi && '
+            "Xvfb :99 -screen 0 1920x1080x24 -nolisten tcp & "
+            "sleep 1 && "
+            "x11vnc -display :99 -nopw -forever -shared -quiet & "
+            "websockify --web /usr/share/novnc 6080 localhost:5900 & "
+            "export DISPLAY=:99 && "
+            "source /opt/ros/jazzy/setup.bash && "
+            "if [ -f /workspace/install/setup.bash ]; then source /workspace/install/setup.bash; fi && "
             f"ros2 launch devkit_launch devkit.launch.py sim:={is_sim} rover_port:={r_port} mcu_port:={mcu_port} " +
-            ' '.join(extra_args)
+            " ".join(extra_args)
         )
 
-        subprocess.run(['xhost', '+local:docker'], capture_output=True, check=False)
+        subprocess.run(['xhost', '+local:docker'], capture_output=True)
         (self.root_dir / 'maps').mkdir(exist_ok=True)
 
         docker_cmd = [
@@ -153,6 +159,9 @@ class DevkitManager:
             '--env', 'PYTHONPATH=/root/.lizard:/workspace/install/lib/python3.12/site-packages',
             '--env', f'DISPLAY={os.environ.get("DISPLAY", ":0")}',
             '--env', 'QT_X11_NO_MITSHM=1',
+            '--env', 'GALLIUM_DRIVER=llvmpipe',
+            '--env', 'MESA_LOADER_DRIVER_OVERRIDE=llvmpipe',
+            '--env', 'LIBGL_ALWAYS_SOFTWARE=1',
             '-v', '/tmp/.X11-unix:/tmp/.X11-unix:rw',
             '--env-file', str(env_file) if env_file.exists() else '/dev/null',
             '-v', '/dev:/dev',
@@ -161,7 +170,7 @@ class DevkitManager:
         ]
 
         self._log(f"Runtime active. Sim: {is_sim.upper()}")
-        subprocess.run(docker_cmd, check=False)
+        subprocess.run(docker_cmd)
 
 
 if __name__ == '__main__':
