@@ -194,6 +194,7 @@ ENV MESA_GL_VERSION_OVERRIDE=3.3
 # ============================================================
 # Stage 7: Workspace — Local Sources
 # ============================================================
+ARG CACHEBUST=1  # Restarts Docker build from here on ./manage.py build You may want to move it earlier or later in local development
 WORKDIR /workspace
 COPY ./src/devkit_driver    ./src/devkit_driver
 COPY ./src/devkit_launch    ./src/devkit_launch
