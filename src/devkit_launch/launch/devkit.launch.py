@@ -203,16 +203,7 @@ def _topo_nav_nodes(tmap2_file, sim_condition, real_condition, devkit_launch_pkg
             ),
         ]),
 
-        # 6. RViz (delayed 5 s)
-        TimerAction(period=5.0, actions=[
-            Node(
-                package='rviz2',
-                executable='rviz2',
-                name='rviz2',
-                output='screen',
-                arguments=['-d', rviz_cfg],
-            ),
-        ]),
+    
     ]
 
 
