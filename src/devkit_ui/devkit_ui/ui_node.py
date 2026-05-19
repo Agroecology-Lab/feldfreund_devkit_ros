@@ -1924,7 +1924,7 @@ class NiceGuiNode(Node):
         status_lbl.set_text(f'Mission executor not yet implemented — queue: rows {queue}')
         status_lbl.style('color:#9a6700')
 
-    # ── System tab ────────────────────────────────────────────────────────────
+   # ── System tab ────────────────────────────────────────────────────────────
 
     def _system_content(self) -> None:
         with ui.row().classes('items-stretch w-full gap-3'):
@@ -1995,6 +1995,8 @@ class NiceGuiNode(Node):
         with ui.card().classes('w-full mt-3'):
             ui.label('Tools').classes('font-semibold mb-2')
             with ui.row().classes('items-center gap-3 flex-wrap'):
+
+                # ── Graph Explorer ───────────────────────────────────────
                 _explorer_proc: list = [None]
                 _explorer_lbl = ui.label('').classes('text-xs font-mono').style('color:#57606a')
                 def _start_explorer():
@@ -2029,6 +2031,47 @@ class NiceGuiNode(Node):
                     '📄 Documentation</a>'
                 )
                 _explorer_lbl
+
+                ui.separator().classes('w-full my-1')
+
+                # ── Gazebo Sim ───────────────────────────────────────────
+                _gazebo_proc: list = [None]
+                _gazebo_lbl = ui.label('').classes('text-xs font-mono').style('color:#57606a')
+                def _start_gazebo():
+                    import subprocess
+                    if _gazebo_proc[0] is not None and _gazebo_proc[0].poll() is None:
+                        _gazebo_lbl.set_text('already running')
+                        return
+                    try:
+                        _gazebo_proc[0] = subprocess.Popen(
+                            ['ros2', 'launch', 'agro_robot_sim', 'fazenda_completa.launch.py'],
+                            stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
+                            env={**os.environ, 'DISPLAY': ':99'},
+                        )
+                        _gazebo_lbl.set_text(f'started (pid {_gazebo_proc[0].pid})')
+                        _gazebo_lbl.style('color:#1a7f37')
+                    except Exception as exc:
+                        _gazebo_lbl.set_text(f'ERROR: {exc}')
+                        _gazebo_lbl.style('color:#cf222e')
+                def _stop_gazebo():
+                    import subprocess
+                    if _gazebo_proc[0] is not None:
+                        _gazebo_proc[0].terminate()
+                        _gazebo_proc[0] = None
+                        _gazebo_lbl.set_text('stopped')
+                        _gazebo_lbl.style('color:#57606a')
+                ui.button('Launch Sim', on_click=_start_gazebo).props(
+                    'outline no-caps').classes('px-4')
+                ui.button('Stop Sim', on_click=_stop_gazebo).props(
+                    'outline no-caps').classes('px-4')
+                ui.html(
+                    '<a href="http://localhost:6080/vnc.html" target="_blank" '
+                    'style="font-size:13px;color:var(--blue);text-decoration:none;'
+                    'padding:6px 12px;border:1px solid var(--blue);border-radius:4px;'
+                    'font-family:\'Courier New\',monospace;">'
+                    '↗ Gazebo (noVNC)</a>'
+                )
+                _gazebo_lbl
 
     # ── shared ────────────────────────────────────────────────────────────────
 
