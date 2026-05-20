@@ -2034,46 +2034,81 @@ class NiceGuiNode(Node):
 
                 ui.separator().classes('w-full my-1')
 
-                # ── RViz ─────────────────────────────────────────────────
+       # ── RViz ─────────────────────────────────────────────────
                 _rviz_proc: list = [None]
+                _rviz_daemons: list = []  # Xvfb, x11vnc, websockify - tracked for clean shutdown
                 _rviz_lbl = ui.label('').classes('text-xs font-mono').style('color:#57606a')
+
                 def _start_rviz():
                     import subprocess, time
+                    from ament_index_python.packages import (
+                        get_package_share_directory, PackageNotFoundError,
+                    )
                     if _rviz_proc[0] is not None and _rviz_proc[0].poll() is None:
                         _rviz_lbl.set_text('already running')
                         return
                     try:
-                        subprocess.Popen(
-                            ['Xvfb', ':98', '-screen', '0', '1920x1080x24', '-nolisten', 'tcp'],
-                            stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
-                        )
-                        time.sleep(0.5)
-                        subprocess.Popen(
+                        # Resolve topo_nav RViz config (has MarkerArray displays
+                        # pre-wired to /topological_map_visualisation et al).
+                        # Falls back to no config if topo_nav isn't installed.
+                        try:
+                            rviz_cfg = os.path.join(
+                                get_package_share_directory('topological_navigation'),
+                                'rviz', 'topological_navigation.rviz',
+                            )
+                        except PackageNotFoundError:
+                            rviz_cfg = None
+
+                        # Spawn Xvfb only if :98 isn't already taken (re-launch safe).
+                        if not os.path.exists('/tmp/.X98-lock'):
+                            _rviz_daemons.append(subprocess.Popen(
+                                ['Xvfb', ':98', '-screen', '0', '1920x1080x24',
+                                 '-nolisten', 'tcp'],
+                                stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
+                            ))
+                            time.sleep(0.5)
+
+                        _rviz_daemons.append(subprocess.Popen(
                             ['x11vnc', '-display', ':98', '-nopw', '-forever', '-shared',
                              '-quiet', '-rfbport', '5901'],
                             stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
-                        )
-                        subprocess.Popen(
-                            ['websockify', '--web', '/usr/share/novnc', '6081', 'localhost:5901'],
+                        ))
+                        _rviz_daemons.append(subprocess.Popen(
+                            ['websockify', '--web', '/usr/share/novnc', '6081',
+                             'localhost:5901'],
                             stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
-                        )
+                        ))
                         time.sleep(0.5)
+
+                        rviz_args = ['ros2', 'run', 'rviz2', 'rviz2']
+                        if rviz_cfg is not None:
+                            rviz_args += ['-d', rviz_cfg]
+
                         _rviz_proc[0] = subprocess.Popen(
-                            ['ros2', 'run', 'rviz2', 'rviz2'],
+                            rviz_args,
                             stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
                             env={**os.environ, 'DISPLAY': ':98'},
                         )
-                        _rviz_lbl.set_text(f'started (pid {_rviz_proc[0].pid})')
+                        suffix = '' if rviz_cfg else ' (no topo config found)'
+                        _rviz_lbl.set_text(f'started (pid {_rviz_proc[0].pid}){suffix}')
                         _rviz_lbl.style('color:#1a7f37')
                     except Exception as exc:
                         _rviz_lbl.set_text(f'ERROR: {exc}')
                         _rviz_lbl.style('color:#cf222e')
+
                 def _stop_rviz():
                     if _rviz_proc[0] is not None:
                         _rviz_proc[0].terminate()
                         _rviz_proc[0] = None
-                        _rviz_lbl.set_text('stopped')
-                        _rviz_lbl.style('color:#57606a')
+                    for p in _rviz_daemons:
+                        try:
+                            p.terminate()
+                        except Exception:
+                            pass
+                    _rviz_daemons.clear()
+                    _rviz_lbl.set_text('stopped')
+                    _rviz_lbl.style('color:#57606a')
+
                 ui.button('Launch RViz', on_click=_start_rviz).props(
                     'outline no-caps').classes('px-4')
                 ui.button('Stop RViz', on_click=_stop_rviz).props(
@@ -2086,7 +2121,6 @@ class NiceGuiNode(Node):
                     '↗ RViz (noVNC)</a>'
                 )
                 _rviz_lbl
-
                 ui.separator().classes('w-full my-1')
 
                 # ── Gazebo Sim ───────────────────────────────────────────
