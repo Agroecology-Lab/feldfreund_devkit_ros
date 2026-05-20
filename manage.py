@@ -156,12 +156,14 @@ class DevkitManager:
             '--env', 'QT_X11_NO_MITSHM=1',
             '--env', 'GALLIUM_DRIVER=llvmpipe',
             '--env', 'MESA_LOADER_DRIVER_OVERRIDE=llvmpipe',
+            '--env', "CYCLONEDDS_URI=<CycloneDDS><Domain><Discovery><MaxAutoParticipantIndex>200</MaxAutoParticipantIndex></Discovery></Domain></CycloneDDS>",
+            '--env', 'GZ_SIM_RESOURCE_PATH=/workspace/install/virtual_maize_field/share/virtual_maize_field/models',
             '-v', '/tmp/.X11-unix:/tmp/.X11-unix:rw',
             '--env-file', str(env_file) if env_file.exists() else '/dev/null',
             '-v', '/dev:/dev',
             '-v', f'{self.root_dir}/maps:/workspace/maps',
             self.image_name, 'bash', '-c', ros_command,
-        ]
+]
 
         self._log(f"Runtime active. Sim: {is_sim.upper()}")
         subprocess.run(docker_cmd)
