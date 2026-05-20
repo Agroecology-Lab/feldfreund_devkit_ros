@@ -182,11 +182,8 @@ RUN mkdir -p /root/models && \
 # ============================================================
 COPY ./docker/bashrc /tmp/bashrc
 RUN cat /tmp/bashrc >> /root/.bashrc && rm -f /tmp/bashrc
-
 RUN mkdir -p /root/.rosys && echo '{}' > /root/.rosys/rosys.config.json
-
 ENV PYTHONPATH="/root/.lizard:/workspace/install/lib/python3.12/site-packages"
-ENV LIBGL_ALWAYS_SOFTWARE=1
 ENV MESA_GL_VERSION_OVERRIDE=3.3
 
 # ============================================================
