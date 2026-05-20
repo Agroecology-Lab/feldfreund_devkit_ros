@@ -140,6 +140,9 @@ class DevkitManager:
         ros_command = (
             "source /opt/ros/jazzy/setup.bash && "
             "if [ -f /workspace/install/setup.bash ]; then source /workspace/install/setup.bash; fi && "
+            "ros2 run virtual_maize_field generate_world fre22_task_navigation_mini 2>/dev/null && "
+            "ln -sf /root/.ros/virtual_maize_field/generated.world "
+            "/workspace/install/agro_robot_sim/share/agro_robot_sim/worlds/maize.world && "
             f"ros2 launch devkit_launch devkit.launch.py sim:={is_sim} rover_port:={r_port} mcu_port:={mcu_port} " +
             " ".join(extra_args)
         )
