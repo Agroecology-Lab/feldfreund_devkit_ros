@@ -172,6 +172,7 @@ RUN pip install --break-system-packages --no-cache-dir \
       thop tqdm loguru ninja tabulate \
       nicegui pyserial lizard pymongo networkx
 
+ARG CACHEBUST=1         
 # 5.3 YOLOX-Nano pretrained weights
 RUN mkdir -p /root/models && \
     wget -q -O /root/models/yolox_nano.pth \
@@ -180,16 +181,20 @@ RUN mkdir -p /root/models && \
 # ============================================================
 # Stage 6: Shell Environment
 # ============================================================
+
 COPY ./docker/bashrc /tmp/bashrc
 RUN cat /tmp/bashrc >> /root/.bashrc && rm -f /tmp/bashrc
+
 RUN mkdir -p /root/.rosys && echo '{}' > /root/.rosys/rosys.config.json
+
 ENV PYTHONPATH="/root/.lizard:/workspace/install/lib/python3.12/site-packages"
+
 ENV MESA_GL_VERSION_OVERRIDE=3.3
 
 # ============================================================
 # Stage 7: Workspace — Local Sources
 # ============================================================
-ARG CACHEBUST=1         
+
 WORKDIR /workspace
 COPY ./src/devkit_driver    ./src/devkit_driver
 COPY ./src/devkit_launch    ./src/devkit_launch
@@ -225,6 +230,12 @@ RUN for i in 1 2 3 4 5; do \
       GIT_TERMINAL_PROMPT=0 git clone --depth 1 \
         https://github.com/manankharwar/fusioncore src/fusioncore && break || \
       (echo "fusioncore attempt $i failed, retrying in 15s..." && sleep 15); \
+    done
+    
+RUN for i in 1 2 3 4 5; do \
+      GIT_TERMINAL_PROMPT=0 git clone --depth 1 -b ros2-gz \
+        https://github.com/FieldRobotEvent/virtual_maize_field src/virtual_maize_field && break || \
+      (echo "virtual_maize_field attempt $i failed, retrying in 15s..." && sleep 15); \
     done
 
 # Patch fusioncore: use BEST_EFFORT QoS for /gnss/fix subscriptions.
