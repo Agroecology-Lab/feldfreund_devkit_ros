@@ -24,13 +24,16 @@ class DevkitManager:
         subprocess.run(['docker', 'stop', self.container_name], capture_output=True)
         sys.exit(0)
 
-    def build(self, full_clean: bool = False):
+    def build(self, full_clean: bool = False, sim: bool = False):
         """Builds the Docker image."""
         build_cmd = ['docker', 'build', '-t', self.image_name, '-f', 'docker/Dockerfile', '.']
 
         if full_clean:
             self._log("Full rebuild requested: Purging Docker cache...", "WARN")
             build_cmd.insert(2, '--no-cache')
+
+        if sim:
+            build_cmd += ['--build-arg', 'INSTALL_SIM=true']
 
         if subprocess.run(build_cmd).returncode != 0:
             self._log("Build failed.", "ERROR")
@@ -161,12 +164,13 @@ class DevkitManager:
             '--env', 'MESA_LOADER_DRIVER_OVERRIDE=llvmpipe',
             '--env', "CYCLONEDDS_URI=<CycloneDDS><Domain><Discovery><MaxAutoParticipantIndex>200</MaxAutoParticipantIndex></Discovery></Domain></CycloneDDS>",
             '--env', 'GZ_SIM_RESOURCE_PATH=/workspace/install/virtual_maize_field/share/virtual_maize_field/models',
+            '--env', 'TMAP2_FILE=/workspace/maps/maize_map',
             '-v', '/tmp/.X11-unix:/tmp/.X11-unix:rw',
             '--env-file', str(env_file) if env_file.exists() else '/dev/null',
             '-v', '/dev:/dev',
             '-v', f'{self.root_dir}/maps:/workspace/maps',
             self.image_name, 'bash', '-c', ros_command,
-]
+        ]
 
         self._log(f"Runtime active. Sim: {is_sim.upper()}")
         subprocess.run(docker_cmd)
@@ -175,9 +179,11 @@ class DevkitManager:
 if __name__ == '__main__':
     manager = DevkitManager()
     action = sys.argv[1] if len(sys.argv) > 1 else 'up'
+    sim = '+sim' in sys.argv
+
     if action == 'build':
-        manager.build(full_clean=False)
+        manager.build(full_clean=False, sim=sim)
     elif action == 'full-build':
-        manager.build(full_clean=True)
+        manager.build(full_clean=True, sim=sim)
     else:
         manager.run(sys.argv[2:] if action == 'up' else sys.argv[1:])
