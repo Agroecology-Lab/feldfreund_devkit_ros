@@ -351,7 +351,7 @@ RUN apt-get update && \
 ARG INSTALL_SIM=false
 RUN if [ "$INSTALL_SIM" = "true" ]; then \
       apt-get update && apt-get install -y \
-        gz-harmonic ros-jazzy-ros-gz ros-jazzy-ros-gz-bridge && \
+        gz-harmonic ros-jazzy-ros-gz-sim && \
       rm -rf /var/lib/apt/lists/*; \
     fi
 
