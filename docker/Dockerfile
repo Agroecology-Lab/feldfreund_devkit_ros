@@ -172,7 +172,6 @@ RUN pip install --break-system-packages --no-cache-dir \
       thop tqdm loguru ninja tabulate \
       nicegui pyserial lizard pymongo networkx
 
-ARG CACHEBUST=1         
 # 5.3 YOLOX-Nano pretrained weights
 RUN mkdir -p /root/models && \
     wget -q -O /root/models/yolox_nano.pth \
@@ -316,6 +315,8 @@ RUN apt-get update && \
       break || (echo "rosdep attempt $i failed, retrying in 15s..." && sleep 15); \
     done && \
     rm -rf /var/lib/apt/lists/*
+
+ARG CACHEBUST=1  ## Move this line earlier in the file if you want to start the build process earlier       
 
 # ============================================================
 # Stage 10: colcon Build
