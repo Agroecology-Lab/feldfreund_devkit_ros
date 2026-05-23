@@ -174,6 +174,7 @@ class DevkitManager:
             '--env-file', str(env_file) if env_file.exists() else '/dev/null',
             '-v', '/dev:/dev',
             '-v', f'{self.root_dir}/maps:/workspace/maps',
+            '-v', f'{self.root_dir}/get_maize_topo.py:/workspace/get_maize_topo.py:ro',
             self.image_name, 'bash', '-c', ros_command,
         ]
 
