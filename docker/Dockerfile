@@ -329,7 +329,6 @@ RUN apt-get update && \
    	x11vnc \
         websockify \
         novnc \ 
-        gz-harmonic \
         ros-jazzy-rmw-cyclonedds-cpp \
         ros-jazzy-rtcm-msgs \
         ros-jazzy-nmea-msgs \
@@ -348,6 +347,13 @@ RUN apt-get update && \
     colcon build --symlink-install \
       --cmake-args -DCMAKE_BUILD_TYPE=Release && \
     apt-get clean && rm -rf /var/lib/apt/lists/*
+
+ARG INSTALL_SIM=false
+RUN if [ "$INSTALL_SIM" = "true" ]; then \
+      apt-get update && apt-get install -y \
+        gz-harmonic ros-jazzy-ros-gz ros-jazzy-ros-gz-bridge && \
+      rm -rf /var/lib/apt/lists/*; \
+    fi
 
 # ============================================================
 # Stage 11: Runtime Environment
