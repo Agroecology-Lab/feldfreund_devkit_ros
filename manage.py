@@ -146,6 +146,11 @@ class DevkitManager:
             "ros2 run virtual_maize_field generate_world fre22_task_navigation_mini 2>/dev/null && "
             "ln -sf /root/.ros/virtual_maize_field/generated.world "
             "/workspace/install/agro_robot_sim/share/agro_robot_sim/worlds/maize.world && "
+            "python3 /workspace/get_maize_topo.py "
+            "--csv /root/.ros/virtual_maize_field/gt_map.csv "
+            "--out /workspace/maps/maize_map --name maize_map --rows 6 && "
+            "cp /workspace/src/devkit_launch/resource/fake_nav2_server.py "
+            "/workspace/src/topological_navigation/topological_nav_simulator/topological_nav_simulator/fake_nav2_server.py && "
             f"ros2 launch devkit_launch devkit.launch.py sim:={is_sim} rover_port:={r_port} mcu_port:={mcu_port} " +
             " ".join(extra_args)
         )
