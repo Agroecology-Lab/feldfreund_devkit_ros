@@ -2125,55 +2125,110 @@ class NiceGuiNode(Node):
 
                 # ── Gazebo Sim ───────────────────────────────────────────
                 _gazebo_proc: list = [None]
+                _gazebo_daemons: list = []   # Xvfb, x11vnc, websockify for browser mode
                 _gazebo_lbl = ui.label('').classes('text-xs font-mono').style('color:#57606a')
-                def _start_gazebo():
+
+                _SIM_ENV = {
+                    **os.environ,
+                    'TMAP2_FILE': '/workspace/maps/maize_map',
+                    'GZ_SIM_RESOURCE_PATH': (
+                        '/workspace/install/virtual_maize_field'
+                        '/share/virtual_maize_field/models'
+                    ),
+                    'CYCLONEDDS_URI': (
+                        '<CycloneDDS><Domain><Discovery>'
+                        '<MaxAutoParticipantIndex>200</MaxAutoParticipantIndex>'
+                        '</Discovery></Domain></CycloneDDS>'
+                    ),
+                }
+                _SIM_CMD = [
+                    'ros2', 'launch', 'devkit_launch', 'sowbot_sim.launch.py',
+                    'world:=maize.world',
+                ]
+
+                def _start_gazebo_native():
+                    import subprocess
+                    if _gazebo_proc[0] is not None and _gazebo_proc[0].poll() is None:
+                        _gazebo_lbl.set_text('already running')
+                        return
+                    try:
+                        env = {**_SIM_ENV, 'DISPLAY': os.environ.get('DISPLAY', ':0')}
+                        _gazebo_proc[0] = subprocess.Popen(
+                            _SIM_CMD,
+                            stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
+                            env=env,
+                        )
+                        _gazebo_lbl.set_text(f'native window — pid {_gazebo_proc[0].pid}')
+                        _gazebo_lbl.style('color:#1a7f37')
+                    except Exception as exc:
+                        _gazebo_lbl.set_text(f'ERROR: {exc}')
+                        _gazebo_lbl.style('color:#cf222e')
+
+                def _start_gazebo_browser():
                     import subprocess, time
                     if _gazebo_proc[0] is not None and _gazebo_proc[0].poll() is None:
                         _gazebo_lbl.set_text('already running')
                         return
                     try:
-                        subprocess.Popen(
-                            ['Xvfb', ':99', '-screen', '0', '1920x1080x24', '-nolisten', 'tcp'],
+                        # Spawn Xvfb on :99 only if not already taken
+                        if not os.path.exists('/tmp/.X99-lock'):
+                            p = subprocess.Popen(
+                                ['Xvfb', ':99', '-screen', '0', '1920x1080x24',
+                                 '-nolisten', 'tcp'],
+                                stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
+                            )
+                            _gazebo_daemons.append(p)
+                            time.sleep(0.5)
+                        _gazebo_daemons.append(subprocess.Popen(
+                            ['x11vnc', '-display', ':99', '-nopw', '-forever',
+                             '-shared', '-quiet', '-rfbport', '5900'],
                             stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
-                        )
+                        ))
+                        _gazebo_daemons.append(subprocess.Popen(
+                            ['websockify', '--web', '/usr/share/novnc',
+                             '6080', 'localhost:5900'],
+                            stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
+                        ))
                         time.sleep(0.5)
-                        subprocess.Popen(
-                            ['x11vnc', '-display', ':99', '-nopw', '-forever', '-shared',
-                             '-quiet', '-rfbport', '5900'],
-                            stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
-                        )
-                        subprocess.Popen(
-                            ['websockify', '--web', '/usr/share/novnc', '6080', 'localhost:5900'],
-                            stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
-                        )
-                        time.sleep(0.5)
+                        env = {**_SIM_ENV, 'DISPLAY': ':99'}
                         _gazebo_proc[0] = subprocess.Popen(
-                            ['ros2', 'launch', 'agro_robot_sim', 'fazenda_completa.launch.py'],
+                            _SIM_CMD,
                             stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
-                            env={**os.environ, 'DISPLAY': ':99'},
+                            env=env,
                         )
-                        _gazebo_lbl.set_text(f'started (pid {_gazebo_proc[0].pid})')
+                        _gazebo_lbl.set_text(f'browser mode — pid {_gazebo_proc[0].pid}')
                         _gazebo_lbl.style('color:#1a7f37')
                     except Exception as exc:
                         _gazebo_lbl.set_text(f'ERROR: {exc}')
                         _gazebo_lbl.style('color:#cf222e')
+
                 def _stop_gazebo():
                     if _gazebo_proc[0] is not None:
                         _gazebo_proc[0].terminate()
                         _gazebo_proc[0] = None
-                        _gazebo_lbl.set_text('stopped')
-                        _gazebo_lbl.style('color:#57606a')
-                ui.button('Launch Sim', on_click=_start_gazebo).props(
-                    'outline no-caps').classes('px-4')
-                ui.button('Stop Sim', on_click=_stop_gazebo).props(
-                    'outline no-caps').classes('px-4')
-                ui.html(
-                    '<a href="http://localhost:6080/vnc.html" target="_blank" '
-                    'style="font-size:13px;color:var(--blue);text-decoration:none;'
-                    'padding:6px 12px;border:1px solid var(--blue);border-radius:4px;'
-                    'font-family:\'Courier New\',monospace;">'
-                    '↗ Gazebo (noVNC)</a>'
-                )
+                    for p in _gazebo_daemons:
+                        try:
+                            p.terminate()
+                        except Exception:
+                            pass
+                    _gazebo_daemons.clear()
+                    _gazebo_lbl.set_text('stopped')
+                    _gazebo_lbl.style('color:#57606a')
+
+                with ui.row().classes('items-center gap-2 flex-wrap'):
+                    ui.button('Launch Sim (native)', on_click=_start_gazebo_native).props(
+                        'outline no-caps').classes('px-4')
+                    ui.button('Launch Sim (browser)', on_click=_start_gazebo_browser).props(
+                        'outline no-caps').classes('px-4')
+                    ui.button('Stop Sim', on_click=_stop_gazebo).props(
+                        'outline no-caps').classes('px-4')
+                    ui.html(
+                        '<a href="http://localhost:6080/vnc.html" target="_blank" '
+                        'style="font-size:13px;color:var(--blue);text-decoration:none;'
+                        'padding:6px 12px;border:1px solid var(--blue);border-radius:4px;'
+                        'font-family:\'Courier New\',monospace;">'
+                        '↗ Gazebo (noVNC)</a>'
+                    )
                 _gazebo_lbl
 
     def toggle_estop(self) -> None:
