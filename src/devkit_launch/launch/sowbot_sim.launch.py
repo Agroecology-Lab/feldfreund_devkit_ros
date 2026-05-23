@@ -179,7 +179,7 @@ def _topo_nav_nodes(tmap2_file: str, devkit_launch_pkg: str) -> list:
         ]),
 
         # 3. Real Nav2 (delayed 3 s — Gazebo + robot spawn need to settle)
-        TimerAction(period=3.0, actions=_nav2_sim_nodes(nav2_params)),
+        TimerAction(period=8.0, actions=_nav2_sim_nodes(nav2_params)),
 
         # 4. Topo navigation server (4 s)
         TimerAction(period=4.0, actions=[
