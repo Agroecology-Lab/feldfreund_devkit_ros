@@ -92,6 +92,14 @@ xhost +local:docker
 ```
 Access http://localhost to access the WebUI
 
+If you'd like to use Gazebo then add a +sim argument to your build instruction
+
+```bash
+./manage.py full-build +sim
+xhost +local:docker
+./manage.py 
+```
+
 
 ## Management & Tools
 
