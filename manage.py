@@ -43,12 +43,17 @@ class DevkitManager:
         subprocess.run(['docker', 'stop', self.container_name], capture_output=True)
         sys.exit(0)
 
-    def build(self, full_clean: bool = False):
+    def build(self, full_clean: bool = False, sim: bool = False):
         """Builds the Docker image."""
         build_cmd = ['docker', 'build', '-t', self.image_name, '-f', 'docker/Dockerfile', '.']
+
         if full_clean:
             self._log("Full rebuild requested: Purging Docker cache...", "WARN")
             build_cmd.insert(2, '--no-cache')
+
+        if sim:
+            build_cmd += ['--build-arg', 'INSTALL_SIM=true']
+
         if subprocess.run(build_cmd).returncode != 0:
             self._log("Build failed.", "ERROR")
             sys.exit(1)
@@ -108,9 +113,13 @@ class DevkitManager:
         else:
             self._log(f"USB reset failed: {result.stderr.strip()}", "WARN")
 
-    def _base_docker_cmd(self, env_file: Path) -> List[str]:
-        """Common docker run flags shared by all launch modes."""
-        return [
+    def _base_docker_cmd(self, env_file: Path, extra_flags: List[str] = None) -> List[str]:
+        """Common docker run flags shared by all launch modes.
+
+        extra_flags lets a mode add its own volumes/env vars (e.g. limbic-only
+        sim mounts) before the image name.
+        """
+        cmd = [
             'docker', 'run', '-it', '--rm', '--name', self.container_name,
             '--net=host', '--privileged',
             '--env', 'RMW_IMPLEMENTATION=rmw_cyclonedds_cpp',
@@ -125,8 +134,11 @@ class DevkitManager:
             '--env-file', str(env_file) if env_file.exists() else '/dev/null',
             '-v', '/dev:/dev',
             '-v', f'{self.root_dir}/maps:/workspace/maps',
-            self.image_name, 'bash', '-c',
         ]
+        if extra_flags:
+            cmd += extra_flags
+        cmd += [self.image_name, 'bash', '-c']
+        return cmd
 
     def _ros_source(self) -> str:
         """ROS sourcing preamble — used by all modes."""
@@ -140,6 +152,7 @@ class DevkitManager:
         env_file = self.root_dir / '.env'
 
         if (self.root_dir / 'fixusb.py').exists():
+            # Prep for fixusb.py: bind so it can detect serial ports
             bound_before = self._find_ublox_interfaces()
             if not bound_before:
                 ublox_ifaces = []
@@ -156,11 +169,13 @@ class DevkitManager:
 
             subprocess.run(['sudo', 'python3', 'fixusb.py'], check=True)
 
+            # Restore ownership of .env to the actual user
             real_user = os.environ.get('SUDO_USER') or os.environ.get('USER') or os.getlogin()
             if env_file.exists():
                 subprocess.run(['sudo', 'chown', f'{real_user}:', str(env_file)], capture_output=True)
                 self._log(f"Restored {env_file.name} ownership to {real_user}")
 
+            # Unbind so ublox_dgnss can claim the device via libusb
             ifaces_to_unbind = self._find_ublox_interfaces()
             if ifaces_to_unbind:
                 self._log("Unbinding cdc_acm for libusb access...")
@@ -183,6 +198,11 @@ class DevkitManager:
             "ros2 run virtual_maize_field generate_world fre22_task_navigation_mini 2>/dev/null && "
             "ln -sf /root/.ros/virtual_maize_field/generated.world "
             "/workspace/install/agro_robot_sim/share/agro_robot_sim/worlds/maize.world && "
+            "python3 /workspace/get_maize_topo.py "
+            "--csv /root/.ros/virtual_maize_field/gt_map.csv "
+            "--out /workspace/maps/maize_map --name maize_map --rows 6 && "
+            "cp /workspace/src/devkit_launch/resource/fake_nav2_server.py "
+            "/workspace/src/topological_navigation/topological_nav_simulator/topological_nav_simulator/fake_nav2_server.py && "
             f"ros2 launch devkit_launch devkit.launch.py sim:={is_sim} rover_port:={r_port} mcu_port:={mcu_port} " +
             " ".join(extra_args)
         )
@@ -190,7 +210,12 @@ class DevkitManager:
         subprocess.run(['xhost', '+local:docker'], capture_output=True)
         (self.root_dir / 'maps').mkdir(exist_ok=True)
 
-        docker_cmd = self._base_docker_cmd(env_file) + [ros_command]
+        # Limbic-only flags: topological map env + get_maize_topo.py mount.
+        limbic_flags = [
+            '--env', 'TMAP2_FILE=/workspace/maps/maize_map',
+            '-v', f'{self.root_dir}/get_maize_topo.py:/workspace/get_maize_topo.py:ro',
+        ]
+        docker_cmd = self._base_docker_cmd(env_file, limbic_flags) + [ros_command]
 
         self._log(f"Runtime active. Sim: {is_sim.upper()}")
         subprocess.run(docker_cmd)
@@ -220,11 +245,12 @@ class DevkitManager:
 if __name__ == '__main__':
     manager = DevkitManager()
     action = sys.argv[1] if len(sys.argv) > 1 else 'up'
+    sim = '+sim' in sys.argv
 
     if action == 'build':
-        manager.build(full_clean=False)
+        manager.build(full_clean=False, sim=sim)
     elif action == 'full-build':
-        manager.build(full_clean=True)
+        manager.build(full_clean=True, sim=sim)
     elif action == 'neo':
         manager.run_neo(sys.argv[2:])
     else:
