@@ -8,24 +8,11 @@ import shutil
 from pathlib import Path
 from typing import List, Dict
 
-# CycloneDDS: direct crossover Ethernet between Limbic (192.168.10.1) and
-# Neo (192.168.10.2) via end0. Multicast disabled; explicit peer list so
-# discovery works without a router or switch.
-# TODO: verify interface name on first boot — run `ip -br link show | grep -v lo`
-#       If it differs from end0, update NetworkInterface name= here and in
-#       the nmcli commands in docs/network-setup.md.
-CYCLONEDDS_URI = (
-    "<CycloneDDS><Domain><General><Interfaces>"
-    "<NetworkInterface name=\"end0\" priority=\"default\" multicast=\"false\"/>"
-    "</Interfaces></General><Discovery>"
-    "<MaxAutoParticipantIndex>200</MaxAutoParticipantIndex>"
-    "<ParticipantIndex>auto</ParticipantIndex>"
-    "<Peers>"
-    "<Peer address=\"192.168.10.1\"/>"   # Limbic — TODO: confirm IP
-    "<Peer address=\"192.168.10.2\"/>"   # Neo    — TODO: confirm IP
-    "</Peers>"
-    "</Discovery></Domain></CycloneDDS>"
-)
+# CycloneDDS network config is assembled at runtime (see _cyclonedds_uri and
+# _resolve_dds_interface) so the bound interface adapts per-machine. On the
+# Limbic/Neo hardware the interface is 'end0'; on a dev laptop it differs, so
+# the name is autodetected. Override explicitly by setting DDS_INTERFACE in
+# .env (also see the nmcli commands in docs/network-setup.md).
 
 
 class DevkitManager:
@@ -113,12 +100,75 @@ class DevkitManager:
         else:
             self._log(f"USB reset failed: {result.stderr.strip()}", "WARN")
 
-    def _base_docker_cmd(self, env_file: Path, extra_flags: List[str] = None) -> List[str]:
+    def _resolve_dds_interface(self, cfg: Dict[str, str]) -> str:
+        """Resolves the network interface CycloneDDS should bind to.
+
+        Priority:
+          1. DDS_INTERFACE from .env (explicit override)
+          2. 'end0' if present (the Limbic/Neo hardware default)
+          3. First physical interface that is operationally UP
+          4. First physical interface of any state
+          5. 'end0' as a last resort (will warn)
+        """
+        override = (cfg.get('DDS_INTERFACE') or '').strip()
+        net_path = Path('/sys/class/net')
+        available = sorted(n.name for n in net_path.iterdir()) if net_path.exists() else []
+
+        if override:
+            if override not in available:
+                self._log(f"DDS_INTERFACE '{override}' not present. Seen: {available or 'none'}", "WARN")
+            return override
+
+        if 'end0' in available:
+            return 'end0'
+
+        def is_virtual(name: str) -> bool:
+            return name.startswith(('lo', 'docker', 'veth', 'br-', 'virbr', 'tap'))
+
+        physical = [n for n in available if not is_virtual(n)]
+        for name in physical:
+            try:
+                if (net_path / name / 'operstate').read_text().strip() == 'up':
+                    self._log(f"'end0' not found; CycloneDDS will bind '{name}'.", "WARN")
+                    return name
+            except Exception:
+                pass
+
+        if physical:
+            self._log(f"'end0' not found and no interface is UP; using '{physical[0]}'.", "WARN")
+            return physical[0]
+
+        self._log("No usable network interface found; defaulting to 'end0'.", "WARN")
+        return 'end0'
+
+    def _cyclonedds_uri(self, iface: str) -> str:
+        """Builds the CycloneDDS config XML bound to the given interface.
+
+        Direct crossover Ethernet between Limbic (192.168.10.1) and Neo
+        (192.168.10.2). Multicast disabled; explicit peer list so discovery
+        works without a router or switch.
+        """
+        return (
+            "<CycloneDDS><Domain><General><Interfaces>"
+            f"<NetworkInterface name=\"{iface}\" priority=\"default\" multicast=\"false\"/>"
+            "</Interfaces></General><Discovery>"
+            "<MaxAutoParticipantIndex>200</MaxAutoParticipantIndex>"
+            "<ParticipantIndex>auto</ParticipantIndex>"
+            "<Peers>"
+            "<Peer address=\"192.168.10.1\"/>"   # Limbic
+            "<Peer address=\"192.168.10.2\"/>"   # Neo
+            "</Peers>"
+            "</Discovery></Domain></CycloneDDS>"
+        )
+
+    def _base_docker_cmd(self, env_file: Path, cfg: Dict[str, str],
+                         extra_flags: List[str] = None) -> List[str]:
         """Common docker run flags shared by all launch modes.
 
         extra_flags lets a mode add its own volumes/env vars (e.g. limbic-only
         sim mounts) before the image name.
         """
+        cyclonedds_uri = self._cyclonedds_uri(self._resolve_dds_interface(cfg))
         cmd = [
             'docker', 'run', '-it', '--rm', '--name', self.container_name,
             '--net=host', '--privileged',
@@ -128,7 +178,7 @@ class DevkitManager:
             '--env', 'QT_X11_NO_MITSHM=1',
             '--env', 'GALLIUM_DRIVER=llvmpipe',
             '--env', 'MESA_LOADER_DRIVER_OVERRIDE=llvmpipe',
-            '--env', f'CYCLONEDDS_URI={CYCLONEDDS_URI}',
+            '--env', f'CYCLONEDDS_URI={cyclonedds_uri}',
             '--env', 'GZ_SIM_RESOURCE_PATH=/workspace/install/virtual_maize_field/share/virtual_maize_field/models',
             '-v', '/tmp/.X11-unix:/tmp/.X11-unix:rw',
             '--env-file', str(env_file) if env_file.exists() else '/dev/null',
@@ -215,7 +265,7 @@ class DevkitManager:
             '--env', 'TMAP2_FILE=/workspace/maps/maize_map',
             '-v', f'{self.root_dir}/get_maize_topo.py:/workspace/get_maize_topo.py:ro',
         ]
-        docker_cmd = self._base_docker_cmd(env_file, limbic_flags) + [ros_command]
+        docker_cmd = self._base_docker_cmd(env_file, cfg, limbic_flags) + [ros_command]
 
         self._log(f"Runtime active. Sim: {is_sim.upper()}")
         subprocess.run(docker_cmd)
@@ -227,6 +277,7 @@ class DevkitManager:
         Neo only needs: source ROS, launch crop_row_nav.launch.py.
         """
         env_file = self.root_dir / '.env'
+        cfg = self._get_env_config()
 
         ros_command = (
             f"{self._ros_source()} && "
@@ -236,7 +287,7 @@ class DevkitManager:
 
         subprocess.run(['xhost', '+local:docker'], capture_output=True)
 
-        docker_cmd = self._base_docker_cmd(env_file) + [ros_command]
+        docker_cmd = self._base_docker_cmd(env_file, cfg) + [ros_command]
 
         self._log("Neo runtime active.")
         subprocess.run(docker_cmd)
