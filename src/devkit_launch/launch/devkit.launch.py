@@ -417,5 +417,25 @@ def generate_launch_description():
             ),
         ),
 
+        # ── Row Follow action server (real hardware only) ────────────────────
+        # Provides the /limbic_row_follow action server that topo_nav calls on
+        # limbic_row_follow edge types. Omitted in sim: fake_nav2_server handles
+        # /navigate_to_pose directly and there is no Neo SBC to talk to.
+        # Including it in sim would cause immediate timeouts on every row edge
+        # (it waits for Neo's /row_follow/enable service which doesn't exist).
+        GroupAction(
+            condition=real_condition,
+            actions=[
+                IncludeLaunchDescription(
+                    PythonLaunchDescriptionSource(
+                        os.path.join(
+                            get_package_share_directory('sowbot_row_follow'),
+                            'launch', 'row_follow.launch.py'
+                        )
+                    ),
+                ),
+            ],
+        ),
+
         # ── Topological Navigation ───────────────────────────────────────────
     ] + _topo_nav_nodes(tmap2_file, sim_condition, real_condition, devkit_launch_pkg))
