@@ -8,11 +8,17 @@ import shutil
 from pathlib import Path
 from typing import List, Dict
 
-# CycloneDDS network config is assembled at runtime (see _cyclonedds_uri and
-# _resolve_dds_interface) so the bound interface adapts per-machine. On the
-# Limbic/Neo hardware the interface is 'end0'; on a dev laptop it differs, so
-# the name is autodetected. Override explicitly by setting DDS_INTERFACE in
-# .env (also see the nmcli commands in docs/network-setup.md).
+# The Limbic <-> Neo direct crossover-Ethernet link. A host is treated as
+# "on the robot" only if it owns one of these exact addresses; otherwise DDS
+# falls back to loopback. Order matters: index 0 = Limbic, index 1 = Neo.
+CROSSOVER_PEERS = ('192.168.10.1', '192.168.10.2')
+
+# CycloneDDS config is assembled at runtime (see _cyclonedds_uri):
+#   - sim, or any dev box not on the crossover link -> loopback (local-only).
+#   - real Limbic/Neo hardware -> peer-to-peer config bound to the crossover
+#     interface, multicast off (no switch/router on that link).
+# Set DDS_INTERFACE in .env to force the peer-to-peer config onto a named
+# interface (see docs/network-setup.md).
 
 
 class DevkitManager:
@@ -100,75 +106,86 @@ class DevkitManager:
         else:
             self._log(f"USB reset failed: {result.stderr.strip()}", "WARN")
 
-    def _resolve_dds_interface(self, cfg: Dict[str, str]) -> str:
-        """Resolves the network interface CycloneDDS should bind to.
+    def _find_crossover_interface(self) -> str:
+        """Returns the interface that owns a CROSSOVER_PEERS address, else None.
 
-        Priority:
-          1. DDS_INTERFACE from .env (explicit override)
-          2. 'end0' if present (the Limbic/Neo hardware default)
-          3. First physical interface that is operationally UP
-          4. First physical interface of any state
-          5. 'end0' as a last resort (will warn)
+        This is how we tell a real robot host from a dev box: the peer-to-peer
+        DDS config only functions for a host whose own IP is in the peer list.
         """
-        override = (cfg.get('DDS_INTERFACE') or '').strip()
-        net_path = Path('/sys/class/net')
-        available = sorted(n.name for n in net_path.iterdir()) if net_path.exists() else []
+        try:
+            result = subprocess.run(['ip', '-4', '-o', 'addr', 'show'],
+                                    capture_output=True, text=True)
+            if result.returncode != 0:
+                return None
+            for line in result.stdout.splitlines():
+                # e.g. "3: end0    inet 192.168.10.1/24 brd ... scope global end0"
+                parts = line.split()
+                if len(parts) >= 4 and parts[2] == 'inet':
+                    if parts[3].split('/')[0] in CROSSOVER_PEERS:
+                        return parts[1]
+        except Exception:
+            pass
+        return None
 
-        if override:
-            if override not in available:
-                self._log(f"DDS_INTERFACE '{override}' not present. Seen: {available or 'none'}", "WARN")
-            return override
+    def _loopback_dds_uri(self) -> str:
+        """Single-host DDS config: discovery over loopback multicast.
 
-        if 'end0' in available:
-            return 'end0'
-
-        def is_virtual(name: str) -> bool:
-            return name.startswith(('lo', 'docker', 'veth', 'br-', 'virbr', 'tap'))
-
-        physical = [n for n in available if not is_virtual(n)]
-        for name in physical:
-            try:
-                if (net_path / name / 'operstate').read_text().strip() == 'up':
-                    self._log(f"'end0' not found; CycloneDDS will bind '{name}'.", "WARN")
-                    return name
-            except Exception:
-                pass
-
-        if physical:
-            self._log(f"'end0' not found and no interface is UP; using '{physical[0]}'.", "WARN")
-            return physical[0]
-
-        self._log("No usable network interface found; defaulting to 'end0'.", "WARN")
-        return 'end0'
-
-    def _cyclonedds_uri(self, iface: str) -> str:
-        """Builds the CycloneDDS config XML bound to the given interface.
-
-        Direct crossover Ethernet between Limbic (192.168.10.1) and Neo
-        (192.168.10.2). Multicast disabled; explicit peer list so discovery
-        works without a router or switch.
+        Always valid — every node runs in one container, so loopback reaches
+        all of them and needs no real network interface.
         """
+        return (
+            "<CycloneDDS><Domain><General><Interfaces>"
+            "<NetworkInterface name=\"lo\" priority=\"default\" multicast=\"true\"/>"
+            "</Interfaces></General><Discovery>"
+            "<MaxAutoParticipantIndex>200</MaxAutoParticipantIndex>"
+            "<ParticipantIndex>auto</ParticipantIndex>"
+            "</Discovery></Domain></CycloneDDS>"
+        )
+
+    def _crossover_dds_uri(self, iface: str) -> str:
+        """Peer-to-peer DDS config bound to the Limbic<->Neo crossover link.
+
+        Multicast disabled; explicit peer list so discovery works without a
+        router or switch on the direct Ethernet link.
+        """
+        peers = "".join(f"<Peer address=\"{ip}\"/>" for ip in CROSSOVER_PEERS)
         return (
             "<CycloneDDS><Domain><General><Interfaces>"
             f"<NetworkInterface name=\"{iface}\" priority=\"default\" multicast=\"false\"/>"
             "</Interfaces></General><Discovery>"
             "<MaxAutoParticipantIndex>200</MaxAutoParticipantIndex>"
             "<ParticipantIndex>auto</ParticipantIndex>"
-            "<Peers>"
-            "<Peer address=\"192.168.10.1\"/>"   # Limbic
-            "<Peer address=\"192.168.10.2\"/>"   # Neo
-            "</Peers>"
+            f"<Peers>{peers}</Peers>"
             "</Discovery></Domain></CycloneDDS>"
         )
 
-    def _base_docker_cmd(self, env_file: Path, cfg: Dict[str, str],
+    def _cyclonedds_uri(self, cfg: Dict[str, str], is_sim: bool) -> str:
+        """Picks the right CycloneDDS config for where we're actually running."""
+        if is_sim:
+            self._log("Sim mode: CycloneDDS on loopback (local-only DDS).")
+            return self._loopback_dds_uri()
+
+        override = (cfg.get('DDS_INTERFACE') or '').strip()
+        if override:
+            self._log(f"DDS_INTERFACE override: peer-to-peer DDS on '{override}'.")
+            return self._crossover_dds_uri(override)
+
+        iface = self._find_crossover_interface()
+        if iface:
+            self._log(f"Crossover link found on '{iface}': peer-to-peer DDS.")
+            return self._crossover_dds_uri(iface)
+
+        self._log("Not on the 192.168.10.0/24 crossover link; "
+                  "CycloneDDS falling back to loopback (local-only DDS).", "WARN")
+        return self._loopback_dds_uri()
+
+    def _base_docker_cmd(self, env_file: Path, cyclonedds_uri: str,
                          extra_flags: List[str] = None) -> List[str]:
         """Common docker run flags shared by all launch modes.
 
         extra_flags lets a mode add its own volumes/env vars (e.g. limbic-only
         sim mounts) before the image name.
         """
-        cyclonedds_uri = self._cyclonedds_uri(self._resolve_dds_interface(cfg))
         cmd = [
             'docker', 'run', '-it', '--rm', '--name', self.container_name,
             '--net=host', '--privileged',
@@ -265,7 +282,8 @@ class DevkitManager:
             '--env', 'TMAP2_FILE=/workspace/maps/maize_map',
             '-v', f'{self.root_dir}/get_maize_topo.py:/workspace/get_maize_topo.py:ro',
         ]
-        docker_cmd = self._base_docker_cmd(env_file, cfg, limbic_flags) + [ros_command]
+        cyclonedds_uri = self._cyclonedds_uri(cfg, is_sim == 'true')
+        docker_cmd = self._base_docker_cmd(env_file, cyclonedds_uri, limbic_flags) + [ros_command]
 
         self._log(f"Runtime active. Sim: {is_sim.upper()}")
         subprocess.run(docker_cmd)
@@ -287,7 +305,10 @@ class DevkitManager:
 
         subprocess.run(['xhost', '+local:docker'], capture_output=True)
 
-        docker_cmd = self._base_docker_cmd(env_file, cfg) + [ros_command]
+        # Neo is a hardware stack: peer-to-peer DDS when on the crossover link,
+        # loopback fallback when run standalone on a dev box.
+        cyclonedds_uri = self._cyclonedds_uri(cfg, is_sim=False)
+        docker_cmd = self._base_docker_cmd(env_file, cyclonedds_uri) + [ros_command]
 
         self._log("Neo runtime active.")
         subprocess.run(docker_cmd)
