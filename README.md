@@ -111,6 +111,7 @@ The primary entry point for the system. While it runs the full stack by default,
 | `./manage.py` | (No arguments) | Runs `run_runtime()` immediately using live volumes. |
 | `./manage.py build` | `build` | Runs `run_build(full=False)`. Re-compiles ROS code. |
 | `./manage.py full-build` | `full-build` | Runs `run_build(full=True)`. Cleans system & Re-installs all system dependencies. |
+| `./manage.py neo` | `neo` | Runs `neo`. Runs only the line following code for the second 'neo'(cortex) perception SBC. |
 
 
 ### Interactive Shell
