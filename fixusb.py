@@ -125,8 +125,68 @@ def scan_and_export():
         mcu_device = '/dev/ttyTHS0'
         print(f'Using Jetson Header MCU: {mcu_device}')
 
-    r_port,  r_type,  r_serial,  r_vid  = gnss_found[0] if len(gnss_found) > 0 else ('virtual', 'none', '', 0)
-    r1_port, r1_type, r1_serial, r1_vid = gnss_found[1] if len(gnss_found) > 1 else ('virtual', 'none', '', 0)
+    # ── Deterministic receiver assignment ────────────────────────────────────
+    # USB enumeration order is NOT stable across reboots or reconnects.
+    # Assign rover/base by serial number when known; fall back to order only
+    # when serials are absent (iSerial=0 devices).
+    #
+    # Priority:
+    #   1. If GPS_SERIAL_ROVER / GPS_SERIAL_ROVER1 are already set in the
+    #      environment (e.g. from a previous run or manual override), respect them.
+    #   2. Match enumerated devices to those serials.
+    #   3. If no serials are set and both devices have iSerial=0, assign by order
+    #      but WARN loudly so the operator knows assignment may be wrong.
+
+    env_serial_rover  = os.environ.get('GPS_SERIAL_ROVER',  '')
+    env_serial_rover1 = os.environ.get('GPS_SERIAL_ROVER1', '')
+
+    # Separate ublox and septentrio devices
+    ublox_devs = [(dev, ser, vid) for dev, typ, ser, vid in gnss_found if typ == 'ublox']
+    sep_devs   = [(dev, ser, vid) for dev, typ, ser, vid in gnss_found if typ == 'septentrio']
+
+    def pick_ublox(prefer_serial: str, remaining: list):
+        """Return (device, serial, vid), rest. prefer_serial='' means take first."""
+        if prefer_serial:
+            for i, (dev, ser, vid) in enumerate(remaining):
+                if ser == prefer_serial:
+                    return (dev, ser, vid), remaining[:i] + remaining[i+1:]
+            print(f'WARNING: GPS_SERIAL={prefer_serial!r} not found in enumerated devices!')
+        if remaining:
+            return remaining[0], remaining[1:]
+        return None, remaining
+
+    rover_dev, ublox_devs  = pick_ublox(env_serial_rover,  ublox_devs)
+    rover1_dev, ublox_devs = pick_ublox(env_serial_rover1, ublox_devs)
+
+    # Check for zero-serial ambiguity
+    zero_serial_count = sum(1 for _, s, _ in
+                            ([rover_dev] if rover_dev else []) +
+                            ([rover1_dev] if rover1_dev else [])
+                            if not s)
+    if zero_serial_count > 1:
+        print('WARNING: Multiple u-blox receivers with iSerial=0 detected.')
+        print('         Receiver assignment is by enumeration order and may be wrong')
+        print('         on reconnect. Set GPS_SERIAL_ROVER / GPS_SERIAL_ROVER1 env')
+        print('         vars or flash unique serial numbers via u-center.')
+
+    # Unpack results
+    if rover_dev:
+        r_port, r_serial, r_vid = rover_dev
+        r_type = 'ublox'
+    elif sep_devs:
+        r_port, r_serial, r_vid = sep_devs.pop(0)
+        r_type = 'septentrio'
+    else:
+        r_port, r_type, r_serial, r_vid = 'virtual', 'none', '', 0
+
+    if rover1_dev:
+        r1_port, r1_serial, r1_vid = rover1_dev
+        r1_type = 'ublox'
+    elif sep_devs:
+        r1_port, r1_serial, r1_vid = sep_devs.pop(0)
+        r1_type = 'septentrio'
+    else:
+        r1_port, r1_type, r1_serial, r1_vid = 'virtual', 'none', '', 0
     mcu_p = mcu_device if mcu_device else 'virtual'
 
     # Resolve USB bus paths for ublox receivers (libusb requires bus path, not tty)
@@ -174,6 +234,11 @@ def scan_and_export():
         f.write(f'GROUP_ID={os.getgid()}\n')
         f.write(f'IS_JETSON={"true" if is_jetson else "false"}\n')
         f.write('TMAP2_FILE=/workspace/maps/mixed_test_map\n')
+        # NTRIP: set to true once config/ntrip.yaml is filled in with real creds.
+        # Keeps corrections disabled by default so a misconfigured ntrip.yaml
+        # doesn't spam connection errors on every boot.
+        existing_ntrip = os.environ.get('NTRIP_ENABLED', 'false')
+        f.write(f'NTRIP_ENABLED={existing_ntrip}\n')
 
     print(f'\nConfiguration Exported to .env')
     print(f'Safety Ack: {safety_ack} | MCU: {mcu_p}')
