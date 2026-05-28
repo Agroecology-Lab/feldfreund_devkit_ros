@@ -25,6 +25,7 @@ setup(
             'devkit_driver_node = devkit_driver.devkit_driver_node:main',
             'relposned_heading_shim = devkit_driver.relposned_heading_shim:main',
             'course_over_ground = devkit_driver.course_over_ground:main',
+            'rtk_navsatfix_shim = devkit_driver.rtk_navsatfix_shim:main',
         ],
     },
 )
