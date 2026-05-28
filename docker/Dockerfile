@@ -69,17 +69,6 @@ RUN apt-get update && \
       libgles2 && \
     apt-get clean && rm -rf /var/lib/apt/lists/*
 
-# 3.1b Pin NumPy to the 1.x series for ALL pip installs in this image.
-#      ROS Jazzy's binary packages — notably cv_bridge's cv_bridge_boost
-#      extension, plus matplotlib etc. — are compiled against the Noble
-#      system NumPy (1.26). Left unpinned, pip pulls NumPy 2.x as a
-#      transitive dependency of torch / opencv / rosys into /usr/local,
-#      where it shadows the apt build and breaks cv_bridge_boost at runtime:
-#        "A module that was compiled using NumPy 1.x cannot be run in NumPy 2.x"
-#      PIP_CONSTRAINT caps every pip invocation below (Stages 4, 5, 10),
-#      narrowing requirements.txt's `numpy<3.0.0` down to the 1.x series.
-RUN echo "numpy<2" > /etc/pip-constraints.txt
-ENV PIP_CONSTRAINT=/etc/pip-constraints.txt
 
 # 3.2 ROS Jazzy binaries (with retries)
 #     NOTE: ros-jazzy-fields2cover intentionally excluded here —
