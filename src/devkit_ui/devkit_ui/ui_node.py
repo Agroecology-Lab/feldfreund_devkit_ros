@@ -2193,10 +2193,8 @@ class NiceGuiNode(Node):
                     placeholder='Mission name', label='Save queue as…',
                 ).classes('flex-1').props('dense outlined')
                 save_repeat = ui.number(
-                    label='Repeat (h)', value=None,
-                    min=1, step=1, precision=0,
-                ).classes('w-24').props('dense outlined clearable')
-                save_repeat.set_tooltip('Leave blank for one-shot')
+                label='Repeat (h)', value=None, min=1, step=1, precision=0,
+                ).classes('w-24').props('dense outlined clearable').tooltip('Leave blank for one-shot')
 
                 def _save_mission():
                     if not mission_queue:
