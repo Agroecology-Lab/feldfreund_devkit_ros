@@ -255,6 +255,21 @@ def generate_launch_description():
     if rover1_serial:
         rear_args['device_serial_string'] = rover1_serial
 
+    # dual_antenna: True when a second F9P is present (moving-base receiver).
+    # Computed the same way as gps1_enabled so they're always consistent.
+    # gps1_enabled is a PythonExpression substitution (runtime); dual_antenna is
+    # used as a plain Python bool at parse time for the course_over_ground param.
+    # Both read the same env vars which don't change between parse and execution.
+    dual_antenna = (rover1_port != 'virtual' and gps1_type == 'ublox')
+
+    # NTRIP: gated by NTRIP_ENABLED env var, not file presence.
+    # File presence is evaluated at build/install time in Docker images and
+    # will always be True once ntrip.yaml is committed. Use an explicit env var
+    # so operators can toggle NTRIP without touching the image.
+    # To enable: set NTRIP_ENABLED=true in .env (fixusb.py writes this file).
+    ntrip_config  = os.path.join(devkit_launch_pkg, 'config', 'ntrip.yaml')
+    ntrip_enabled = os.getenv('NTRIP_ENABLED', 'false').lower() == 'true'
+
     return LaunchDescription([
         sim_arg,
 
@@ -287,14 +302,35 @@ def generate_launch_description():
             ],
         ),
 
-        # ── Topic relays ─────────────────────────────────────────────────────
-
-        Node(
-            package='topic_tools',
-            executable='relay',
-            name='navsatfix_relay',
-            arguments=['/rover/fix', '/gnss/fix'],
+        # ── NTRIP corrections (u-blox path) ──────────────────────────────────
+        # Delivers RTCM to ublox_dgnss when NTRIP_ENABLED=true in .env.
+        # Fill in config/ntrip.yaml (host/port/mountpoint/credentials) then
+        # set NTRIP_ENABLED=true and re-run fixusb.py to activate.
+        # Requires: sudo apt install ros-jazzy-ntrip-client
+        *([Node(
+            package='ntrip_client',
+            executable='ntrip_client_node',
+            name='ntrip_client',
+            parameters=[ntrip_config],
             output='screen',
+        )] if (ntrip_enabled and rover_port != 'virtual' and gps_type == 'ublox') else []),
+
+        # ── Topic relays & GNSS shims ─────────────────────────────────────────
+        # rtk_navsatfix_shim replaces the dumb topic_tools relay.
+        # It combines /rover/ublox_nav_sat_fix_hp + /rover/ubx_nav_pvt.carr_soln
+        # to emit /gnss/fix with a status that correctly reflects RTK FLOAT vs
+        # FIXED (ublox_dgnss reports STATUS_GBAS_FIX for both without this shim).
+        # Only meaningful when GPS hardware is present; in sim /gnss/fix is unused.
+        GroupAction(
+            condition=IfCondition(gps_enabled),
+            actions=[
+                Node(
+                    package='devkit_driver',
+                    executable='rtk_navsatfix_shim',
+                    name='rtk_navsatfix_shim',
+                    output='screen',
+                ),
+            ],
         ),
 
         Node(
@@ -305,18 +341,35 @@ def generate_launch_description():
             output='screen',
         ),
 
-        Node(
-            package='devkit_driver',
-            executable='relposned_heading_shim',
-            name='relposned_heading_shim',
-            output='screen',
+        # relposned_heading_shim: dual-antenna RTK heading from NAV-RELPOSNED.
+        # Only launched when a second F9P (moving base) is present.
+        GroupAction(
+            condition=IfCondition(gps1_enabled),
+            actions=[
+                Node(
+                    package='devkit_driver',
+                    executable='relposned_heading_shim',
+                    name='relposned_heading_shim',
+                    output='screen',
+                ),
+            ],
         ),
 
-        Node(
-            package='devkit_driver',
-            executable='course_over_ground',
-            name='course_over_ground',
-            output='screen',
+        # course_over_ground: single-F9P CoG heading fallback.
+        # Launched whenever GPS is present. dual_antenna param disables
+        # publishing when the relposned shim is active, preventing two nodes
+        # from racing on /gnss/heading.
+        GroupAction(
+            condition=IfCondition(gps_enabled),
+            actions=[
+                Node(
+                    package='devkit_driver',
+                    executable='course_over_ground',
+                    name='course_over_ground',
+                    parameters=[{'dual_antenna': dual_antenna}],
+                    output='screen',
+                ),
+            ],
         ),
 
         # ── FusionCore UKF ───────────────────────────────────────────────────
