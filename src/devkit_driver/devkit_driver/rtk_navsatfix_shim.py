@@ -70,6 +70,18 @@ _SENSOR_QOS = QoSProfile(
     durability=DurabilityPolicy.VOLATILE,
 )
 
+# Output QoS for /gnss/fix. MUST be RELIABLE: fusioncore subscribes to /gnss/fix
+# with the default reliable profile (rclcpp::QoS(10)). A BEST_EFFORT publisher is
+# QoS-incompatible with a RELIABLE subscriber, so DDS silently refuses to deliver
+# any fix and fusioncore never sees a position. Publishing RELIABLE is compatible
+# with both reliable and best-effort subscribers. The input subscriptions below
+# stay BEST_EFFORT to match ublox_dgnss.
+_PUB_QOS = QoSProfile(
+    depth=10,
+    reliability=ReliabilityPolicy.RELIABLE,
+    durability=DurabilityPolicy.VOLATILE,
+)
+
 
 class RtkNavSatFixShim(Node):
     def __init__(self):
@@ -80,7 +92,7 @@ class RtkNavSatFixShim(Node):
         self._pub_count: int = 0
         self._held_fixes: list = []   # fixes buffered while waiting for first PVT
 
-        self._pub = self.create_publisher(NavSatFix, '/gnss/fix', _SENSOR_QOS)
+        self._pub = self.create_publisher(NavSatFix, '/gnss/fix', _PUB_QOS)
 
         self.create_subscription(
             NavSatFix, '/rover/ublox_nav_sat_fix_hp',
