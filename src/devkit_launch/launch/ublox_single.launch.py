@@ -1,4 +1,9 @@
 import os
+# SUPERSEDED — this file is no longer used by devkit.launch.py.
+# devkit.launch.py conditionally includes ublox_dgnss/launch/ublox_mb+r_rover.launch.py
+# (single-F9P, no moving base) or ublox_mb+r_base + ublox_mb+r_rover (dual-F9P RTK)
+# based on GPS_PORT_ROVER / GPS_PORT_ROVER1 env vars set by fixusb.py.
+# Kept for standalone bench testing only. Do not wire into any production launch.
 from launch import LaunchDescription
 from launch.actions import SetEnvironmentVariable
 from launch_ros.actions import ComposableNodeContainer
