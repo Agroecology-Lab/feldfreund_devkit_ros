@@ -55,6 +55,15 @@ _STALE_REPUB_HZ = 5.0
 class CourseOverGround(Node):
     def __init__(self):
         super().__init__('course_over_ground')
+
+        # When True, a moving-baseline (dual-F9P) heading source is active and
+        # publishing to /gnss/heading. This CoG shim must then stay silent so
+        # the two nodes don't race on the same topic. The launch file passes
+        # this; it was previously declared nowhere and silently ignored, so
+        # both shims published simultaneously in dual-antenna mode.
+        self.declare_parameter('dual_antenna', False)
+        self._dual_antenna = self.get_parameter('dual_antenna').value
+
         self._pub = self.create_publisher(Imu, '/gnss/heading', 10)
         self._sub = self.create_subscription(
             UBXNavPVT, '/rover/ubx_nav_pvt',
@@ -70,6 +79,10 @@ class CourseOverGround(Node):
         self.get_logger().info('course_over_ground ready')
 
     def _cb(self, msg: UBXNavPVT) -> None:
+        # Moving-baseline heading is authoritative when present — stay silent.
+        if self._dual_antenna:
+            return
+
         # GNSS solution must be valid before we trust any of its fields
         if not msg.gnss_fix_ok or msg.invalid_llh:
             self._reject_count += 1
@@ -105,9 +118,17 @@ class CourseOverGround(Node):
         acc_rad  = math.radians(head_acc_deg)
         variance = acc_rad ** 2
 
-        # orientation_covariance is row-major 3×3; index [8] = yaw variance
-        out.orientation_covariance    = [-1.0] * 9
-        out.orientation_covariance[8] = variance
+        # orientation_covariance is row-major 3×3; index [8] = yaw variance.
+        # Do NOT use -1 in index [0]: FusionCore's gnss_heading_callback rejects
+        # the message when orientation_covariance[0] < 0, silently dropping every
+        # heading. Mark roll/pitch unknown with a large positive variance so the
+        # validity gate passes; the callback only reads index [8].
+        _UNKNOWN = 1.0e6
+        out.orientation_covariance = [
+            _UNKNOWN, 0.0,      0.0,
+            0.0,      _UNKNOWN, 0.0,
+            0.0,      0.0,      variance,
+        ]
 
         # Angular velocity and linear acceleration unused — heading only
         out.angular_velocity_covariance[0]    = -1.0
@@ -127,6 +148,9 @@ class CourseOverGround(Node):
         STALE_TIMEOUT_S, after which the topic goes silent and the filter
         degrades to wheel-odom dead reckoning.
         """
+        # In dual-antenna mode this shim is disabled; never republish.
+        if self._dual_antenna:
+            return
         if self._last_good is None:
             return
 
