@@ -69,9 +69,21 @@ class RelPosnedHeadingShim(Node):
         acc_rad  = math.radians(msg.acc_heading * 1e-5)
         variance = acc_rad ** 2
 
-        # orientation_covariance is row-major 3×3; index [8] = yaw variance
-        out.orientation_covariance    = [-1.0] * 9
-        out.orientation_covariance[8] = variance
+        # orientation_covariance is row-major 3×3; index [8] = yaw variance.
+        #
+        # IMPORTANT: do NOT set index [0] to -1 here. FusionCore's
+        # gnss_heading_callback rejects the whole message when
+        # orientation_covariance[0] < 0 ("invalid orientation covariance"),
+        # so a -1 sentinel silently drops every heading update. The heading
+        # callback only reads index [8] (yaw); roll/pitch are unused. Mark
+        # roll/pitch as "unknown" with a large positive variance so index [0]
+        # stays >= 0 and the validity gate passes.
+        _UNKNOWN = 1.0e6
+        out.orientation_covariance = [
+            _UNKNOWN, 0.0,      0.0,
+            0.0,      _UNKNOWN, 0.0,
+            0.0,      0.0,      variance,
+        ]
 
         # Angular velocity and linear acceleration unused (heading only)
         out.angular_velocity_covariance[0]    = -1.0
