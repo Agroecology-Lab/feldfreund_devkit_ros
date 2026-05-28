@@ -5,7 +5,13 @@
     ## Important: Make sure the values provided are in decimal points, or else might give error in execution
     pose_stddev: [0.1, 0.1, 0.0, 0.0, 0.0, 0.1] # [m]
     twist_stddev: [0.01, 0.0, 0.0, 0.0, 0.0, 0.01] # [m/s]
-    publish_tf: True
+    # FusionCore is the localizer and owns the odom -> base_link transform
+    # (its own publish.tf defaults true). odom_handler must NOT also broadcast
+    # that edge, or the two compete and the TF flickers between the raw wheel
+    # pose and the fused UKF pose, corrupting every TF consumer (Nav2 costmaps).
+    # The wheel /odom *topic* is still published and relayed to /odom/wheels
+    # for FusionCore to consume; only the duplicate TF broadcast is suppressed.
+    publish_tf: False
     expander_name: "p0" # Name of the expander in the lizard configuration
     flash_parameters: "-j orin --nand" # Parameters for espresso.py (e.g., "-j orin --nand" for "flash.py orin nand v05")
     serial_port: "/dev/ttyTHS0" # This needs to be in the docker-compose.yml file as well
