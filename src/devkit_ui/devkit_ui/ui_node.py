@@ -1993,34 +1993,347 @@ class NiceGuiNode(Node):
         # OBSTACLE: obstacle list + map rendering, full width below the queue.
         attach_mission_obstacle_panel(draw_handle)
 
-    # ── Mission executor ─────────────────────────────────────────────────────
 
-    def _get_tool_publisher(self, topic: str):
-        """Return (creating if necessary) a latched std_msgs/Bool publisher
-        for the given tool topic.  Keyed by topic name so we never create
-        duplicates across missions."""
-        if topic not in self._tool_publishers:
-            self._tool_publishers[topic] = self.create_publisher(Bool, topic, 1)
-        return self._tool_publishers[topic]
+# ── ui_node.py: mission tab queue section + executor (replaces lines 1848–1925) ──
+#
+# Drop this in to replace everything from:
+#   with ui.card().classes('w-full'):          # "Mission Queue" card
+# down to the end of _run_mission.
+#
+# Also requires:
+#   1. Add to NiceGuiNode.__init__:
+#        self._mission_running = False
+#        self._mission_cancel  = False
+#        self._mission_run_id  = None
+#        self._tool_publishers: dict = {}
+#
+#   2. Change the import at the top:
+#        from devkit_ui.missions import ACTIONS, MissionStore, action_ros_msgs
+#
+#   3. Add these two methods to NiceGuiNode (see bottom of this file):
+#        _get_tool_publisher, _send_goal_sync, cancel_mission
+
+# ─────────────────────────────────────────────────────────────────────────────
+# MISSION QUEUE CARD  (replaces the old "Mission Queue" card block)
+# ─────────────────────────────────────────────────────────────────────────────
+
+        with ui.card().classes('w-full'):
+            with ui.row().classes('items-baseline gap-2 mb-3'):
+                ui.label('Mission Queue').classes('font-semibold')
+                ui.label('select rows · pick action · run').classes(
+                    'text-xs').style('color:#8c959f')
+
+            # ── action selector + param editor ────────────────────────────────
+            with ui.row().classes('items-center gap-3 w-full mb-2 flex-wrap'):
+                ui.html('<div class="sec-label" style="white-space:nowrap">Implement</div>')
+                action_select = ui.select(
+                    options={k: f'{a.icon} {a.label}' for k, a in ACTIONS.items()},
+                    value='drive',
+                ).classes('flex-1').props('dense outlined')
+
+            # Param inputs rendered dynamically when action changes.
+            param_row = ui.row().classes('items-end gap-3 w-full flex-wrap mb-2')
+            param_inputs: dict = {}   # key → ui.number widget
+
+            def _rebuild_params():
+                param_row.clear()
+                param_inputs.clear()
+                action = ACTIONS.get(action_select.value)
+                if action is None or not action.param_schema:
+                    return
+                with param_row:
+                    for p in action.param_schema:
+                        inp = ui.number(
+                            label=f'{p.label} ({p.unit})',
+                            value=p.default,
+                            min=p.min, max=p.max, step=p.step,
+                            precision=p.precision,
+                        ).classes('w-32').props('dense outlined')
+                        param_inputs[p.key] = inp
+
+            action_select.on_value_change(lambda _: _rebuild_params())
+            _rebuild_params()
+
+            # ── available / queue panels ──────────────────────────────────────
+            with ui.row().classes('w-full gap-4 items-start'):
+                with ui.card().classes('flex-1').style('background:#f6f8fa;padding:10px'):
+                    ui.html('<div class="sec-label mb-2">Available rows</div>')
+                    available_col = ui.column().style('gap:2px;width:100%')
+                with ui.card().classes('flex-1').style('background:#f6f8fa;padding:10px'):
+                    ui.html('<div class="sec-label mb-2">Today\'s queue</div>')
+                    queue_col = ui.column().style('gap:2px;width:100%')
+                    queue_lbl = ui.label('Empty — add rows from the left').classes(
+                        'text-xs').style('color:#8c959f')
+
+            # mission_queue: list of (row_id, action_key, action_params) triples
+            mission_queue: list = []
+
+            def _render_queue():
+                queue_col.clear()
+                queue_lbl.set_visibility(not mission_queue)
+                if not mission_queue:
+                    return
+                with queue_col:
+                    for i, (rid, act, params) in enumerate(mission_queue):
+                        idx = i
+                        adef = ACTIONS.get(act)
+                        param_str = ' · '.join(
+                            f'{p.label}: {params.get(p.key, p.default):.{p.precision}f}{p.unit}'
+                            for p in (adef.param_schema if adef else [])
+                        )
+                        with ui.row().classes('items-center gap-1 w-full'):
+                            with ui.column().classes('flex-1 gap-0'):
+                                ui.label(
+                                    f'Row {rid}  {adef.icon if adef else "?"} {adef.label if adef else act}'
+                                ).classes('text-sm font-mono')
+                                if param_str:
+                                    ui.label(param_str).classes('text-xs font-mono').style(
+                                        'color:#8c959f')
+                            ui.button('↑',
+                                on_click=lambda _, i=idx: _move(i, -1)).props(
+                                'flat dense').classes('text-xs').style(
+                                'color:#57606a').set_enabled(i > 0)
+                            ui.button('↓',
+                                on_click=lambda _, i=idx: _move(i, 1)).props(
+                                'flat dense').classes('text-xs').style(
+                                'color:#57606a').set_enabled(i < len(mission_queue) - 1)
+                            ui.button('✕',
+                                on_click=lambda _, i=idx: _remove(i)).props(
+                                'flat dense').classes('text-xs').style('color:#cf222e')
+
+            def _move(idx, d):
+                ni = idx + d
+                if 0 <= ni < len(mission_queue):
+                    mission_queue[idx], mission_queue[ni] = mission_queue[ni], mission_queue[idx]
+                _render_queue()
+
+            def _remove(idx):
+                mission_queue.pop(idx)
+                _render_queue()
+
+            def _add_row(row_id):
+                act = action_select.value or 'drive'
+                adef = ACTIONS.get(act)
+                params = {p.key: float(param_inputs[p.key].value)
+                          for p in (adef.param_schema if adef else [])
+                          if p.key in param_inputs}
+                # allow duplicates — operator may want to run the same row
+                # twice with different implements (e.g. spray then harvest)
+                mission_queue.append((row_id, act, params))
+                _render_queue()
+
+            mission_status = ui.label('').classes('text-xs font-mono mt-3').style(
+                'color:#57606a')
+
+            with ui.row().classes('gap-2 mt-3'):
+                run_btn = ui.button(
+                    'Run Mission',
+                    on_click=lambda: self._run_mission(mission_queue, mission_status),
+                ).props('color=positive no-caps')
+                ui.button(
+                    'Cancel',
+                    on_click=self.cancel_mission,
+                ).props('color=negative no-caps flat')
+
+            # ── available rows refresh ────────────────────────────────────────
+            _avail_prev = [None]
+            def _refresh_available():
+                if id(self.topo_nodes) == _avail_prev[0]:
+                    return
+                _avail_prev[0] = id(self.topo_nodes)
+                rows: dict[int, str] = {}
+                for nname, nd in self.topo_nodes.items():
+                    meta = nd.get('meta', {})
+                    rid  = meta.get('row_id')
+                    if rid is not None and meta.get('row_role', '') == 'entry':
+                        try:
+                            rows[int(rid)] = nname
+                        except (TypeError, ValueError):
+                            pass
+                available_col.clear()
+                if not rows:
+                    with available_col:
+                        ui.label('No rows in map yet').classes('text-xs').style(
+                            'color:#8c959f')
+                    return
+                with available_col:
+                    for rid in sorted(rows):
+                        r = rid
+                        with ui.row().classes('items-center gap-2 w-full'):
+                            ui.label(f'Row {rid}').classes('text-sm font-mono flex-1')
+                            ui.label(rows[rid]).classes('text-xs font-mono').style(
+                                'color:#8c959f')
+                            ui.button(
+                                'Add →',
+                                on_click=lambda _, r=r: _add_row(r),
+                            ).props('color=primary outline no-caps dense')
+                            ui.button(
+                                '✕',
+                                on_click=lambda _, r=r: self.confirm_delete_row(r),
+                            ).props('flat dense').classes('text-xs').style('color:#cf222e')
+
+            ui.timer(1.0, _refresh_available)
+
+            # ── mission store panel ───────────────────────────────────────────
+            ui.separator().classes('my-3')
+            with ui.row().classes('items-baseline gap-2 mb-2'):
+                ui.label('Mission Store').classes('font-semibold')
+                ui.label('saved missions with repeat schedules').classes(
+                    'text-xs').style('color:#8c959f')
+
+            with ui.card().classes('w-full').style('background:#f6f8fa;padding:10px'):
+                missions_col = ui.column().style('gap:2px;width:100%')
+                missions_empty_lbl = ui.label(
+                    'No saved missions'
+                ).classes('text-xs').style('color:#8c959f')
+
+            # Save current queue as a named recurring mission
+            with ui.row().classes('items-center gap-2 mt-2 flex-wrap'):
+                save_name_input = ui.input(
+                    placeholder='Mission name', label='Save queue as…',
+                ).classes('flex-1').props('dense outlined')
+                save_repeat = ui.number(
+                    label='Repeat (h)', value=None,
+                    min=1, step=1, precision=0,
+                ).classes('w-24').props('dense outlined clearable')
+                save_repeat.set_tooltip('Leave blank for one-shot')
+
+                def _save_mission():
+                    if not mission_queue:
+                        self._mission_store._set_status('ERROR: queue is empty')
+                        return
+                    rows_for_store = [
+                        next(
+                            (nname for nname, nd in self.topo_nodes.items()
+                             if nd.get('meta', {}).get('row_id') == rid
+                             and nd.get('meta', {}).get('row_role') == 'entry'),
+                            f'ROW_{rid}_IN',
+                        )
+                        for rid, _, _ in mission_queue
+                    ]
+                    # All steps in the queue share the action+params of the
+                    # first entry.  Mixed-action missions aren't supported in
+                    # the store yet — first step wins.
+                    first_act    = mission_queue[0][1]
+                    first_params = mission_queue[0][2]
+                    rpt = int(save_repeat.value) if save_repeat.value else None
+                    self._mission_store.add(
+                        rows=rows_for_store,
+                        action=first_act,
+                        action_params=first_params,
+                        name=save_name_input.value or '',
+                        repeat_every_hours=rpt,
+                        active=True,
+                    )
+
+                ui.button('Save', on_click=_save_mission).props(
+                    'color=primary no-caps dense')
+
+            mission_store_status = ui.label('').classes('text-xs font-mono mt-1').style(
+                'color:#57606a')
+
+            _mstore_prev = [-1]
+            def _refresh_missions():
+                # Store status line
+                cur_status = self.mission_status
+                mission_store_status.set_text(cur_status)
+                mission_store_status.style(
+                    'color:#cf222e' if cur_status.startswith('ERROR') else
+                    'color:#1a7f37' if cur_status else 'color:#57606a')
+
+                v = self.missions_version
+                if v == _mstore_prev[0]:
+                    return
+                _mstore_prev[0] = v
+
+                snap = self.missions
+                missions_col.clear()
+                missions_empty_lbl.set_visibility(not snap)
+                run_btn.set_enabled(not self._mission_running)
+
+                if not snap:
+                    return
+                with missions_col:
+                    for m in snap:
+                        mid   = m.get('id', '?')
+                        name  = m.get('name', mid)
+                        act   = m.get('action', '—')
+                        adef  = ACTIONS.get(act)
+                        icon  = adef.icon if adef else '?'
+                        rows  = m.get('rows', [])
+                        active = m.get('active', False)
+                        due_h = self._mission_store.next_due_in_hours(mid)
+                        if due_h is None:
+                            due_str, due_col = 'done', 'color:#8c959f'
+                        elif due_h == 0.0:
+                            due_str, due_col = 'due now', 'color:#1a7f37'
+                        else:
+                            due_str, due_col = f'in {due_h:.1f}h', 'color:#9a6700'
+                        last_ok = m.get('last_run_success')
+                        last_str = '✓' if last_ok is True else '✗' if last_ok is False else '—'
+
+                        with ui.row().classes('items-center gap-2 w-full'):
+                            ui.label(f'{icon} {name}').classes(
+                                'text-sm font-mono').style('min-width:100px')
+                            ui.label(f'{len(rows)} rows').classes(
+                                'text-xs font-mono flex-1').style('color:#8c959f')
+                            ui.label(due_str).classes('text-xs font-mono').style(due_col)
+                            ui.label(last_str).classes('text-xs font-mono').style(
+                                'color:#1a7f37' if last_ok is True else
+                                'color:#cf222e' if last_ok is False else 'color:#8c959f')
+                            act_toggle = ui.checkbox('', value=active).props('dense')
+                            act_toggle.tooltip('Active — included in today_queue()')
+                            act_toggle.on_value_change(
+                                lambda e, m=mid: self._mission_store.set_active(m, e.value))
+                            ui.button(
+                                '✕',
+                                on_click=lambda _, m=mid: self._mission_store.delete(m),
+                            ).props('flat dense').classes('text-xs').style('color:#cf222e')
+
+            ui.timer(0.5, _refresh_missions)
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# NiceGuiNode METHODS  (add / replace on the class)
+# ─────────────────────────────────────────────────────────────────────────────
+
+    def _get_tool_publisher(self, topic: str, is_float: bool = False):
+        """Return (creating if needed) a publisher for the given tool topic.
+        is_float=True → std_msgs/Float64; False → std_msgs/Bool."""
+        key = (topic, is_float)
+        if key not in self._tool_publishers:
+            if is_float:
+                from std_msgs.msg import Float64
+                self._tool_publishers[key] = self.create_publisher(Float64, topic, 1)
+            else:
+                from std_msgs.msg import Bool
+                self._tool_publishers[key] = self.create_publisher(Bool, topic, 1)
+        return self._tool_publishers[key]
+
+    def _publish_tool_msgs(self, action_key: str,
+                           action_params: Optional[dict],
+                           enable: bool) -> None:
+        """Publish all (topic, value) pairs from action_ros_msgs."""
+        from std_msgs.msg import Bool, Float64
+        for topic, value in action_ros_msgs(action_key, action_params, enable):
+            try:
+                if isinstance(value, bool):
+                    pub = self._get_tool_publisher(topic, is_float=False)
+                    msg = Bool(); msg.data = value
+                else:
+                    pub = self._get_tool_publisher(topic, is_float=True)
+                    msg = Float64(); msg.data = float(value)
+                pub.publish(msg)
+            except Exception as exc:
+                self.get_logger().warn(
+                    f'_publish_tool_msgs({topic}, enable={enable}): {exc}')
 
     def _run_mission(self, queue: list, status_lbl) -> None:
         """Launch a mission from the UI queue.
 
-        queue  : list of row_id integers in the operator-chosen order.
-        Each row_id maps to a topo entry-node name via topo_nodes meta.
-        The executor:
-          1. Resolves row_id → entry-node name.
-          2. For each (mission_id, entry_node, action) tuple:
-             a. Publishes True on the action's tool_topic (if any).
-             b. Sends a GotoNode goal to the entry node.
-             c. Waits for the goal to complete (or cancellation / e-stop).
-             d. Publishes False on the tool_topic.
-             e. Calls record_run() on the mission.
-          3. Sets status throughout so the UI timer can reflect progress.
-
-        One mission in the MissionStore is created (or reused) per run
-        using the operator-assembled queue.  Its id is stored in
-        self._mission_run_id so Cancel can find it.
+        queue: list of (row_id, action_key, action_params) triples.
+        Each step navigates to the row's entry node and publishes
+        implement params + enable before the goal, then disable after.
         """
         if not queue:
             status_lbl.set_text('ERROR: queue is empty')
@@ -2031,11 +2344,11 @@ class NiceGuiNode(Node):
             status_lbl.style('color:#cf222e')
             return
         if not _ACTION_OK:
-            status_lbl.set_text('ERROR: action client unavailable (import failed)')
+            status_lbl.set_text('ERROR: action client unavailable')
             status_lbl.style('color:#cf222e')
             return
 
-        # Build a snapshot of row_id → entry_node from the current topo map.
+        # Resolve row_id → entry node from current topo map.
         row_entry: dict[int, str] = {}
         for nname, nd in self.topo_nodes.items():
             meta = nd.get('meta', {})
@@ -2046,121 +2359,73 @@ class NiceGuiNode(Node):
                 except (TypeError, ValueError):
                     pass
 
-        missing = [rid for rid in queue if rid not in row_entry]
+        missing = [rid for rid, _, _ in queue if rid not in row_entry]
         if missing:
             status_lbl.set_text(f'ERROR: no entry node for row(s) {missing}')
             status_lbl.style('color:#cf222e')
             return
 
-        # Resolve the queue to (row_id, entry_node) pairs.
-        # Use the first action that appears in ACTIONS — the UI queue is
-        # row-centric today; per-row action selection is a future feature.
-        default_action = next(iter(ACTIONS))
-        steps = [(rid, row_entry[rid], default_action) for rid in queue]
-
-        # Register a one-shot mission in the store so record_run anchors
-        # the repeat interval and the YAML log is updated.
-        rows_for_store = [row_entry[rid] for rid in queue]
-        mid = self._mission_store.add(
-            rows=rows_for_store,
-            action=default_action,
-            name='UI_RUN',
-            active=True,
-        )
-        if mid is None:
-            # Name collision on UI_RUN — reuse the existing record.
-            for m in self.missions:
-                if m.get('name') == 'UI_RUN':
-                    mid = m['id']
-                    self._mission_store.update(
-                        mid, rows=rows_for_store, action=default_action, active=True)
-                    break
-        self._mission_run_id = mid
+        steps = [(rid, row_entry[rid], act, params) for rid, act, params in queue]
 
         self._mission_running = True
         self._mission_cancel  = False
-        status_lbl.set_text(f'Starting {len(steps)} row(s)…')
+        status_lbl.set_text(f'Starting {len(steps)} step(s)…')
         status_lbl.style('color:#57606a')
 
         import threading as _threading
 
         def _execute():
             success_overall = True
-            for step_idx, (rid, entry_node, action) in enumerate(steps):
+            for step_idx, (rid, entry_node, action, params) in enumerate(steps):
                 if self._mission_cancel or self.soft_estop_active:
                     status_lbl.set_text('Cancelled')
                     status_lbl.style('color:#9a6700')
                     success_overall = False
                     break
 
-                tool_topic = ACTIONS.get(action, {}).get('tool_topic')
+                adef = ACTIONS.get(action)
+                label = f'{adef.icon} {adef.label}' if adef else action
                 status_lbl.set_text(
-                    f'Row {rid} ({step_idx+1}/{len(steps)}) → {entry_node}')
+                    f'[{step_idx+1}/{len(steps)}] Row {rid} {label} → {entry_node}')
                 status_lbl.style('color:#0969da')
 
-                # Engage tool
-                if tool_topic:
-                    try:
-                        pub = self._get_tool_publisher(tool_topic)
-                        msg = Bool(); msg.data = True
-                        pub.publish(msg)
-                    except Exception as exc:
-                        self.get_logger().warn(
-                            f'tool enable failed ({tool_topic}): {exc}')
+                # Engage implement
+                self._publish_tool_msgs(action, params, enable=True)
 
-                # Send nav goal and wait synchronously
-                goal_success = self._send_goal_sync(entry_node)
+                nav_ok = self._send_goal_sync(entry_node)
 
-                # Disengage tool regardless of nav outcome
-                if tool_topic:
-                    try:
-                        pub = self._get_tool_publisher(tool_topic)
-                        msg = Bool(); msg.data = False
-                        pub.publish(msg)
-                    except Exception as exc:
-                        self.get_logger().warn(
-                            f'tool disable failed ({tool_topic}): {exc}')
+                # Disengage regardless of nav outcome
+                self._publish_tool_msgs(action, params, enable=False)
 
-                if not goal_success:
+                if not nav_ok:
                     status_lbl.set_text(
-                        f'Row {rid}: navigation failed — stopping mission')
+                        f'Row {rid}: nav failed — stopping mission')
                     status_lbl.style('color:#cf222e')
                     success_overall = False
                     break
 
-            # Record outcome in the store
-            if mid is not None:
-                self._mission_store.record_run(mid, success_overall)
-
             if success_overall:
                 status_lbl.set_text(
-                    f'Mission complete — {len(steps)} row(s) done')
+                    f'Mission complete — {len(steps)} step(s) done ✓')
                 status_lbl.style('color:#1a7f37')
 
             self._mission_running = False
             self._mission_cancel  = False
-            self._mission_run_id  = None
 
         _threading.Thread(target=_execute, daemon=True).start()
 
     def _send_goal_sync(self, target: str, timeout_sec: float = 300.0) -> bool:
-        """Send a GotoNode goal and block until it succeeds, fails, or the
-        mission is cancelled / e-stopped.  Returns True on success.
-
-        Runs in the executor thread (not the ROS spin thread), so we use
-        an Event for synchronisation rather than rclpy futures directly.
-        """
+        """Send a GotoNode goal and block until success/failure/cancel/timeout.
+        Returns True on success.  Runs in the executor thread."""
         import threading as _threading
-
         if not _ACTION_OK:
             return False
 
-        result_holder: list = [None]   # [True | False]
         done_event = _threading.Event()
+        result_holder: list = [None]
 
-        ready = self._nav_ac.wait_for_server(timeout_sec=10.0)
-        if not ready:
-            self.get_logger().warn(f'_send_goal_sync: action server not ready (10s)')
+        if not self._nav_ac.wait_for_server(timeout_sec=10.0):
+            self.get_logger().warn('_send_goal_sync: action server not ready')
             return False
 
         goal = GotoNode.Goal()
@@ -2187,18 +2452,16 @@ class NiceGuiNode(Node):
             self._nav_goal_handle = None
             done_event.set()
 
-        send_future = self._nav_ac.send_goal_async(
-            goal, feedback_callback=self._nav_feedback)
-        send_future.add_done_callback(_on_accepted)
+        self._nav_ac.send_goal_async(
+            goal, feedback_callback=self._nav_feedback
+        ).add_done_callback(_on_accepted)
 
-        # Poll until done, cancelled, e-stopped, or timed out.
         deadline = timeout_sec
         interval = 0.25
         while not done_event.wait(timeout=interval):
             deadline -= interval
             if deadline <= 0:
-                self.get_logger().warn(
-                    f'_send_goal_sync: timeout waiting for {target}')
+                self.get_logger().warn(f'_send_goal_sync: timeout for {target}')
                 self.cancel_nav_goal()
                 return False
             if self._mission_cancel or self.soft_estop_active:
@@ -2209,11 +2472,11 @@ class NiceGuiNode(Node):
         return bool(result_holder[0])
 
     def cancel_mission(self) -> None:
-        """Signal the running executor thread to stop after the current row."""
+        """Signal the executor thread to stop after the current row."""
         self._mission_cancel = True
         self.cancel_nav_goal()
-
- # ── System tab ────────────────────────────────────────────────────────────
+    
+# ── System tab ────────────────────────────────────────────────────────────
 
     def _system_content(self) -> None:
         with ui.row().classes('items-stretch w-full gap-3'):
