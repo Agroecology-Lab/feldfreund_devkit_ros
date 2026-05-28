@@ -35,36 +35,33 @@ fusioncore:
     gnss.heading_topic: /gnss/heading
 
     # fusioncore fix_type enum: 1=GPS, 2=DGPS, 3=RTK_FLOAT, 4=RTK_FIXED
-    # IMPORTANT: sensor_msgs/NavSatFix status=2 (GBAS) maps to RTK_FIXED (4).
-    # RTK_FLOAT (3) is unreachable via NavSatFix — ublox_dgnss reports
-    # status=2 for both FLOAT and FIXED modes. Meaningful thresholds are
-    # 2 (accept any augmented fix) or 4 (accept RTK quality only).
+    # rtk_navsatfix_shim maps carr_soln to NavSatFix status as follows:
+    #   carr_soln=0 (no RTK)    → receiver's own status (GPS/SBAS/DGPS)
+    #   carr_soln=1 (RTK FLOAT) → STATUS_SBAS_FIX → fusioncore DGPS (2)
+    #   carr_soln=2 (RTK FIXED) → STATUS_GBAS_FIX → fusioncore RTK_FIXED (4)
     #
-    # ── SINGLE F9P / NO CORRECTIONS (current) ─────────────────
-    # Plain GPS fix → NavSatFix status=0 → fusioncore GPS_FIX (1).
-    # Must accept 1 or filter starves entirely and /fusion/odom never publishes.
-    gnss.min_fix_type: 1
-    # ── RESTORE FOR DUAL F9P + RTK ─────────────────────────────
-    # gnss.min_fix_type: 4   # require NavSatFix status=2 (RTK FLOAT or FIXED)
+    # min_fix_type=4: accept RTK FIXED only. FLOAT fixes are fused as DGPS (2)
+    # and rejected here, so the filter runs on wheel odom + heading alone until
+    # the baseline converges. Set to 2 to fuse FLOAT fixes (useful during
+    # startup convergence in large fields, at the cost of ~0.3 m position noise).
+    gnss.min_fix_type: 4
 
     # Mahalanobis outlier gate — 5σ is conservative for open field.
     # Do NOT lower below chi2 critical values or normal GPS noise trips the gate.
     gnss.mahalanobis_threshold: 5.0
 
     # Base position noise floor (m). Adaptive covariance tracks reality above this.
-    # Plain GPS CEP is ~2 m — floor must reflect that or the Mahalanobis gate
-    # will reject every valid fix (innovation >> expected noise → chi² spike).
-    #
-    # ── SINGLE F9P / NO CORRECTIONS (current) ─────────────────
-    gnss.base_noise_xy: 2.0
-    gnss.base_noise_z:  4.0
-    # ── RESTORE FOR DUAL F9P + RTK ─────────────────────────────
-    # gnss.base_noise_xy: 0.05
-    # gnss.base_noise_z:  0.10
+    # RTK FIXED CEP is ~0.02 m, FLOAT ~0.3 m. The HP fix covariance reflects the
+    # actual solution quality so the floor just needs to be below FIXED accuracy.
+    gnss.base_noise_xy: 0.05
+    gnss.base_noise_z:  0.10
 
     # Heading noise fallback (rad). Only used when shim covariance[8] is zero.
-    # Dual-antenna baseline >= 0.5m → ~0.2° accuracy → 0.0035 rad.
-    gnss.heading_noise: 0.0035
+    # F9P dual-antenna spec: ~0.2° (0.0035 rad) at 1 m baseline, open sky.
+    # In practice with multipath/crop canopy expect 0.5–1.0° (0.009–0.017 rad).
+    # relposned_heading_shim populates covariance[8] from acc_heading, so this
+    # fallback only fires if the F9P reports zero accuracy — leave conservative.
+    gnss.heading_noise: 0.017
 
     # Physical offset of rover antenna from base_link origin, in robot body frame.
     # Convention: x=forward, y=left, z=up (metres).
