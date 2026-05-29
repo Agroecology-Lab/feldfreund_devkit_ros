@@ -2,15 +2,27 @@
 """
 Mission storage and scheduling for the Sowbot webui.
 
+Owns the mission list, its YAML persistence, and the ACTIONS registry.
+Designed to be attached to a NiceGuiNode (see MissionStore.attach) so the
+node exposes a read-only snapshot and a version counter that the UI timer
+polls to decide when to rebuild. Does not inherit from rclpy.node.Node.
+
+Unlike obstacles, missions are not broadcast on a ROS topic — they exist
+to drive the executor in ui_node.py, which dispatches `sowbot_row_follow`
+goals and toggles tool topics. The store knows nothing about ROS itself.
+
 Threading model
 ---------------
-self._missions is an immutable tuple.  All writes replace it wholesale
-under self._lock and bump self._version in the same critical section.
+self._missions is an immutable tuple. All writes replace it wholesale
+under self._lock, and bump self._version in the same critical section.
 Readers grab the tuple reference lock-free (CPython attribute reads are
-atomic) and walk a consistent snapshot.
+atomic) and walk a consistent snapshot. Same pattern as obstacles.py.
 
-_persist snapshots the list *under* the lock, then writes the file
-*outside* the lock so IO never blocks writers.
+Persistence is serialised through a single background writer thread
+(self._write_q). Callers snapshot the current tuple inside the lock and
+enqueue (snapshot, status_msg). The writer drains the queue, keeping
+only the most-recent snapshot per wakeup, so rapid back-to-back writes
+do not pile up threads and the status message is never stale.
 
 Scheduling
 ----------
@@ -19,230 +31,82 @@ Each mission carries one optional integer field, repeat_every_hours:
     None  → one-shot: runs once when active, auto-deactivates on success.
     N     → recurring: re-arms N hours after the last successful run.
 
-today_queue() returns (mission_id, row_id, action, action_params) tuples
-for every active+due mission.  A mission is due if it has never run,
-its last run failed, or its repeat interval has elapsed.
+today_queue() is the only scheduler primitive: it returns
+(mission_id, row_id, action) tuples for every active mission that is
+*due right now*. A mission is due if it has never run, if its last run
+failed (retry asap — operator-gated, no automatic loop because the
+executor is operator-triggered), or if its repeat interval has elapsed.
+There is no cron, no calendar, no time-of-day. If that's ever asked
+for, it's a separate scheduler, not this one.
+
+record_run(mid, success) is the convergence point: both the scheduled
+executor and any manual "Run now" path call it. That keeps the repeat
+interval anchored on actual robot activity rather than wall-clock ticks
+that ignore manual runs.
+
+reset(mid) is the re-arm path: clears last_run_at / last_run_success and
+re-activates. Use it to re-run a completed one-shot (e.g. crop re-planted)
+or to immediately retry a failed mission outside the normal scheduler pass.
 
 Action registry
 ---------------
-ACTIONS is a module-level dict of ActionDef dataclasses.  Each ActionDef
-carries a param_schema (tuple of ParamDef) describing every configurable
-implement parameter.
+ACTIONS is a module-level dict for now. The tool_topic is the
+std_msgs/Bool topic the executor publishes True/False on to engage and
+disengage the implement; None means the action drives only. The dict
+shape is the documented seam — when a third action with parameters
+(RPM, depth, blade height) arrives, refactor to a proper class.
 
-action_ros_msgs(action_key, action_params, enable) returns a list of
-(topic, value) pairs the executor should publish:
-  enable=True  → Float64 params first (in schema order), then Bool True.
-  enable=False → Bool False only.
+Timestamp format
+----------------
+Timestamps are written as ISO 8601 UTC: 2025-04-01T09:30:00Z. Records
+written by earlier versions of this module (dd-mm-yyyy_hh-mm-ss) are
+read transparently by _parse_ts and silently migrated to ISO 8601 on the
+next save.
 
-Topic type is inferred from the value type by the executor (bool → Bool,
-float → Float64).  This keeps the store ROS-free and unit-testable.
+next_due_in_hours() sentinels
+-----------------------------
+Import DUE_NOW and DUE_FAILED rather than comparing against magic floats:
 
-Adding an implement: one ActionDef entry with its ParamDef list.
-No other file needs changing.
+    DUE_NOW    (0.0)   mission is active and has never run
+    DUE_FAILED (-1.0)  mission is active and last run failed
+    > 0.0              hours until the recurring interval elapses
+    None               inactive, completed one-shot, or unknown id
 """
 
 from __future__ import annotations
 
 import os
+import queue
 import re
 import threading
-from dataclasses import dataclass
 from datetime import datetime, timedelta, timezone
-from typing import Any, Optional
+from typing import Optional
 
 import yaml
 
-# ── Constants ─────────────────────────────────────────────────────────────────
+# ── Constants ────────────────────────────────────────────────────────────────
 
 MISSIONS_FILE = '/workspace/maps/missions.yaml'
 
 _NAME_RE    = re.compile(r'^[A-Z0-9_]+$')
 _NAME_CLEAN = re.compile(r'[^A-Z0-9_]')
 
-_TS_FMT = '%d-%m-%Y_%H-%M-%S'
+# ISO 8601 UTC — lexicographically sortable, unambiguous, standard.
+_TS_FMT        = '%Y-%m-%dT%H:%M:%SZ'
+_TS_FMT_LEGACY = '%d-%m-%Y_%H-%M-%S'   # accepted on read, never written
 
+# Sentinels returned by next_due_in_hours().
+DUE_NOW:    float = 0.0
+DUE_FAILED: float = -1.0
 
-# ── Parameter / Action dataclasses ────────────────────────────────────────────
-
-@dataclass(frozen=True)
-class ParamDef:
-    """Schema for one configurable implement parameter."""
-    key:       str
-    label:     str
-    unit:      str
-    default:   float
-    min:       float
-    max:       float
-    step:      float
-    ros_topic: Optional[str] = None   # Float64 topic; None = UI-only / not published
-    precision: int            = 1     # decimal places in UI spinbox
-
-
-@dataclass(frozen=True)
-class ActionDef:
-    """Registry entry for one implement action."""
-    key:          str
-    label:        str
-    icon:         str              # emoji shown in UI chip
-    tool_topic:   Optional[str]    # std_msgs/Bool enable/disable; None = drive-only
-    param_schema: tuple[ParamDef, ...] = ()
-
-    @property
-    def default_params(self) -> dict[str, float]:
-        return {p.key: p.default for p in self.param_schema}
-
-    def resolve_params(self, stored: Optional[dict]) -> dict[str, float]:
-        """Merge stored action_params with schema defaults.
-        Missing keys → default.  Unknown keys silently dropped."""
-        src = stored or {}
-        return {p.key: float(src.get(p.key, p.default))
-                for p in self.param_schema}
-
-    def validate_params(self, params: dict) -> Optional[str]:
-        for p in self.param_schema:
-            if p.key not in params:
-                continue
-            try:
-                v = float(params[p.key])
-            except (TypeError, ValueError):
-                return f'ERROR: {p.key} must be numeric'
-            if not (p.min <= v <= p.max):
-                return (f'ERROR: {p.key}={v} out of range '
-                        f'[{p.min}–{p.max} {p.unit}]')
-        return None
-
-
-# ── Action / implement registry ───────────────────────────────────────────────
-#
-# speed_mps lives on /tool/speed_override — shared across actions.
-# The executor publishes it before engaging the implement enable; nav2
-# should honour it via a speed filter node or TwistMux priority lane.
-# All implement-specific params use /tool/<implement>/<param> topics.
-
-ACTIONS: dict[str, ActionDef] = {
-
-    'drive': ActionDef(
-        key='drive', label='Drive only', icon='🚜',
-        tool_topic=None,
-        param_schema=(
-            ParamDef('speed_mps', 'Speed', 'm/s',
-                     default=0.5, min=0.1, max=1.5, step=0.05,
-                     ros_topic='/tool/speed_override', precision=2),
-        ),
-    ),
-
-    'weed': ActionDef(
-        key='weed', label='Weed', icon='🌿',
-        tool_topic='/tool/weeder/enable',
-        param_schema=(
-            ParamDef('speed_mps', 'Speed', 'm/s',
-                     default=0.3, min=0.05, max=0.8, step=0.05,
-                     ros_topic='/tool/speed_override', precision=2),
-            ParamDef('blade_depth_mm', 'Blade depth', 'mm',
-                     default=30.0, min=5.0, max=80.0, step=5.0,
-                     ros_topic='/tool/weeder/blade_depth_mm', precision=0),
-        ),
-    ),
-
-    'sow': ActionDef(
-        key='sow', label='Sow', icon='🌱',
-        tool_topic='/tool/seeder/enable',
-        param_schema=(
-            ParamDef('speed_mps', 'Speed', 'm/s',
-                     default=0.4, min=0.1, max=1.0, step=0.05,
-                     ros_topic='/tool/speed_override', precision=2),
-            ParamDef('seed_rate_per_m', 'Seed rate', 'seeds/m',
-                     default=8.0, min=1.0, max=30.0, step=1.0,
-                     ros_topic='/tool/seeder/seed_rate', precision=0),
-            ParamDef('sow_depth_mm', 'Sow depth', 'mm',
-                     default=20.0, min=5.0, max=60.0, step=5.0,
-                     ros_topic='/tool/seeder/sow_depth_mm', precision=0),
-        ),
-    ),
-
-    'harvest': ActionDef(
-        key='harvest', label='Harvest', icon='🌾',
-        tool_topic='/tool/harvester/enable',
-        param_schema=(
-            ParamDef('speed_mps', 'Speed', 'm/s',
-                     default=0.4, min=0.05, max=0.8, step=0.05,
-                     ros_topic='/tool/speed_override', precision=2),
-            ParamDef('cutter_rpm', 'Cutter RPM', 'rpm',
-                     default=1500.0, min=500.0, max=3000.0, step=100.0,
-                     ros_topic='/tool/harvester/cutter_rpm', precision=0),
-            ParamDef('cut_height_mm', 'Cut height', 'mm',
-                     default=50.0, min=10.0, max=200.0, step=10.0,
-                     ros_topic='/tool/harvester/cut_height_mm', precision=0),
-        ),
-    ),
-
-    'spray': ActionDef(
-        key='spray', label='Spray', icon='💧',
-        tool_topic='/tool/sprayer/enable',
-        param_schema=(
-            ParamDef('speed_mps', 'Speed', 'm/s',
-                     default=0.5, min=0.1, max=1.2, step=0.05,
-                     ros_topic='/tool/speed_override', precision=2),
-            ParamDef('flow_rate_ml_per_m2', 'Flow rate', 'ml/m²',
-                     default=200.0, min=10.0, max=1000.0, step=10.0,
-                     ros_topic='/tool/sprayer/flow_rate', precision=0),
-            ParamDef('nozzle_pressure_bar', 'Nozzle pressure', 'bar',
-                     default=2.0, min=0.5, max=5.0, step=0.5,
-                     ros_topic='/tool/sprayer/nozzle_pressure', precision=1),
-        ),
-    ),
-
-    'mow': ActionDef(
-        key='mow', label='Mow / mulch', icon='✂️',
-        tool_topic='/tool/mower/enable',
-        param_schema=(
-            ParamDef('speed_mps', 'Speed', 'm/s',
-                     default=0.5, min=0.1, max=1.0, step=0.05,
-                     ros_topic='/tool/speed_override', precision=2),
-            ParamDef('blade_rpm', 'Blade RPM', 'rpm',
-                     default=2000.0, min=500.0, max=4000.0, step=100.0,
-                     ros_topic='/tool/mower/blade_rpm', precision=0),
-            ParamDef('deck_height_mm', 'Deck height', 'mm',
-                     default=80.0, min=20.0, max=200.0, step=10.0,
-                     ros_topic='/tool/mower/deck_height_mm', precision=0),
-        ),
-    ),
+# Action registry. Refactor to a class when a third action arrives.
+ACTIONS: dict[str, dict] = {
+    'drive': {'label': 'Drive only', 'tool_topic': None},
+    'weed':  {'label': 'Weed',       'tool_topic': '/tool/weeder/enable'},
 }
 
 
-# ── ROS message factory ───────────────────────────────────────────────────────
-
-def action_ros_msgs(action_key: str,
-                    action_params: Optional[dict],
-                    enable: bool) -> list[tuple[str, Any]]:
-    """Return (topic, value) pairs for the executor to publish.
-
-    enable=True  → Float64 param topics first (schema order),
-                   then Bool True on tool_topic (if set).
-    enable=False → Bool False on tool_topic only.
-
-    The executor infers message type from the value:
-        bool  → std_msgs/Bool
-        float → std_msgs/Float64
-    """
-    action = ACTIONS.get(action_key)
-    if action is None:
-        return []
-    out: list[tuple[str, Any]] = []
-    if enable:
-        resolved = action.resolve_params(action_params)
-        for p in action.param_schema:
-            if p.ros_topic is not None:
-                out.append((p.ros_topic, float(resolved[p.key])))
-        if action.tool_topic is not None:
-            out.append((action.tool_topic, True))
-    else:
-        if action.tool_topic is not None:
-            out.append((action.tool_topic, False))
-    return out
-
-
-# ── Pure helpers ──────────────────────────────────────────────────────────────
+# ── Pure helpers (module-level, easy to test) ────────────────────────────────
 
 def _now_utc() -> datetime:
     return datetime.now(timezone.utc)
@@ -253,15 +117,34 @@ def _now_utc_str() -> str:
 
 
 def _parse_ts(s: Optional[str]) -> Optional[datetime]:
+    """Parse a stored timestamp back to UTC datetime. Returns None on
+    missing or malformed input — callers treat that as 'never ran'.
+
+    Accepts both current ISO 8601 format and the legacy dd-mm-yyyy_hh-mm-ss
+    format so existing YAML files migrate transparently on next save."""
     if not s:
         return None
-    try:
-        return datetime.strptime(s, _TS_FMT).replace(tzinfo=timezone.utc)
-    except ValueError:
-        return None
+    for fmt in (_TS_FMT, _TS_FMT_LEGACY):
+        try:
+            return datetime.strptime(s, fmt).replace(tzinfo=timezone.utc)
+        except ValueError:
+            pass
+    return None
 
 
 def _is_due(mission: dict, now: datetime) -> bool:
+    """Whether the mission belongs in today_queue at `now`.
+
+    Due if any of:
+      - never run yet (no last_run_at), or
+      - last run failed (retry on next executor pass), or
+      - repeat_every_hours is set and the interval has elapsed.
+
+    Not due if repeat_every_hours is None and last_run_success is True
+    — a successful one-shot. record_run also flips its active flag, so
+    in practice such a mission won't reach this check, but the guard
+    keeps the logic correct if a one-shot is somehow active+completed.
+    """
     last_at = _parse_ts(mission.get('last_run_at'))
     if last_at is None:
         return True
@@ -273,21 +156,71 @@ def _is_due(mission: dict, now: datetime) -> bool:
     try:
         interval = timedelta(hours=int(hrs))
     except (TypeError, ValueError):
+        # Malformed interval — conservatively due so the UI surfaces it.
         return True
     return (now - last_at) >= interval
 
 
-def _clean_name(raw: str) -> str:
-    """Uppercase, strip non-alphanumeric-underscore, collapse spaces to _."""
-    return _NAME_CLEAN.sub('', raw.strip().upper().replace(' ', '_'))
+def _coerce_record(raw: object, path: str) -> Optional[dict]:
+    """Validate and normalise a record loaded from YAML.
+
+    Returns a dict with all expected fields present, or None if the
+    record is fatally malformed (missing id, wrong container type).
+    Logs issues to stderr rather than raising, so one bad record does not
+    take down the whole store on startup.
+
+    Optional fields missing from older records are filled in with safe
+    defaults so the rest of the code can always do m.get('field') without
+    defensive gymnastics.
+    """
+    if not isinstance(raw, dict):
+        print(f'[missions] WARN {path}: skipping non-dict record: {raw!r}',
+              flush=True)
+        return None
+
+    mid = raw.get('id')
+    if not mid or not isinstance(mid, str):
+        print(f'[missions] WARN {path}: skipping record with missing/invalid id',
+              flush=True)
+        return None
+
+    rows = raw.get('rows')
+    if not isinstance(rows, list):
+        print(f'[missions] WARN {path}: {mid} — non-list rows reset to []',
+              flush=True)
+        rows = []
+
+    reh = raw.get('repeat_every_hours')
+    try:
+        reh = None if reh is None else int(reh)
+    except (TypeError, ValueError):
+        print(f'[missions] WARN {path}: {mid} — malformed repeat_every_hours '
+              f'{reh!r} reset to None', flush=True)
+        reh = None
+
+    return {
+        'id':                 mid,
+        'name':               str(raw.get('name') or mid),
+        'rows':               [str(r) for r in rows],
+        'action':             str(raw.get('action') or 'drive'),
+        'repeat_every_hours': reh,
+        'active':             bool(raw.get('active', True)),
+        'created_at':         str(raw.get('created_at') or _now_utc_str()),
+        'last_run_at':        raw.get('last_run_at'),
+        'last_run_success':   raw.get('last_run_success'),
+    }
 
 
 def validate_mission(name: str,
                      rows: list,
                      action: str,
-                     repeat_every_hours: Optional[int],
-                     action_params: Optional[dict] = None) -> Optional[str]:
-    """Return an error string, or None if valid."""
+                     repeat_every_hours: Optional[int]) -> Optional[str]:
+    """Return an error string, or None if OK.
+
+    Expects name to already be cleaned (uppercase, only [A-Z0-9_]).
+    MissionStore.add() and .update() clean before calling; external
+    callers should do the same or pass name='' to use the id default.
+    """
     if not rows:
         return 'ERROR: no rows selected'
     if action not in ACTIONS:
@@ -299,21 +232,13 @@ def validate_mission(name: str,
             return 'ERROR: repeat_every_hours must be an integer'
         if n <= 0:
             return 'ERROR: repeat_every_hours must be > 0'
-    if name:
-        cleaned = _clean_name(name)
-        # Must be non-empty after cleaning and match the pattern.
-        if not cleaned:
-            return f'ERROR: name {name!r} contains no valid characters'
-        if not _NAME_RE.match(cleaned):
-            return f'ERROR: invalid name {cleaned!r}'
-    if action_params:
-        err = ACTIONS[action].validate_params(action_params)
-        if err:
-            return err
+    if name and not _NAME_RE.match(name):
+        return f'ERROR: invalid name {name!r}'
     return None
 
 
-# ── MissionStore ──────────────────────────────────────────────────────────────
+# ── MissionStore ─────────────────────────────────────────────────────────────
+
 
 class MissionStore:
     """Owns the mission list and its YAML persistence.
@@ -321,40 +246,49 @@ class MissionStore:
     After attach(node), the node exposes:
 
         node.missions          : tuple[dict, ...]   read-only snapshot
-        node.missions_version  : int                bumps on every write
-        node.mission_status    : str                last-action status string
+        node.missions_version  : int                bumps on every change
+        node.mission_status    : str                last-action status
 
     Mission record schema:
 
-        id:                  str            allocated (MISSION_N), immutable
-        name:                str            operator label; defaults to id
-        rows:                list[str]      topo entry-node names, ordered
-        action:              str            key in ACTIONS
-        action_params:       dict | None    per-action parameter values
-        repeat_every_hours:  int | None     None = one-shot
+        id:                  'MISSION_1'   (allocated, immutable)
+        name:                str           (operator label; defaults to id)
+        rows:                list[str]     (topo entry-node names)
+        action:              str           (key in ACTIONS)
+        repeat_every_hours:  int | None    (None == one-shot)
         active:              bool
-        created_at:          str            UTC timestamp
-        last_run_at:         str | None
+        created_at:          str           (ISO 8601 UTC)
+        last_run_at:         str  | None
         last_run_success:    bool | None
     """
 
-    _MUTABLE = frozenset(
-        {'name', 'rows', 'action', 'action_params', 'repeat_every_hours', 'active'})
+    _MUTABLE_FIELDS = frozenset(
+        {'name', 'rows', 'action', 'repeat_every_hours', 'active'})
 
     def __init__(self, path: str = MISSIONS_FILE) -> None:
-        self._path      = path
-        self._lock      = threading.Lock()
+        self._path     = path
+        self._lock     = threading.Lock()
         self._missions: tuple[dict, ...] = ()
-        self._version:  int              = 0
+        self._version: int               = 0
         self._node                       = None
+
+        # Single background writer. Carries (snapshot, status_msg) pairs.
+        # The writer loop drains the queue on each wakeup and keeps only
+        # the latest entry, so rapid back-to-back writes converge in one
+        # disk round-trip and the status message is never stale.
+        self._write_q: queue.SimpleQueue = queue.SimpleQueue()
+        threading.Thread(
+            target=self._writer_loop, daemon=True, name='missions-writer'
+        ).start()
 
     # ── lifecycle ─────────────────────────────────────────────────────────
 
     def attach(self, node) -> None:
+        """Wire into a NiceGuiNode. Kicks off a background load."""
         self._node = node
-        node.missions         = ()
-        node.missions_version = 0
-        node.mission_status   = ''
+        node.missions          = ()
+        node.missions_version  = 0
+        node.mission_status    = ''
         threading.Thread(target=self._load, daemon=True).start()
 
     # ── public API ────────────────────────────────────────────────────────
@@ -363,45 +297,47 @@ class MissionStore:
             rows: list,
             action: str,
             name: str = '',
-            action_params: Optional[dict] = None,
             repeat_every_hours: Optional[int] = None,
             active: bool = True) -> Optional[str]:
-        err = validate_mission(name, rows, action, repeat_every_hours, action_params)
+        """Add a mission. Returns its allocated id, or None on failure.
+        Status carries the reason either way."""
+        # Clean name before validation so validate_mission sees the final form.
+        clean = _NAME_CLEAN.sub(
+            '', (name or '').strip().upper().replace(' ', '_'))
+
+        err = validate_mission(clean, rows, action, repeat_every_hours)
         if err:
             self._set_status(err)
             return None
 
-        cleaned = _clean_name(name) if name else ''
         ts = _now_utc_str()
-        resolved = ACTIONS[action].resolve_params(action_params)
 
         with self._lock:
-            existing = {m.get('id') for m in self._missions}
+            existing_ids = {m.get('id') for m in self._missions}
             i = 1
-            while f'MISSION_{i}' in existing:
+            while f'MISSION_{i}' in existing_ids:
                 i += 1
             mid = f'MISSION_{i}'
-            record = {
+
+            mission = {
                 'id':                 mid,
-                'name':               cleaned or mid,
+                'name':               clean or mid,
                 'rows':               list(rows),
                 'action':             action,
-                'action_params':      resolved,
-                'repeat_every_hours': None if repeat_every_hours is None else int(repeat_every_hours),
+                'repeat_every_hours': (None if repeat_every_hours is None
+                                       else int(repeat_every_hours)),
                 'active':             bool(active),
                 'created_at':         ts,
                 'last_run_at':        None,
                 'last_run_success':   None,
             }
-            self._missions = self._missions + (record,)
+            self._missions = self._missions + (mission,)
             self._version += 1
             self._sync_node()
+            snapshot = list(self._missions)
 
         self._set_status(f'{mid} created — writing…')
-        threading.Thread(
-            target=self._persist,
-            args=(f'{mid} saved · {len(self._missions)} total',),
-            daemon=True).start()
+        self._write_q.put((snapshot, f'{mid} saved · {len(snapshot)} total'))
         return mid
 
     def delete(self, mid: str) -> bool:
@@ -409,131 +345,219 @@ class MissionStore:
             if not any(m.get('id') == mid for m in self._missions):
                 self._set_status(f'ERROR: {mid!r} not found')
                 return False
-            self._missions = tuple(m for m in self._missions if m.get('id') != mid)
+            self._missions = tuple(
+                m for m in self._missions if m.get('id') != mid)
             self._version += 1
             self._sync_node()
+            snapshot = list(self._missions)
+
         self._set_status(f'deleting {mid} — writing…')
-        threading.Thread(
-            target=self._persist,
-            args=(f'deleted {mid} · {len(self._missions)} left',),
-            daemon=True).start()
+        self._write_q.put((snapshot, f'deleted {mid} · {len(snapshot)} left'))
         return True
 
     def update(self, mid: str, **fields) -> bool:
-        bad = set(fields) - self._MUTABLE
+        """Replace mutable fields on a mission. Allowed fields:
+        name, rows, action, repeat_every_hours, active.
+        Immutable metadata (id, created_at, last_run_*) is rejected
+        — record_run owns the last_run_* fields."""
+        bad = set(fields) - self._MUTABLE_FIELDS
         if bad:
-            self._set_status(f'ERROR: cannot update {sorted(bad)}')
+            self._set_status(f'ERROR: cannot update field(s) {sorted(bad)}')
             return False
+
+        # Clean name before merging so validate_mission sees the final form.
+        if 'name' in fields:
+            fields = {**fields, 'name': _NAME_CLEAN.sub(
+                '', (fields['name'] or '').strip().upper().replace(' ', '_'))}
+
         with self._lock:
-            target = next((m for m in self._missions if m.get('id') == mid), None)
+            target = next(
+                (m for m in self._missions if m.get('id') == mid), None)
             if target is None:
                 self._set_status(f'ERROR: {mid!r} not found')
                 return False
+
             merged = {**target, **fields}
             err = validate_mission(
                 merged.get('name', ''),
                 merged.get('rows', []),
                 merged.get('action', ''),
-                merged.get('repeat_every_hours'),
-                merged.get('action_params'))
+                merged.get('repeat_every_hours'))
             if err:
                 self._set_status(err)
                 return False
-            # Re-clean name
-            if 'name' in fields:
-                fields = {**fields,
-                          'name': _clean_name(fields['name']) or merged['id']}
-            # Re-resolve params when action or params change
-            new_action = merged.get('action', '')
-            if ('action_params' in fields or 'action' in fields) and new_action in ACTIONS:
-                fields = {**fields,
-                          'action_params': ACTIONS[new_action].resolve_params(
-                              merged.get('action_params'))}
+
+            # Empty name after cleaning → fall back to id.
+            if 'name' in fields and not fields['name']:
+                fields = {**fields, 'name': mid}
+
             self._missions = tuple(
                 ({**m, **fields} if m.get('id') == mid else m)
                 for m in self._missions)
             self._version += 1
             self._sync_node()
+            snapshot = list(self._missions)
+
         self._set_status(f'{mid} updated — writing…')
-        threading.Thread(
-            target=self._persist, args=(f'{mid} saved',), daemon=True).start()
+        self._write_q.put((snapshot, f'{mid} saved'))
         return True
 
     def set_active(self, mid: str, active: bool) -> bool:
+        """Convenience wrapper around update(). The common toggle."""
         return self.update(mid, active=bool(active))
 
-    def record_run(self, mid: str, success: bool) -> bool:
-        ts = _now_utc_str()
+    def reset(self, mid: str) -> bool:
+        """Re-arm a mission: clear run history and re-activate.
+
+        The canonical path for:
+          - a completed one-shot that needs to run again (e.g. crop re-planted),
+          - a failed mission the operator wants to retry without waiting for
+            the next scheduled executor pass.
+
+        Does not touch repeat_every_hours, rows, or action.
+        """
         with self._lock:
-            target = next((m for m in self._missions if m.get('id') == mid), None)
-            if target is None:
+            if not any(m.get('id') == mid for m in self._missions):
                 self._set_status(f'ERROR: {mid!r} not found')
                 return False
-            patch: dict = {'last_run_at': ts, 'last_run_success': bool(success)}
-            if target.get('repeat_every_hours') is None and success:
-                patch['active'] = False
+
+            patch = {
+                'last_run_at':      None,
+                'last_run_success': None,
+                'active':           True,
+            }
             self._missions = tuple(
                 ({**m, **patch} if m.get('id') == mid else m)
                 for m in self._missions)
             self._version += 1
             self._sync_node()
-        threading.Thread(
-            target=self._persist,
-            args=(f'{mid} run recorded ({"ok" if success else "fail"})',),
-            daemon=True).start()
+            snapshot = list(self._missions)
+
+        self._set_status(f'{mid} reset — writing…')
+        self._write_q.put((snapshot, f'{mid} reset'))
         return True
 
-    # ── derived views ─────────────────────────────────────────────────────
+    def record_run(self, mid: str, success: bool) -> bool:
+        """Record a run outcome. Called by the executor (and any 'Run now'
+        path) so the repeat interval re-arms from actual robot activity
+        regardless of who triggered the run.
 
-    def today_queue(self) -> list[tuple[str, str, str, dict]]:
-        """Active+due missions as (mission_id, row_node, action, resolved_params)."""
+        Side effect: one-shot missions (repeat_every_hours is None) that
+        complete successfully are auto-deactivated.
+        """
+        ts = _now_utc_str()
+        with self._lock:
+            target = next(
+                (m for m in self._missions if m.get('id') == mid), None)
+            if target is None:
+                self._set_status(f'ERROR: {mid!r} not found')
+                return False
+
+            patch: dict = {
+                'last_run_at':      ts,
+                'last_run_success': bool(success),
+            }
+            if target.get('repeat_every_hours') is None and success:
+                patch['active'] = False
+
+            self._missions = tuple(
+                ({**m, **patch} if m.get('id') == mid else m)
+                for m in self._missions)
+            self._version += 1
+            self._sync_node()
+            snapshot = list(self._missions)
+
+        self._write_q.put(
+            (snapshot, f'{mid} run recorded ({"ok" if success else "fail"})'))
+        return True
+
+    # ── derived views (lock-free snapshots) ──────────────────────────────
+
+    def today_queue(self) -> list[tuple[str, str, str]]:
+        """Active+due missions expanded into (mission_id, row_id, action)
+        tuples in declaration order. Lock-free; the executor walks this
+        list and dispatches each tuple in sequence."""
         now = _now_utc()
-        out: list[tuple[str, str, str, dict]] = []
+        out: list[tuple[str, str, str]] = []
         for m in self._missions:
-            if not m.get('active') or not _is_due(m, now):
+            if not m.get('active'):
+                continue
+            if not _is_due(m, now):
                 continue
             action = m.get('action')
             if action not in ACTIONS:
-                continue
-            resolved = ACTIONS[action].resolve_params(m.get('action_params'))
+                continue  # corrupt record — surfaced in UI via _coerce_record
             for r in m.get('rows', ()):
-                out.append((m['id'], r, action, resolved))
+                out.append((m['id'], r, action))
         return out
 
     def next_due_in_hours(self, mid: str) -> Optional[float]:
-        """0.0 = due now, >0 = hours until due, None = not applicable."""
+        """For the UI chip. Returns one of:
+
+            DUE_NOW    (0.0)   active, never run yet
+            DUE_FAILED (-1.0)  active, last run failed — retry sentinel
+            > 0.0              hours until the recurring interval elapses
+            None               inactive, completed one-shot, or unknown id
+
+        Import DUE_NOW / DUE_FAILED from this module rather than
+        comparing against magic floats.  UI rendering pattern:
+
+            h = store.next_due_in_hours(mid)
+            if h is None:          label = 'done'
+            elif h == DUE_FAILED:  label = 'retry'
+            elif h == DUE_NOW:     label = 'due now'
+            else:                  label = f'in {h:.1f}h'
+        """
         m = next((x for x in self._missions if x.get('id') == mid), None)
         if m is None or not m.get('active'):
             return None
         last_at = _parse_ts(m.get('last_run_at'))
-        if last_at is None or not m.get('last_run_success'):
-            return 0.0
+        if last_at is None:
+            return DUE_NOW
+        if not m.get('last_run_success'):
+            return DUE_FAILED
         hrs = m.get('repeat_every_hours')
         if hrs is None:
-            return None
+            return None   # successful one-shot, now inactive in practice
         try:
             interval = timedelta(hours=int(hrs))
         except (TypeError, ValueError):
-            return 0.0
-        return max(0.0, (last_at + interval - _now_utc()).total_seconds() / 3600.0)
+            return DUE_NOW
+        delta_s = (last_at + interval - _now_utc()).total_seconds()
+        return max(DUE_NOW, delta_s / 3600.0)
 
     def find(self, mid: str) -> Optional[dict]:
-        return next((m for m in self._missions if m.get('id') == mid), None)
+        """Lock-free single-mission lookup by id. Returns the dict from
+        the current snapshot — treat as read-only."""
+        for m in self._missions:
+            if m.get('id') == mid:
+                return m
+        return None
 
-    # ── internals ─────────────────────────────────────────────────────────
+    def find_by_name(self, name: str) -> Optional[dict]:
+        """Lock-free lookup by operator name. Returns the first match.
+        Useful for collision checks before add() (e.g. the UI_RUN record
+        the executor creates to anchor repeat intervals)."""
+        for m in self._missions:
+            if m.get('name') == name:
+                return m
+        return None
+
+    # ── internals ────────────────────────────────────────────────────────
 
     def _sync_node(self) -> None:
-        """Mirror state onto node.  Always called inside lock."""
+        """Mirror internal state onto the node. Always called inside the lock."""
         if self._node is None:
             return
         self._node.missions         = self._missions
         self._node.missions_version = self._version
 
     def _set_status(self, s: str) -> None:
+        """Status setter — last-writer-wins race accepted (see module docs)."""
         if self._node is not None:
             self._node.mission_status = s
 
-    # ── persistence ───────────────────────────────────────────────────────
+    # ── persistence ──────────────────────────────────────────────────────
 
     def _load(self) -> None:
         try:
@@ -541,43 +565,50 @@ class MissionStore:
                 return
             with open(self._path) as fh:
                 doc = yaml.safe_load(fh) or {}
-            raw = doc.get('missions', []) or []
+            raw_list = doc.get('missions', []) or []
 
-            # Migrate: back-fill action_params on old records.
-            # Write the migrated file so we don't re-migrate every restart.
-            migrated = []
-            needs_write = False
-            for m in raw:
-                action = m.get('action', '')
-                if 'action_params' not in m and action in ACTIONS:
-                    m = {**m, 'action_params': ACTIONS[action].default_params}
-                    needs_write = True
-                migrated.append(m)
+            good, skipped = [], 0
+            for raw in raw_list:
+                record = _coerce_record(raw, self._path)
+                if record is not None:
+                    good.append(record)
+                else:
+                    skipped += 1
 
             with self._lock:
-                self._missions = tuple(migrated)
+                self._missions = tuple(good)
                 self._version += 1
                 self._sync_node()
 
+            msg = f'Loaded {len(good)} missions from {self._path}'
+            if skipped:
+                msg += f' ({skipped} invalid record(s) skipped — see stderr)'
             if self._node is not None:
-                self._node.get_logger().info(
-                    f'Loaded {len(migrated)} missions from {self._path}')
-
-            if needs_write:
-                self._persist(f'migrated {len(migrated)} missions')
-
+                self._node.get_logger().info(msg)
         except Exception as e:
             if self._node is not None:
                 self._node.get_logger().warn(f'Failed to load missions: {e}')
 
-    def _persist(self, success_msg: str) -> None:
-        """Snapshot under lock, write outside lock. Atomic via tmp+rename."""
-        # Grab snapshot under lock, then release before doing any IO.
-        with self._lock:
-            snapshot = list(self._missions)
+    def _writer_loop(self) -> None:
+        """Single serialised writer. Blocks on the queue, then drains any
+        items that arrived while the previous write was in progress. Only
+        the most-recent (snapshot, msg) pair is written — intermediate
+        states are safe to skip because each snapshot is complete."""
+        while True:
+            snapshot, msg = self._write_q.get()      # block until work arrives
+            while not self._write_q.empty():         # drain pile-up
+                try:
+                    snapshot, msg = self._write_q.get_nowait()
+                except queue.Empty:
+                    break
+            self._do_write(snapshot, msg)
 
+    def _do_write(self, snapshot: list, success_msg: str) -> None:
+        """Atomic write: tmp file + os.replace. Called only from _writer_loop."""
         try:
-            os.makedirs(os.path.dirname(self._path), exist_ok=True)
+            dirpath = os.path.dirname(self._path)
+            if dirpath:
+                os.makedirs(dirpath, exist_ok=True)
             tmp = self._path + '.tmp'
             with open(tmp, 'w') as fh:
                 yaml.dump({'missions': snapshot}, fh,
@@ -586,7 +617,8 @@ class MissionStore:
             os.replace(tmp, self._path)
             self._set_status(success_msg)
             if self._node is not None:
-                self._node.get_logger().info(f'Missions saved: {len(snapshot)}')
+                self._node.get_logger().info(
+                    f'Missions saved: {len(snapshot)} total')
         except Exception as e:
             self._set_status(f'ERROR: {e}')
             if self._node is not None:
