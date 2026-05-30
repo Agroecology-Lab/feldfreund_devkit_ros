@@ -217,13 +217,18 @@ class DevkitManager:
     def run(self, extra_args: List[str]):
         """Runs the limbic ROS 2 stack within Docker."""
         env_file = self.root_dir / '.env'
+        usb_devices_path = Path('/sys/bus/usb/devices')
+        has_usb_hardware = usb_devices_path.exists()
 
-        if (self.root_dir / 'fixusb.py').exists():
+        if not has_usb_hardware:
+            self._log("No USB hardware detected. Skipping hardware detection.", "WARN")
+
+        if has_usb_hardware and (self.root_dir / 'fixusb.py').exists():
             # Prep for fixusb.py: bind so it can detect serial ports
             bound_before = self._find_ublox_interfaces()
             if not bound_before:
                 ublox_ifaces = []
-                for dev in Path('/sys/bus/usb/devices').iterdir():
+                for dev in usb_devices_path.iterdir():
                     try:
                         if (dev / 'idVendor').read_text().strip() == '1546':
                             ublox_ifaces = [f'{dev.name}:1.0', f'{dev.name}:1.1']

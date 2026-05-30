@@ -79,10 +79,20 @@ import os
 import queue
 import re
 import threading
+from dataclasses import dataclass
 from datetime import datetime, timedelta, timezone
 from typing import Optional
 
 import yaml
+
+
+@dataclass(frozen=True)
+class ActionDef:
+    """Definition of a mission action (drive, weed, etc.)."""
+    label: str
+    icon: str
+    tool_topic: Optional[str] = None
+    param_schema: tuple = ()  # Optional parameter definitions for the action
 
 # ── Constants ────────────────────────────────────────────────────────────────
 
@@ -99,10 +109,10 @@ _TS_FMT_LEGACY = '%d-%m-%Y_%H-%M-%S'   # accepted on read, never written
 DUE_NOW:    float = 0.0
 DUE_FAILED: float = -1.0
 
-# Action registry. Refactor to a class when a third action arrives.
-ACTIONS: dict[str, dict] = {
-    'drive': {'label': 'Drive only', 'tool_topic': None},
-    'weed':  {'label': 'Weed',       'tool_topic': '/tool/weeder/enable'},
+# Action registry — now uses ActionDef dataclass.
+ACTIONS: dict[str, ActionDef] = {
+    'drive': ActionDef(label='Drive only', icon='🚜', tool_topic=None),
+    'weed':  ActionDef(label='Weed',       icon='🌿', tool_topic='/tool/weeder/enable'),
 }
 
 

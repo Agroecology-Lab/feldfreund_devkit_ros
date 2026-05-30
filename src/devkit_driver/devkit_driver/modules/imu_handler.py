@@ -101,12 +101,21 @@ class ImuHandler:
         # Orientation quaternion — the library stores the offset-corrected rotation
         # as a pyquaternion.Quaternion in imu.rotation.
         # pyquaternion convention: Quaternion(w, x, y, z)
-        rot = imu.rotation  # pyquaternion.Quaternion
-        msg.orientation.w = float(rot.w)
-        msg.orientation.x = float(rot.x)
-        msg.orientation.y = float(rot.y)
-        msg.orientation.z = float(rot.z)
-        msg.orientation_covariance = _ORIENT_COV
+        try:
+            rot = imu.rotation  # pyquaternion.Quaternion
+            msg.orientation.w = float(rot.w)
+            msg.orientation.x = float(rot.x)
+            msg.orientation.y = float(rot.y)
+            msg.orientation.z = float(rot.z)
+            msg.orientation_covariance = _ORIENT_COV
+        except AttributeError:
+            # Simulation mode: ImuSimulation doesn't have rotation attribute.
+            # Use identity quaternion and flag unknown orientation with -1 covariance.
+            msg.orientation.w = 1.0
+            msg.orientation.x = 0.0
+            msg.orientation.y = 0.0
+            msg.orientation.z = 0.0
+            msg.orientation_covariance = [-1.0] + [0.0] * 8
 
         # Angular velocity (rad/s) from the calibrated gyroscope.
         # The feldfreund_devkit Imu exposes these as imu.angular_velocity
