@@ -196,6 +196,36 @@ python3 agbot-diagnostic.py full
 * **Connectivity:** Native Zenoh integration via `rmw_zenoh_cpp`. Publishes environment states and "Conditions" to the Zenoh network.
 
 
+## Licenses
+
+# Sowbot / feldfreund_devkit_ros — Dependency Licence Audit
+
+| Component | Source | Licence | Commercial use | Notes |
+|---|---|---|---|---|
+| feldfreund_devkit_ros (root) | your repo | MIT (©Zauberzeug GmbH & Agroecology Lab) | ✅ | Derivative of upstream field-friend; retain Zauberzeug notice |
+| devkit_driver | local | MIT (©ATB) | ✅ | Retain ATB copyright notice |
+| devkit_ui | local | MIT (©Agroecology Lab) | ✅ | |
+| devkit_launch | local | MIT | ✅ | Corrected from `proprietary` |
+| sowbot_row_follow | caatingarobotics | BSD-2-Clause | ✅ | LICENSE file fixed to match header/metadata; ©PRBonn + ©Agroecology Lab |
+| caatingarobotics (agro_robot_sim, caatinga_nav, caatinga_vision) | github.com/samuk | Apache-2.0 | ✅ | Your fork (row_follow is the BSD-2 exception, above) |
+| topological_navigation | LCAS (`aoc_refactor`) | Apache-2.0 (©LCAS) | ✅ | High-level planner |
+| fusioncore | manankharwar | Apache-2.0 | ✅ | GNSS fusion; patched in-build; retain NOTICE if present |
+| virtual_maize_field | FieldRobotEvent (`ros2-gz`) | GPL-3.0 | ⚠️ | Sim-only — must NOT be vendored into a shipped product |
+| ublox_dgnss | aussierobots | Apache-2.0 | ✅ | GNSS driver |
+| sentor | LCAS (fork of francescodelduchetto/sentor) | MIT | ✅ | Monitoring node |
+| ros2graph_explorer | nilseuropa | BSD-3-Clause | ✅ | Dev/debug graph inspector |
+| Fields2Cover v2.0.0 | Fields2Cover | BSD-3-Clause | ✅ | Built from source; pulls OR-tools (Apache-2.0) + GDAL (MIT) |
+| lizard | Agroecology-Lab | MIT (©Zauberzeug GmbH) | ✅ | ESP32 tooling; retain Zauberzeug notice |
+| YOLOX 0.3.0 + yolox_nano weights | Megvii | Apache-2.0 | ✅ | Confirm weights terms for commercial use |
+| PyTorch (CPU) | Meta | BSD-3-Clause | ✅ | |
+
+
+
+
+
+
+===============================================================
+
 ## Feldfreund DevKit ROS 
 (Below from original Zauberzeug forked repo)
 
