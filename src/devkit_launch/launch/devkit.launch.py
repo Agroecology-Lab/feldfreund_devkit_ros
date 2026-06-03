@@ -26,7 +26,7 @@ def _nav2_nodes(params_file, real_condition):
 
     Remappings mirror those in navigation_launch.py:
       cmd_vel -> cmd_vel_nav  (controller_server, behavior_server)
-      cmd_vel -> cmd_vel_nav  (velocity_smoother input, output stays cmd_vel)
+      cmd_vel -> cmd_vel_nav  (velocity_smoother input), cmd_vel_smoothed -> cmd_vel  (velocity_smoother output)
     tf/tf_static are remapped globally via the common remappings list.
     """
     remappings = [('/tf', 'tf'), ('/tf_static', 'tf_static')]
@@ -93,7 +93,7 @@ def _nav2_nodes(params_file, real_condition):
             package='nav2_velocity_smoother',
             executable='velocity_smoother',
             name='velocity_smoother',
-            remappings=remappings + [('cmd_vel', 'cmd_vel_nav')],
+            remappings=remappings + [('cmd_vel', 'cmd_vel_nav'), ('cmd_vel_smoothed', 'cmd_vel')],
             output='screen',
             condition=real_condition,
             parameters=[{'use_sim_time': False}, params_file],
