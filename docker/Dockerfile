@@ -54,8 +54,9 @@ RUN find /etc/apt/sources.list.d/ -name "*.list" -exec \
 # ============================================================
 
 # 3.1 Base system tools
+
 RUN apt-get update && \
-    apt-get install -y --fix-missing --no-install-recommends \
+    apt-get install -y --no-install-recommends \
       wget ca-certificates unzip git \
       python3-pip python3-rosdep \
       curl gnupg2 \
@@ -66,7 +67,11 @@ RUN apt-get update && \
       nano \
       htop \
       libxcb-shape0 \
-      libgles2 && \
+      libgles2 \
+    || (apt-get update && apt-get install -y --no-install-recommends \
+      wget ca-certificates unzip git python3-pip python3-rosdep \
+      curl gnupg2 libusb-1.0-0-dev usbutils libgl1 libegl1 nano htop \
+      libxcb-shape0 libgles2) && \
     apt-get clean && rm -rf /var/lib/apt/lists/*
 
 
