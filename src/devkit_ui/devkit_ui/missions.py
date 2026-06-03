@@ -116,6 +116,34 @@ ACTIONS: dict[str, ActionDef] = {
 }
 
 
+def action_ros_msgs(action_key: str,
+                    action_params: Optional[dict],
+                    enable: bool) -> list[tuple[str, object]]:
+    """Map an action + params to the (topic, value) pairs to publish.
+
+    The mission executor calls this once with enable=True before navigating
+    a row (engage the implement) and once with enable=False after (disengage),
+    publishing each returned pair. A bool value is published as std_msgs/Bool,
+    a numeric value as std_msgs/Float64.
+
+    Currently the only ROS seam on an action is tool_topic — a Bool engage/
+    disengage line. 'drive' has tool_topic=None and so yields nothing. Per-
+    parameter setpoint topics (RPM, depth, blade height) aren't wired yet:
+    param_schema carries no topic field, so action_params is accepted for
+    forward-compatibility but unused. When a parameter gains its own topic,
+    extend the schema and append (param_topic, float(value)) pairs here while
+    enable is True.
+    """
+    adef = ACTIONS.get(action_key)
+    if adef is None:
+        return []
+
+    msgs: list[tuple[str, object]] = []
+    if adef.tool_topic:
+        msgs.append((adef.tool_topic, bool(enable)))
+    return msgs
+
+
 # ── Pure helpers (module-level, easy to test) ────────────────────────────────
 
 def _now_utc() -> datetime:
