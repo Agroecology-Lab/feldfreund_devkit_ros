@@ -2,7 +2,7 @@
 """
 rtk_navsatfix_shim.py
 ─────────────────────
-Republishes /rover/ublox_nav_sat_fix_hp as /gnss/fix with NavSatFix.status
+Republishes /rover/fix as /gnss/fix with NavSatFix.status
 corrected from UBXNavPVT.carr_soln.
 
 Problem
@@ -40,7 +40,7 @@ carr_soln updates at 1 Hz or better).
 
 Subscriptions
 ─────────────
-  /rover/ublox_nav_sat_fix_hp   sensor_msgs/NavSatFix   HP position fixes
+  /rover/fix                    sensor_msgs/NavSatFix   position fixes
   /rover/ubx_nav_pvt            ublox_ubx_msgs/UBXNavPVT  carr_soln field
 
 Publications
@@ -95,7 +95,7 @@ class RtkNavSatFixShim(Node):
         self._pub = self.create_publisher(NavSatFix, '/gnss/fix', _PUB_QOS)
 
         self.create_subscription(
-            NavSatFix, '/rover/ublox_nav_sat_fix_hp',
+            NavSatFix, '/rover/fix',
             self._fix_cb, _SENSOR_QOS)
 
         self.create_subscription(
