@@ -904,7 +904,8 @@ class NiceGuiNode(Node):
 
     # ── F2C → topo rows ──────────────────────────────────────────────────────
 
-    def save_f2c_rows_to_topo(self, prefix: str, row_id_start: int) -> None:
+    def save_f2c_rows_to_topo(self, prefix: str, row_id_start: int,
+                              overwrite: bool = False) -> None:
         prefix = re.sub(r'[^A-Z0-9_]', '',
                         (prefix or '').strip().upper().replace(' ', '_'))
         if not prefix:
@@ -956,6 +957,9 @@ class NiceGuiNode(Node):
             connect_to = self.topo_selected
 
         new_topo_nodes = dict(self.topo_nodes)
+        if overwrite:
+            new_topo_nodes = {k: v for k, v in new_topo_nodes.items()
+                              if not k.startswith(f'{prefix}_R')}
         new_entries: list = []
         added: list = []
         row_names: dict = {}
@@ -978,7 +982,7 @@ class NiceGuiNode(Node):
 
             in_name  = f'{prefix}_R{rid}_IN'
             out_name = f'{prefix}_R{rid}_OUT'
-            if in_name in new_topo_nodes or out_name in new_topo_nodes:
+            if not overwrite and (in_name in new_topo_nodes or out_name in new_topo_nodes):
                 skipped.append(rid); continue
 
             def _disk_node(name, x, y, role, lat, lon, edges):
@@ -1076,6 +1080,24 @@ class NiceGuiNode(Node):
             f'writing {len(added)} rows · {prefix}{splice_str}{skip_str}…')
 
         def _modify(file_doc):
+            if overwrite:
+                old_names = {
+                    e.get('node', {}).get('name', '')
+                    for e in file_doc.get('nodes', [])
+                    if e.get('node', {}).get('name', '').startswith(f'{prefix}_R')
+                }
+                if old_names:
+                    file_doc['nodes'] = [
+                        e for e in file_doc.get('nodes', [])
+                        if e.get('node', {}).get('name') not in old_names
+                    ]
+                    # Prune dangling edges pointing at removed nodes
+                    for entry in file_doc.get('nodes', []):
+                        n = entry.get('node', {})
+                        n['edges'] = [
+                            e for e in n.get('edges', [])
+                            if e.get('node') not in old_names
+                        ]
             existing = {e.get('node', {}).get('name')
                         for e in file_doc.get('nodes', [])}
             for entry in new_entries:
@@ -1673,6 +1695,8 @@ class NiceGuiNode(Node):
                 save_btn  = ui.button('Save as Topo Rows').props(
                     'color=primary no-caps').classes('w-full mt-1')
                 save_btn.set_enabled(False)
+                f2c_overwrite = ui.checkbox('Overwrite existing rows with same prefix',
+                                            value=False).classes('text-xs mt-1')
                 clear_btn = ui.button('Clear').props(
                     'outline no-caps').classes('w-full mt-1')
 
@@ -1798,6 +1822,7 @@ class NiceGuiNode(Node):
             self.save_f2c_rows_to_topo(
                 f2c_prefix.value or 'F2C',
                 int(f2c_row_id_start.value or 1),
+                overwrite=f2c_overwrite.value,
             )
         save_btn.on_click(do_save)
 
