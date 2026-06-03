@@ -2584,6 +2584,53 @@ class NiceGuiNode(Node):
 
                 ui.separator().classes('w-full my-1')
 
+
+
+    _explorer_lbl
+
+                ui.separator().classes('w-full my-1')
+
+                # ── ros2grapher ──────────────────────────────────────────
+                _grapher_proc: list = [None]
+                _grapher_lbl = ui.label('').classes('text-xs font-mono').style('color:#57606a')
+                def _start_grapher():
+                    import subprocess
+                    if _grapher_proc[0] is not None and _grapher_proc[0].poll() is None:
+                        _grapher_lbl.set_text('already running')
+                        return
+                    try:
+                        _grapher_proc[0] = subprocess.Popen(
+                            ['ros2grapher', '/workspace'],
+                            stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
+                        )
+                        _grapher_lbl.set_text(
+                            f'started (pid {_grapher_proc[0].pid}) — '
+                            f'open http://localhost:8888')
+                        _grapher_lbl.style('color:#1a7f37')
+                    except Exception as exc:
+                        _grapher_lbl.set_text(f'ERROR: {exc}')
+                        _grapher_lbl.style('color:#cf222e')
+                ui.button('Start ros2grapher', on_click=_start_grapher).props(
+                    'outline no-caps').classes('px-4')
+                ui.html(
+                    '<a href="http://localhost:8888/" target="_blank" '
+                    'style="font-size:13px;color:var(--blue);text-decoration:none;'
+                    'padding:6px 12px;border:1px solid var(--blue);border-radius:4px;'
+                    'font-family:\'Courier New\',monospace;">'
+                    '↗ ros2grapher</a>'
+                )
+                ui.html(
+                    '<a href="https://github.com/Supull/ros2grapher"'
+                    ' target="_blank"'
+                    ' style="font-size:11px;color:var(--txt-muted);text-decoration:none;'
+                    'font-family:\'Courier New\',monospace;">'
+                    '📄 Documentation</a>'
+                )
+                _grapher_lbl
+
+                ui.separator().classes('w-full my-1')
+
+               
        # ── RViz ─────────────────────────────────────────────────
                 _rviz_proc: list = [None]
                 _rviz_daemons: list = []  # Xvfb, x11vnc, websockify - tracked for clean shutdown
