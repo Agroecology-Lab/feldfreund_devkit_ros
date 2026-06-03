@@ -866,6 +866,15 @@ class NiceGuiNode(Node):
                 else:
                     file_doc = copy.deepcopy(self._topo_doc)
 
+                # Ensure every entry has the top-level 'meta' field the schema
+                # requires. Nodes from hand-written or older map files may omit
+                # it, causing WriteTopologicalMap to reject the whole doc.
+                for _entry in file_doc.get('nodes', []):
+                    if 'meta' not in _entry:
+                        _nm = _entry.get('node', {}).get('name', '')
+                        _entry['meta'] = {
+                            'map': map_name, 'node': _nm, 'pointset': map_name}
+
                 modify_fn(file_doc)
 
                 with open(map_file, 'w') as f:
