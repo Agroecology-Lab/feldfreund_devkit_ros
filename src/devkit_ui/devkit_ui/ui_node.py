@@ -866,7 +866,15 @@ class NiceGuiNode(Node):
                 else:
                     file_doc = copy.deepcopy(self._topo_doc)
 
-                # Ensure every entry has the top-level 'meta' field the schema
+                # Ensure the document-level 'meta' key exists — the schema
+                # requires it and maps written without it (e.g. by older
+                # get_maize_topo.py or hand-edited files) will fail validation.
+                if 'meta' not in file_doc:
+                    file_doc['meta'] = {
+                        'last_updated': datetime.now(timezone.utc).strftime(
+                            '%d-%m-%Y_%H-%M-%S')}
+
+                # Ensure every entry has the node-level 'meta' field the schema
                 # requires. Nodes from hand-written or older map files may omit
                 # it, causing WriteTopologicalMap to reject the whole doc.
                 for _entry in file_doc.get('nodes', []):
