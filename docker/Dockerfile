@@ -259,6 +259,14 @@ RUN for i in 1 2 3 4 5; do \
         https://github.com/nilseuropa/ros2graph_explorer src/ros2graph_explorer && break || \
       (echo "ros2graph_explorer attempt $i failed, retrying in 15s..." && sleep 15); \
     done
+    
+    
+RUN for i in 1 2 3 4 5; do \
+      GIT_TERMINAL_PROMPT=0 git clone --depth 1 -b main \
+        https://github.com/Supull/ros2grapher.git src/ros2grapher && break || \
+      (echo "ros2graph_explorer attempt $i failed, retrying in 15s..." && sleep 15); \
+    done
+
 
 # ============================================================
 # Stage 9: rosdep — Automated Dependency Resolution
