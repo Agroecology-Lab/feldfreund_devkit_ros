@@ -2351,6 +2351,72 @@ class NiceGuiNode(Node):
         self._mission_cancel = True
         self.cancel_nav_goal()
 
+    # ── Map archive ───────────────────────────────────────────────────────────
+
+    def archive_and_clear_map(self) -> str:
+        """Copy current map file to /workspace/maps/<name>_<N>, then write a
+        fresh empty map doc back to the original path and reload it.
+
+        Returns a status string (caller displays it).
+        """
+        if not self._topo_doc:
+            return 'ERROR: no map loaded'
+
+        import copy, yaml as _yaml
+
+        map_name = self._topo_doc.get('name', 'mixed_test_map')
+        map_file = f'/workspace/maps/{map_name}'
+
+        # Pick next available archive index
+        i = 1
+        while os.path.exists(f'{map_file}_{i}'):
+            i += 1
+        archive_path = f'{map_file}_{i}'
+
+        try:
+            # Read from disk so we archive the persisted state, not just memory
+            if os.path.exists(map_file):
+                with open(map_file) as f:
+                    on_disk = _yaml.safe_load(f)
+            else:
+                on_disk = copy.deepcopy(self._topo_doc)
+
+            with open(archive_path, 'w') as f:
+                _yaml.dump(on_disk, f, default_flow_style=False,
+                           allow_unicode=True, sort_keys=False)
+
+            # Build empty map doc preserving header fields
+            empty_doc = {
+                'name':           map_name,
+                'metric_map':     self._topo_doc.get('metric_map', ''),
+                'transformation': copy.deepcopy(
+                    self._topo_doc.get('transformation', {})),
+                'nodes':          [],
+            }
+            with open(map_file, 'w') as f:
+                _yaml.dump(empty_doc, f, default_flow_style=False,
+                           allow_unicode=True, sort_keys=False)
+
+            self._topo_doc  = empty_doc
+            self.topo_nodes = {}
+
+            # Republish so topo nav stack sees the cleared map immediately
+            try:
+                msg = __import__('std_msgs.msg', fromlist=['String']).String()
+                import json as _json
+                msg.data = _json.dumps(empty_doc, ensure_ascii=False)
+                self._topo_map_pub.publish(msg)
+            except Exception:
+                pass
+
+            self.get_logger().info(
+                f'archive_and_clear_map: archived to {archive_path}')
+            return f'archived → {os.path.basename(archive_path)}'
+
+        except Exception as e:
+            self.get_logger().error(f'archive_and_clear_map failed: {e}')
+            return f'ERROR: {e}'
+
     # ── System tab ────────────────────────────────────────────────────────────
 
     def _system_content(self) -> None:
@@ -2697,6 +2763,39 @@ class NiceGuiNode(Node):
                         '↗ Gazebo (noVNC)</a>'
                     )
                 _gazebo_lbl
+
+        with ui.card().classes('w-full mt-3'):
+            ui.label('Map Archive').classes('font-semibold mb-2')
+            archive_lbl = ui.label('').classes('text-xs font-mono mt-1').style(
+                'color:#57606a')
+
+            async def _do_archive():
+                map_name = self._topo_doc.get('name', '?') if self._topo_doc else '?'
+                with ui.dialog() as dlg, ui.card():
+                    ui.label('Archive and clear map').classes('font-semibold')
+                    ui.label(
+                        f'Copies "{map_name}" to "{map_name}_N" then wipes all '
+                        f'nodes from the live map. Cannot be undone from the UI.'
+                    ).classes('text-xs').style('color:#57606a;max-width:340px')
+                    with ui.row().classes('w-full justify-end gap-2 mt-3'):
+                        ui.button('Cancel',
+                                  on_click=lambda: dlg.submit('cancel')).props(
+                                      'flat no-caps')
+                        ui.button('Archive & Clear', color='negative',
+                                  on_click=lambda: dlg.submit('ok')).props('no-caps')
+
+                result = await dlg
+                if result != 'ok':
+                    return
+                status = self.archive_and_clear_map()
+                archive_lbl.set_text(status)
+                archive_lbl.style(
+                    'color:#cf222e' if status.startswith('ERROR')
+                    else 'color:#1a7f37')
+
+            ui.button('Archive & Clear Map', on_click=_do_archive).props(
+                'color=negative outline no-caps').classes('px-4')
+            archive_lbl
 
     def toggle_estop(self) -> None:
         self.soft_estop_active = not self.soft_estop_active
