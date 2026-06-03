@@ -35,7 +35,7 @@ from devkit_ui.obstacles import (
 )
 
 # MISSION: store owns missions.yaml, scheduling, and run recording.
-from devkit_ui.missions import ACTIONS, MissionStore
+from devkit_ui.missions import ACTIONS, MissionStore, action_ros_msgs
 
 _TOPO_SRV_OK = False
 try:
@@ -1863,159 +1863,9 @@ class NiceGuiNode(Node):
                 'color:#1a7f37' if cur else 'color:#57606a')
         ui.timer(0.4, _refresh_save_status)
 
-        with ui.card().classes('w-full'):
-            with ui.row().classes('items-baseline gap-2 mb-3'):
-                ui.label('Mission Queue').classes('font-semibold')
-                ui.label('select rows to run today').classes('text-xs').style('color:#8c959f')
-            with ui.row().classes('w-full gap-4 items-start'):
-                with ui.card().classes('flex-1').style('background:#f6f8fa;padding:10px'):
-                    ui.html('<div class="sec-label mb-2">Available rows</div>')
-                    available_col = ui.column().style('gap:2px;width:100%')
-                with ui.card().classes('flex-1').style('background:#f6f8fa;padding:10px'):
-                    ui.html('<div class="sec-label mb-2">Mission store</div>')
-                    missions_col = ui.column().style('gap:2px;width:100%')
-                    missions_empty_lbl = ui.label(
-                        'No missions — use Add → to create one'
-                    ).classes('text-xs').style('color:#8c959f')
-
-            # Local list of row_ids the operator assembles before hitting Run Mission.
-            mission_queue: list = []
-            mission_status = ui.label('').classes('text-xs font-mono mt-3').style('color:#57606a')
-            with ui.row().classes('gap-2 mt-3'):
-                run_btn = ui.button('Run Mission', on_click=lambda: self._run_mission(
-                    mission_queue, mission_status)).props('color=positive no-caps')
-                ui.button('Cancel', on_click=self.cancel_mission).props(
-                    'color=negative no-caps flat')
-
-            def _add_row(row_id):
-                if row_id not in mission_queue:
-                    mission_queue.append(row_id)
-
-            # ── Available rows panel ──────────────────────────────────────────────────
-            _avail_prev = [None]
-            def _refresh_available():
-                if id(self.topo_nodes) == _avail_prev[0]:
-                    return
-                _avail_prev[0] = id(self.topo_nodes)
-                rows: dict[int, str] = {}
-                for nname, nd in self.topo_nodes.items():
-                    meta = nd.get('meta', {})
-                    rid  = meta.get('row_id')
-                    if rid is not None and meta.get('row_role', '') == 'entry':
-                        try:
-                            rows[int(rid)] = nname
-                        except (TypeError, ValueError):
-                            pass
-                available_col.clear()
-                if not rows:
-                    with available_col:
-                        ui.label('No rows in map yet').classes('text-xs').style('color:#8c959f')
-                else:
-                    with available_col:
-                        for rid in sorted(rows):
-                            r = rid
-                            with ui.row().classes('items-center gap-2 w-full'):
-                                ui.label(f'Row {rid}').classes('text-sm font-mono flex-1')
-                                ui.label(rows[rid]).classes('text-xs font-mono').style('color:#8c959f')
-                                ui.button('Add →', on_click=lambda _, r=r: _add_row(r)).props(
-                                    'color=primary outline no-caps dense')
-                                ui.button('✕', on_click=lambda _, r=r: self.confirm_delete_row(r)).props(
-                                    'flat dense').classes('text-xs').style('color:#cf222e')
-            ui.timer(1.0, _refresh_available)
-
-            # ── Mission store panel ──────────────────────────────────────────────────────
-            # Polls node.missions_version (bumped by MissionStore on every
-            # write) to know when to redraw.  Shows each stored mission with
-            # its next-due chip and a delete button.
-            _mstore_prev = [-1]
-            def _refresh_missions():
-                v = self.missions_version
-                if v == _mstore_prev[0]:
-                    return
-                _mstore_prev[0] = v
-                missions_col.clear()
-                snap = self.missions
-                missions_empty_lbl.set_visibility(not snap)
-                if not snap:
-                    return
-                with missions_col:
-                    for m in snap:
-                        mid  = m.get('id', '?')
-                        name = m.get('name', mid)
-                        rows = m.get('rows', [])
-                        act  = m.get('action', '—')
-                        active = m.get('active', False)
-                        due_h = self._mission_store.next_due_in_hours(mid)
-                        if due_h is None:
-                            due_str = 'done'
-                            due_col = 'color:#8c959f'
-                        elif due_h == 0.0:
-                            due_str = 'due now'
-                            due_col = 'color:#1a7f37'
-                        else:
-                            due_str = f'in {due_h:.1f}h'
-                            due_col = 'color:#9a6700'
-                        last_ok = m.get('last_run_success')
-                        last_str = '✓' if last_ok is True else '✗' if last_ok is False else '—'
-                        with ui.row().classes('items-center gap-2 w-full'):
-                            ui.label(name).classes('text-sm font-mono').style('min-width:90px')
-                            ui.label(f'{len(rows)} rows · {act}').classes(
-                                'text-xs font-mono flex-1').style('color:#8c959f')
-                            ui.label(due_str).classes('text-xs font-mono').style(due_col)
-                            ui.label(last_str).classes('text-xs font-mono').style(
-                                'color:#1a7f37' if last_ok is True else
-                                'color:#cf222e' if last_ok is False else 'color:#8c959f')
-                            act_toggle = ui.checkbox('', value=active).props('dense').tooltip(
-                                'Active — included in today_queue()')
-                            act_toggle.on_value_change(
-                                lambda e, m=mid: self._mission_store.set_active(m, e.value))
-                            ui.button('✕', on_click=lambda _, m=mid: self._mission_store.delete(m)).props(
-                                'flat dense').classes('text-xs').style('color:#cf222e')
-
-                # Mirror running state onto Run button
-                run_btn.set_enabled(not self._mission_running)
-
-            ui.timer(0.5, _refresh_missions)
-
-            # Status line from the mission store (save confirmations / errors)
-            _mstatus_prev = ['']
-            mission_store_status = ui.label('').classes('text-xs font-mono').style('color:#57606a')
-            def _refresh_store_status():
-                cur = self.mission_status
-                if cur == _mstatus_prev[0]:
-                    return
-                _mstatus_prev[0] = cur
-                mission_store_status.set_text(cur)
-                mission_store_status.style(
-                    'color:#cf222e' if cur.startswith('ERROR') else
-                    'color:#1a7f37' if cur else 'color:#57606a')
-            ui.timer(0.3, _refresh_store_status)
-        # OBSTACLE: obstacle list + map rendering, full width below the queue.
-        attach_mission_obstacle_panel(draw_handle)
-
-
-# ── ui_node.py: mission tab queue section + executor (replaces lines 1848–1925) ──
-#
-# Drop this in to replace everything from:
-#   with ui.card().classes('w-full'):          # "Mission Queue" card
-# down to the end of _run_mission.
-#
-# Also requires:
-#   1. Add to NiceGuiNode.__init__:
-#        self._mission_running = False
-#        self._mission_cancel  = False
-#        self._mission_run_id  = None
-#        self._tool_publishers: dict = {}
-#
-#   2. Change the import at the top:
-#        from devkit_ui.missions import ACTIONS, MissionStore, action_ros_msgs
-#
-#   3. Add these two methods to NiceGuiNode (see bottom of this file):
-#        _get_tool_publisher, _send_goal_sync, cancel_mission
-
-# ─────────────────────────────────────────────────────────────────────────────
-# MISSION QUEUE CARD  (replaces the old "Mission Queue" card block)
-# ─────────────────────────────────────────────────────────────────────────────
+        # ─────────────────────────────────────────────────────────────────────
+        # MISSION QUEUE CARD
+        # ─────────────────────────────────────────────────────────────────────
 
         with ui.card().classes('w-full'):
             with ui.row().classes('items-baseline gap-2 mb-3'):
@@ -2290,9 +2140,11 @@ class NiceGuiNode(Node):
 
             ui.timer(0.5, _refresh_missions)
 
+        # OBSTACLE: obstacle list + map rendering, full width below the queue.
+        attach_mission_obstacle_panel(draw_handle)
 
 # ─────────────────────────────────────────────────────────────────────────────
-# NiceGuiNode METHODS  (add / replace on the class)
+# NiceGuiNode mission executor methods
 # ─────────────────────────────────────────────────────────────────────────────
 
     def _get_tool_publisher(self, topic: str, is_float: bool = False):
@@ -2473,8 +2325,8 @@ class NiceGuiNode(Node):
         """Signal the executor thread to stop after the current row."""
         self._mission_cancel = True
         self.cancel_nav_goal()
-    
-# ── System tab ────────────────────────────────────────────────────────────
+
+    # ── System tab ────────────────────────────────────────────────────────────
 
     def _system_content(self) -> None:
         with ui.row().classes('items-stretch w-full gap-3'):
@@ -2584,12 +2436,6 @@ class NiceGuiNode(Node):
 
                 ui.separator().classes('w-full my-1')
 
-
-
-    _explorer_lbl
-
-                ui.separator().classes('w-full my-1')
-
                 # ── ros2grapher ──────────────────────────────────────────
                 _grapher_proc: list = [None]
                 _grapher_lbl = ui.label('').classes('text-xs font-mono').style('color:#57606a')
@@ -2630,8 +2476,7 @@ class NiceGuiNode(Node):
 
                 ui.separator().classes('w-full my-1')
 
-               
-       # ── RViz ─────────────────────────────────────────────────
+                # ── RViz ─────────────────────────────────────────────────
                 _rviz_proc: list = [None]
                 _rviz_daemons: list = []  # Xvfb, x11vnc, websockify - tracked for clean shutdown
                 _rviz_lbl = ui.label('').classes('text-xs font-mono').style('color:#57606a')
