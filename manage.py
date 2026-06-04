@@ -257,7 +257,23 @@ class DevkitManager:
         cfg = self._get_env_config()
         r_port = cfg.get('GPS_PORT_ROVER', 'virtual')
         mcu_port = cfg.get('MCU_PORT', 'virtual')
-        is_sim = 'true' if (r_port == 'virtual' and mcu_port == 'virtual') else 'false'
+        # A detected GPS used to silently flip us out of sim, leaving a sim
+        # field with a real-GPS-anchored base_link 27 km off the costmap and
+        # no fake_nav2_server (so no virtual robot rendered). FORCE_SIM keeps
+        # the sim backend regardless of attached hardware.
+        force_sim = '--sim' in extra_args or cfg.get('FORCE_SIM') == '1' \
+            or os.environ.get('FORCE_SIM') == '1'
+        is_sim = 'true' if (force_sim or (r_port == 'virtual' and mcu_port == 'virtual')) else 'false'
+
+        # Survey origin for the topo map datum. In real-GPS runs this MUST match
+        # fusioncore's GNSS reference origin, or the field frame and base_link
+        # will disagree by the lat/lon offset. Defaults to 0/0 (sim-safe).
+        datum_lat = cfg.get('FIELD_DATUM_LAT', '0.0')
+        datum_lon = cfg.get('FIELD_DATUM_LON', '0.0')
+        datum_alt = cfg.get('FIELD_DATUM_ALT', '0.0')
+
+        # --sim is our own flag; don't forward it to ros2 launch.
+        extra_args = [a for a in extra_args if a != '--sim']
 
         if is_sim == 'false':
             self._usb_reset_f9p(cfg.get('GPS_USB_PATH_ROVER', 'virtual'))
@@ -265,16 +281,24 @@ class DevkitManager:
                 self._log(f"Waking MCU on {mcu_port}")
                 os.system(f"stty -F {mcu_port} 115200 && (echo 's' > {mcu_port} &)")
 
-        ros_command = (
-            f"{self._ros_source()} && "
+        # World + topo generation is sim-only. On real hardware you want your
+        # surveyed field map, not a freshly generated maize sim that would
+        # overwrite it.
+        world_gen = (
             "ros2 run virtual_maize_field generate_world fre22_task_navigation_mini 2>/dev/null && "
             "ln -sf /root/.ros/virtual_maize_field/generated.world "
             "/workspace/install/agro_robot_sim/share/agro_robot_sim/worlds/maize.world && "
             "python3 /workspace/get_maize_topo.py "
             "--csv /root/.ros/virtual_maize_field/gt_map.csv "
-            "--out /workspace/maps/maize_map --name maize_map --rows 6 && "
+            f"--out /workspace/maps/maize_map --name maize_map --rows 6 "
+            f"--lat {datum_lat} --lon {datum_lon} --alt {datum_alt} && "
             "cp /workspace/src/devkit_launch/resource/fake_nav2_server.py "
             "/workspace/src/topological_navigation/topological_nav_simulator/topological_nav_simulator/fake_nav2_server.py && "
+        ) if is_sim == 'true' else ""
+
+        ros_command = (
+            f"{self._ros_source()} && "
+            + world_gen +
             f"ros2 launch devkit_launch devkit.launch.py sim:={is_sim} rover_port:={r_port} mcu_port:={mcu_port} " +
             " ".join(extra_args)
         )
