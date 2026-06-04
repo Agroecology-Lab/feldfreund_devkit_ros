@@ -98,7 +98,7 @@ metric_map: {name}
 name: {name}
 pointset: {name}
 transformation:
-  topo_frame_id: map
+  topo_frame_id: topo_map
   parent: map
   rotation:
     w: 1.0
