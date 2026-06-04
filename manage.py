@@ -279,7 +279,8 @@ class DevkitManager:
             " ".join(extra_args)
         )
 
-        subprocess.run(['xhost', '+local:docker'], capture_output=True)
+        if shutil.which('xhost'):
+            subprocess.run(['xhost', '+local:docker'], capture_output=True)
         (self.root_dir / 'maps').mkdir(exist_ok=True)
 
         # Limbic-only flags: topological map env + get_maize_topo.py mount.
@@ -308,7 +309,8 @@ class DevkitManager:
             " ".join(extra_args)
         )
 
-        subprocess.run(['xhost', '+local:docker'], capture_output=True)
+        if shutil.which('xhost'):
+            subprocess.run(['xhost', '+local:docker'], capture_output=True)
 
         # Neo is a hardware stack: peer-to-peer DDS when on the crossover link,
         # loopback fallback when run standalone on a dev box.
