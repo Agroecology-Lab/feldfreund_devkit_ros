@@ -48,7 +48,11 @@ fusioncore:
 
     # Mahalanobis outlier gate — 5σ is conservative for open field.
     # Do NOT lower below chi2 critical values or normal GPS noise trips the gate.
-    gnss.mahalanobis_threshold: 5.0
+    outlier_threshold_gnss: 9.49
+
+    # Tracked platform: relax lateral non-holonomic constraint to allow
+    # sideways slip during turns. Default (wheeled differential drive) is ~0.1.
+    encoder.nhc_vy_sigma: 3.0
 
     # Base position noise floor (m). Adaptive covariance tracks reality above this.
     # RTK FIXED CEP is ~0.02 m, FLOAT ~0.3 m. The HP fix covariance reflects the
