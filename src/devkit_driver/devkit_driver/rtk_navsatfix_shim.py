@@ -112,7 +112,11 @@ class RtkNavSatFixShim(Node):
             f'awaiting first UBXNavPVT')
 
     def _pvt_cb(self, msg: UBXNavPVT) -> None:
-        self._carr_soln = msg.carr_soln
+        # carr_soln is a wrapped CarrSoln message-enum in this ublox_ubx_msgs
+        # build, not a plain int. Storing it raw makes the == comparisons below
+        # never match (corrupting the FIXED/FLOAT status mapping) and makes it
+        # unhashable, which crashes _log_stats's dict lookup. Coerce to int here.
+        self._carr_soln = int(msg.carr_soln)
         if not self._pvt_received:
             self._pvt_received = True
             self._pvt_timeout_timer.cancel()
@@ -204,7 +208,8 @@ def main(args=None):
         pass
     finally:
         node.destroy_node()
-        rclpy.shutdown()
+        if rclpy.ok():
+            rclpy.shutdown()
 
 
 if __name__ == '__main__':
