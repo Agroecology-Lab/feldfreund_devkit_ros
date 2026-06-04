@@ -423,14 +423,24 @@ def generate_launch_description():
             output='screen',
         ),
 
-        # ── Static odom -> base_link TF (sim / no-MCU only) ──────────────────
-        # In sim mode the MCU is virtual so odom_handler never runs and
-        # fusioncore has no wheel odom to fuse, meaning odom->base_link is
-        # never published. This identity static TF closes the chain so that
-        # topological localisation and Nav2 can start up.
-        # In real mode fusioncore owns this TF — do not publish it there.
+        # ── Static odom -> base_link TF (no real MCU) ────────────────────────
+        # Needed whenever the MCU is virtual: odom_handler never runs (no MCU)
+        # and on the bench fusioncore has no RTK fix to fuse, so neither owns
+        # odom->base_link and the TF tree splits into two unconnected trees
+        # (map->odom and a detached base_link->imu_link). That breaks
+        # topological localisation (current node stays unknown) and Nav2.
+        # This identity static TF closes the chain.
+        #
+        # Gate = MCU virtual AND not sim: in true sim mode fake_nav2_server
+        # already owns the full map->odom->base_link chain, so publishing here
+        # too would be a duplicate broadcaster. In real mode WITH a real MCU,
+        # odom_handler / fusioncore own this TF — do not compete.
         Node(
-            condition=sim_condition,
+            condition=IfCondition(
+                PythonExpression(
+                    ["'", mcu_port, "' == 'virtual' and '", sim, "' != 'true'"]
+                )
+            ),
             package='tf2_ros',
             executable='static_transform_publisher',
             name='odom_to_base_link_static',
