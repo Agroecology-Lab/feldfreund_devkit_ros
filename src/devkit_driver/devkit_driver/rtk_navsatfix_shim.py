@@ -59,6 +59,26 @@ _CARR_SOLN_NONE  = 0
 _CARR_SOLN_FLOAT = 1
 _CARR_SOLN_FIXED = 2
 
+
+def _coerce_carr_soln(value) -> int:
+    """Return carr_soln as a plain int regardless of how this ublox_ubx_msgs
+    build represents it. Across builds the UBXNavPVT.carr_soln field has been:
+      * a plain int / IntEnum                      -> int(value) works
+      * a CarrSoln wrapper message with a uint8
+        field also named 'carr_soln'               -> value.carr_soln
+    Try the wrapper field first (the generated-enum case that crashed both a
+    raw assignment and int()), then fall back to int()."""
+    inner = getattr(value, 'carr_soln', None)
+    if inner is not None:
+        try:
+            return int(inner)
+        except (TypeError, ValueError):
+            pass
+    try:
+        return int(value)
+    except (TypeError, ValueError):
+        return _CARR_SOLN_NONE
+
 # How long to wait for first PVT before giving up and forwarding fixes anyway.
 # After this timeout fixes are forwarded with STATUS_NO_FIX until PVT arrives,
 # so fusioncore sees something rather than nothing on a slow-starting receiver.
@@ -112,11 +132,11 @@ class RtkNavSatFixShim(Node):
             f'awaiting first UBXNavPVT')
 
     def _pvt_cb(self, msg: UBXNavPVT) -> None:
-        # carr_soln is a wrapped CarrSoln message-enum in this ublox_ubx_msgs
-        # build, not a plain int. Storing it raw makes the == comparisons below
-        # never match (corrupting the FIXED/FLOAT status mapping) and makes it
-        # unhashable, which crashes _log_stats's dict lookup. Coerce to int here.
-        self._carr_soln = int(msg.carr_soln)
+        # carr_soln is a wrapped CarrSoln message in this ublox_ubx_msgs build,
+        # not a plain int — storing it raw makes the == comparisons never match
+        # and crashes the stats dict lookup. _coerce_carr_soln normalises both
+        # the wrapper and plain-int representations to an int.
+        self._carr_soln = _coerce_carr_soln(msg.carr_soln)
         if not self._pvt_received:
             self._pvt_received = True
             self._pvt_timeout_timer.cancel()
