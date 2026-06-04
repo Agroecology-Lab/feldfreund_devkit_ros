@@ -988,6 +988,7 @@ class NiceGuiNode(Node):
         new_entries: list = []
         added: list = []
         row_names: dict = {}
+        row_coords: dict = {}   # node_name -> (x, y) for headland end-classification
         skipped: list = []
 
         verts = [{'x': -0.5, 'y': -0.5}, {'x':  0.5, 'y': -0.5},
@@ -1044,34 +1045,65 @@ class NiceGuiNode(Node):
             }
             added.append(rid)
             row_names[rid] = (in_name, out_name)
+            # Retain endpoint coords so headland edges can be built by physical
+            # end (south/north), not by IN/OUT label — snake ordering flips the
+            # label↔end correspondence on alternate rows.
+            row_coords[in_name]  = (ix, iy)
+            row_coords[out_name] = (ox, oy)
 
         if not added:
             self.f2c_save_status = 'ERROR: nothing added (all names already taken)'
             return
 
-        for a_rid, b_rid in zip(added, added[1:]):
-            a_out = row_names[a_rid][1]
-            b_in  = row_names[b_rid][0]
-
-            a_e = list(new_topo_nodes[a_out]['edges'])
-            if b_in not in a_e:
-                a_e.append(b_in)
-                new_topo_nodes[a_out] = {**new_topo_nodes[a_out], 'edges': a_e}
-            b_e = list(new_topo_nodes[b_in]['edges'])
-            if a_out not in b_e:
-                b_e.append(a_out)
-                new_topo_nodes[b_in] = {**new_topo_nodes[b_in], 'edges': b_e}
-
+        # ── Headland edges (point-to-point nav_to_pose) ──────────────────────
+        # Connect each node only to its immediate same-end neighbour along the
+        # headland, so a route between rows hugs the headland and never angles
+        # across a crop row. IN/OUT label is NOT the end: the snake flip puts
+        # odd-row IN and even-row OUT at one end, and the opposite labels at the
+        # other. Classify by the cross-row coordinate, then chain neighbours
+        # sorted along the headland.
+        #
+        # Cross-row axis = the field dimension with the larger endpoint spread
+        # (rows are long and narrow, so the ends are separated along the SHORT
+        # axis). We split nodes into two ends by that coordinate's median and,
+        # within each end, sort along the other (along-headland) axis and link
+        # consecutive nodes. IN→OUT row-follow edges are untouched.
+        def _add_headland_edge(p: str, q: str) -> None:
+            """Bidirectional nav_to_pose edge p<->q in both graph structures."""
+            for a, b in ((p, q), (q, p)):
+                e = list(new_topo_nodes[a]['edges'])
+                if b not in e:
+                    e.append(b)
+                    new_topo_nodes[a] = {**new_topo_nodes[a], 'edges': e}
             for entry in new_entries:
                 n = entry['node']
-                if n['name'] == a_out and not any(
-                        e.get('node') == b_in for e in n.get('edges', [])):
-                    n['edges'].append({'action': _NAV_ACTION,
-                                       'edge_id': f'{a_out}_{b_in}', 'node': b_in})
-                elif n['name'] == b_in and not any(
-                        e.get('node') == a_out for e in n.get('edges', [])):
-                    n['edges'].append({'action': _NAV_ACTION,
-                                       'edge_id': f'{b_in}_{a_out}', 'node': a_out})
+                if n['name'] in (p, q):
+                    other = q if n['name'] == p else p
+                    if not any(ed.get('node') == other for ed in n.get('edges', [])):
+                        n['edges'].append({
+                            'action': _NAV_ACTION,
+                            'edge_id': f"{n['name']}_{other}", 'node': other})
+
+        all_pts = list(row_coords.items())   # [(name, (x, y)), ...]
+        if len(all_pts) >= 2:
+            xs = [p[1][0] for p in all_pts]
+            ys = [p[1][1] for p in all_pts]
+            x_spread = max(xs) - min(xs)
+            y_spread = max(ys) - min(ys)
+            # Rows are long; the two ends sit at the extremes of the row-length
+            # axis (the LARGER spread). Split the two ends on that axis, then
+            # order each end along the cross-row axis (the SMALLER spread) so
+            # neighbouring row-ends chain along the headland.
+            end_idx   = 0 if x_spread > y_spread else 1   # row-length axis
+            along_idx = 1 - end_idx                        # along-headland axis
+            end_vals = sorted(p[1][end_idx] for p in all_pts)
+            mid = end_vals[len(end_vals) // 2]
+            end_lo = [p for p in all_pts if p[1][end_idx] <  mid]
+            end_hi = [p for p in all_pts if p[1][end_idx] >= mid]
+            for group in (end_lo, end_hi):
+                group.sort(key=lambda p: p[1][along_idx])
+                for (a_name, _), (b_name, _) in zip(group, group[1:]):
+                    _add_headland_edge(a_name, b_name)
 
         graph_splice: list = []
         if connect_to:
