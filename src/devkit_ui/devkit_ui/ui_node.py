@@ -2486,7 +2486,12 @@ class NiceGuiNode(Node):
                 _yaml.dump(on_disk, f, default_flow_style=False,
                            allow_unicode=True, sort_keys=False)
 
-            # Build empty map doc preserving header fields
+            # Build empty map doc preserving header fields.
+            # CRITICAL: carry forward `definitions` (BT XML bindings) and
+            # `actions` (action-server config for navigate_to_pose /
+            # limbic_row_follow). Without them, _persist_and_reload reloads a
+            # doc with no action config and every edge fails with
+            # "No action config for 'NavigateToPose'".
             empty_doc = {
                 'meta':           {'last_updated': datetime.now(timezone.utc).strftime('%d-%m-%Y_%H-%M-%S')},
                 'name':           map_name,
@@ -2494,6 +2499,10 @@ class NiceGuiNode(Node):
                 'pointset':       map_name,
                 'transformation': copy.deepcopy(
                     self._topo_doc.get('transformation', {})),
+                'definitions':    copy.deepcopy(
+                    self._topo_doc.get('definitions', {})),
+                'actions':        copy.deepcopy(
+                    self._topo_doc.get('actions', {})),
                 'nodes':          [],
             }
             with open(map_file, 'w') as f:
