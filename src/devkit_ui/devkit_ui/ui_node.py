@@ -69,6 +69,46 @@ TMAP_QOS = QoSProfile(
 
 _ROW_ACTION = 'limbic_row_follow'
 _NAV_ACTION = 'navigate_to_pose'
+
+
+def _headland_neighbour_pairs(coords: dict) -> list:
+    """Given {node_name: (x, y)} for all row endpoints, return the list of
+    (a, b) node-name pairs that should be joined by a headland (nav_to_pose)
+    edge: each node linked only to its immediate same-end neighbour.
+
+    Why this exists: a route between rows must hug the headland and never
+    angle across a crop row. The IN/OUT label is NOT a reliable proxy for
+    which physical end a node sits at — snake (boustrophedon) ordering flips
+    the label↔end correspondence on alternate rows. So we classify ends by
+    geometry: rows are long, so the two ends sit at the extremes of the
+    row-length axis (the coordinate with the larger spread). Split nodes into
+    two ends on that axis, then order each end along the cross (along-headland)
+    axis and pair consecutive nodes. Chaining neighbours (never skip-linking)
+    keeps every edge between physically adjacent row-ends, so A* walks the
+    headland instead of cutting a chord across a row mouth.
+
+    Used by both save_f2c_rows_to_topo (initial build) and
+    repair_row_connectivity (rewire) so the two cannot drift apart. Returns an
+    empty list for < 2 endpoints. Never pairs a node with itself.
+    """
+    pts = list(coords.items())
+    if len(pts) < 2:
+        return []
+    xs = [p[1][0] for p in pts]
+    ys = [p[1][1] for p in pts]
+    end_idx   = 0 if (max(xs) - min(xs)) > (max(ys) - min(ys)) else 1
+    along_idx = 1 - end_idx
+    end_vals = sorted(p[1][end_idx] for p in pts)
+    mid = end_vals[len(end_vals) // 2]
+    end_lo = [p for p in pts if p[1][end_idx] <  mid]
+    end_hi = [p for p in pts if p[1][end_idx] >= mid]
+    out: list = []
+    for group in (end_lo, end_hi):
+        group.sort(key=lambda p: p[1][along_idx])
+        for (a_name, _), (b_name, _) in zip(group, group[1:]):
+            if a_name != b_name:
+                out.append((a_name, b_name))
+    return out
 _NAME_RE = re.compile(r'^[A-Z0-9_]+$')
 
 # ── Global CSS ────────────────────────────────────────────────────────────────
@@ -1084,26 +1124,9 @@ class NiceGuiNode(Node):
                             'action': _NAV_ACTION,
                             'edge_id': f"{n['name']}_{other}", 'node': other})
 
-        all_pts = list(row_coords.items())   # [(name, (x, y)), ...]
-        if len(all_pts) >= 2:
-            xs = [p[1][0] for p in all_pts]
-            ys = [p[1][1] for p in all_pts]
-            x_spread = max(xs) - min(xs)
-            y_spread = max(ys) - min(ys)
-            # Rows are long; the two ends sit at the extremes of the row-length
-            # axis (the LARGER spread). Split the two ends on that axis, then
-            # order each end along the cross-row axis (the SMALLER spread) so
-            # neighbouring row-ends chain along the headland.
-            end_idx   = 0 if x_spread > y_spread else 1   # row-length axis
-            along_idx = 1 - end_idx                        # along-headland axis
-            end_vals = sorted(p[1][end_idx] for p in all_pts)
-            mid = end_vals[len(end_vals) // 2]
-            end_lo = [p for p in all_pts if p[1][end_idx] <  mid]
-            end_hi = [p for p in all_pts if p[1][end_idx] >= mid]
-            for group in (end_lo, end_hi):
-                group.sort(key=lambda p: p[1][along_idx])
-                for (a_name, _), (b_name, _) in zip(group, group[1:]):
-                    _add_headland_edge(a_name, b_name)
+        all_pts = dict(row_coords)   # {name: (x, y)}
+        for a_name, b_name in _headland_neighbour_pairs(all_pts):
+            _add_headland_edge(a_name, b_name)
 
         graph_splice: list = []
         if connect_to:
@@ -1184,6 +1207,7 @@ class NiceGuiNode(Node):
             self.f2c_save_status = 'ERROR: map not loaded'; return
 
         rows: dict = {}
+        coords: dict = {}   # node_name -> (x, y) for same-end classification
         for nm, nd in self.topo_nodes.items():
             meta = nd.get('meta', {}) or {}
             rid = meta.get('row_id')
@@ -1195,6 +1219,10 @@ class NiceGuiNode(Node):
             except (TypeError, ValueError):
                 continue
             rows.setdefault(rid_int, {})[role] = nm
+            # x/y live at the top level of the lightweight node dict
+            x, y = nd.get('x'), nd.get('y')
+            if x is not None and y is not None:
+                coords[nm] = (float(x), float(y))
 
         if not rows:
             self.f2c_save_status = 'ERROR: no row nodes found'
@@ -1208,27 +1236,41 @@ class NiceGuiNode(Node):
 
         wanted_edges: list = []
 
-        for a_rid, b_rid in zip(sorted_rids, sorted_rids[1:]):
-            a_out = rows[a_rid].get('exit')
-            b_in  = rows[b_rid].get('entry')
-            if not (a_out and b_in):
-                continue
-            wanted_edges.append((a_out, b_in))
-            wanted_edges.append((b_in, a_out))
+        # In-row edges: every row's entry -> exit is a row-follow edge. The
+        # repair restores these in case they were lost; it must NOT use
+        # nav_to_pose here or the robot would drive straight through the crop.
+        for rid in sorted_rids:
+            inn = rows[rid].get('entry')
+            outn = rows[rid].get('exit')
+            if inn and outn and inn != outn:
+                wanted_edges.append((inn, outn, _ROW_ACTION))
+                wanted_edges.append((outn, inn, _ROW_ACTION))
+
+        # Headland edges: same-end neighbours only, classified by geometry —
+        # NOT by entry/exit label (snake ordering flips label vs physical end).
+        # Shared with the build path so the two cannot diverge.
+        if len(coords) >= 2:
+            for a_name, b_name in _headland_neighbour_pairs(coords):
+                wanted_edges.append((a_name, b_name, _NAV_ACTION))
+                wanted_edges.append((b_name, a_name, _NAV_ACTION))
+        else:
+            self.get_logger().warn(
+                'repair: row nodes lack x/y coords — cannot classify headland '
+                'ends; skipping headland edges (in-row edges still restored)')
 
         if connect_to:
             first_in = rows[sorted_rids[0]].get('entry')
             last_out = rows[sorted_rids[-1]].get('exit')
             for tgt in (first_in, last_out):
-                if not tgt:
+                if not tgt or tgt == connect_to:
                     continue
-                wanted_edges.append((connect_to, tgt))
-                wanted_edges.append((tgt, connect_to))
+                wanted_edges.append((connect_to, tgt, _NAV_ACTION))
+                wanted_edges.append((tgt, connect_to, _NAV_ACTION))
 
         new_topo_nodes = dict(self.topo_nodes)
         added_count = 0
-        for src, tgt in wanted_edges:
-            if src not in new_topo_nodes:
+        for src, tgt, _action in wanted_edges:
+            if src not in new_topo_nodes or src == tgt:
                 continue
             cur = list(new_topo_nodes[src].get('edges', []))
             if tgt in cur:
@@ -1246,7 +1288,9 @@ class NiceGuiNode(Node):
         self.f2c_save_status = f'repair: adding {added_count} edges…'
 
         def _modify(file_doc):
-            for src, tgt in wanted_edges:
+            for src, tgt, action in wanted_edges:
+                if src == tgt:
+                    continue
                 for entry in file_doc.get('nodes', []):
                     n = entry.get('node', {})
                     if n.get('name') != src:
@@ -1254,7 +1298,7 @@ class NiceGuiNode(Node):
                     if any(e.get('node') == tgt for e in n.get('edges', [])):
                         break
                     n.setdefault('edges', []).append({
-                        'action': _NAV_ACTION,
+                        'action': action,
                         'edge_id': f'{src}_{tgt}', 'node': tgt,
                     })
                     break
