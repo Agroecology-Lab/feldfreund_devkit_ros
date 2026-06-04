@@ -751,6 +751,13 @@ class NiceGuiNode(Node):
                     self.get_logger().warn(f'Node {name} already in file — skipping write')
                     return
 
+                _ts = datetime.now(timezone.utc).strftime('%d-%m-%Y_%H-%M-%S')
+                if 'meta' not in file_doc:
+                    file_doc['meta'] = {}
+                file_doc['meta']['last_updated'] = _ts
+                if 'pointset' not in file_doc:
+                    file_doc['pointset'] = map_name
+
                 file_doc.setdefault('nodes', []).append(
                     _make_node_dict(node_meta_disk, node_properties_disk))
                 if connect_to:
@@ -866,17 +873,18 @@ class NiceGuiNode(Node):
                 else:
                     file_doc = copy.deepcopy(self._topo_doc)
 
-                # Ensure the document-level 'meta' key exists — the schema
-                # requires it and maps written without it (e.g. by older
-                # get_maize_topo.py or hand-edited files) will fail validation.
+                # Ensure the doc has the two top-level fields the tmap schema
+                # requires: meta.last_updated and pointset.
+                # Older map files (and our own archive/clear output) may omit
+                # them, causing switch_topological_map → validate() to reject.
+                _ts = datetime.now(timezone.utc).strftime('%d-%m-%Y_%H-%M-%S')
                 if 'meta' not in file_doc:
-                    file_doc['meta'] = {
-                        'last_updated': datetime.now(timezone.utc).strftime(
-                            '%d-%m-%Y_%H-%M-%S')}
+                    file_doc['meta'] = {}
+                file_doc['meta']['last_updated'] = _ts
+                if 'pointset' not in file_doc:
+                    file_doc['pointset'] = map_name
 
-                # Ensure every entry has the node-level 'meta' field the schema
-                # requires. Nodes from hand-written or older map files may omit
-                # it, causing WriteTopologicalMap to reject the whole doc.
+                # Backfill missing per-node entry meta (hand-written nodes).
                 for _entry in file_doc.get('nodes', []):
                     if 'meta' not in _entry:
                         _nm = _entry.get('node', {}).get('name', '')
@@ -2404,8 +2412,10 @@ class NiceGuiNode(Node):
 
             # Build empty map doc preserving header fields
             empty_doc = {
+                'meta':           {'last_updated': datetime.now(timezone.utc).strftime('%d-%m-%Y_%H-%M-%S')},
                 'name':           map_name,
-                'metric_map':     self._topo_doc.get('metric_map', ''),
+                'metric_map':     self._topo_doc.get('metric_map', map_name),
+                'pointset':       map_name,
                 'transformation': copy.deepcopy(
                     self._topo_doc.get('transformation', {})),
                 'nodes':          [],
