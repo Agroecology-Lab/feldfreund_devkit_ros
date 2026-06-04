@@ -99,7 +99,7 @@ If you'd like to use Gazebo then add a +sim argument to your build instruction
 xhost +local:docker
 ./manage.py 
 ```
-
+*Note if you are using a Mac drop the xhost line, you'll still be able to access GUI tools via a browser.
 
 ## Management & Tools
 
