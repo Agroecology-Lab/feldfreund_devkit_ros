@@ -116,6 +116,7 @@ RUN for i in 1 2 3 4 5; do \
         python3-sympy \
         python3-fonttools \
         python3-ufolib2 \
+        ros-jazzy-web-video-server \
         python3-matplotlib \
         python3-serial python3-requests python3-yaml && \
       break || (echo "Stage 3.2 attempt $i failed, retrying in 15s..." && sleep 15); \
