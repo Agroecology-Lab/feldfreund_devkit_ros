@@ -30,13 +30,13 @@ def _nav2_nodes(params_file, real_condition):
     tf/tf_static are remapped globally via the common remappings list.
     """
     remappings = [('/tf', 'tf'), ('/tf_static', 'tf_static')]
-    common = dict(
-        output='screen',
-        condition=real_condition,
-        parameters=[{'use_sim_time': False}, params_file],
-        arguments=['--ros-args', '--log-level', 'info'],
-        remappings=remappings,
-    )
+    common = {
+        "output": 'screen',
+        "condition": real_condition,
+        "parameters": [{'use_sim_time': False}, params_file],
+        "arguments": ['--ros-args', '--log-level', 'info'],
+        "remappings": remappings,
+    }
 
     return [
         Node(
@@ -131,7 +131,6 @@ def _topo_nav_nodes(tmap2_file, sim_condition, real_condition, devkit_launch_pkg
     fake_nav2_server (sim) or real Nav2 (hardware).
     """
     topo_share = get_package_share_directory('topological_navigation')
-    rviz_cfg = os.path.join(topo_share, 'rviz', 'topological_navigation.rviz')
     map_path = tmap2_file or os.path.join(
         topo_share, 'config', 'mixed_actions_map.yaml')
 
@@ -202,8 +201,6 @@ def _topo_nav_nodes(tmap2_file, sim_condition, real_condition, devkit_launch_pkg
                 parameters=[{'edit_mode': True}],
             ),
         ]),
-
-    
     ]
 
 

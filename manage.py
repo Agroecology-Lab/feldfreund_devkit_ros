@@ -239,11 +239,12 @@ class DevkitManager:
                     self._log("Binding cdc_acm for GPS detection...")
                     self._cdc_acm_bind(ublox_ifaces)
 
-            subprocess.run(['sudo', 'python3', 'fixusb.py'], check=True)
+            subprocess.run(['python3', 'fixusb.py'], check=True)
 
             # Restore ownership of .env to the actual user
             real_user = os.environ.get('SUDO_USER') or os.environ.get('USER') or os.getlogin()
             if env_file.exists():
+                print("Chowning file with sudo...")
                 subprocess.run(['sudo', 'chown', f'{real_user}:', str(env_file)], capture_output=True)
                 self._log(f"Restored {env_file.name} ownership to {real_user}")
 

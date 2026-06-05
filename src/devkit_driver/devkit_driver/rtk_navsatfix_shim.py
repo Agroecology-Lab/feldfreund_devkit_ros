@@ -52,7 +52,7 @@ import rclpy
 from rclpy.node import Node
 from rclpy.qos import QoSProfile, ReliabilityPolicy, DurabilityPolicy
 from sensor_msgs.msg import NavSatFix, NavSatStatus
-from ublox_ubx_msgs.msg import UBXNavPVT
+from ublox_ubx_msgs.msg import UBXNavPVT  # pylint: disable=import-error
 
 # carr_soln values from ZED-F9P interface description §3.15.12
 _CARR_SOLN_NONE  = 0

@@ -29,7 +29,7 @@ import math
 from typing import Optional
 import rclpy
 from rclpy.node import Node
-from ublox_ubx_msgs.msg import UBXNavPVT
+from ublox_ubx_msgs.msg import UBXNavPVT  # pylint: disable=import-error
 from sensor_msgs.msg import Imu
 
 # Below this ground speed (mm/s), CoG heading is too noisy to trust as fresh.

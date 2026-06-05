@@ -1,4 +1,3 @@
-import os
 # SUPERSEDED — this file is no longer used by devkit.launch.py.
 # devkit.launch.py conditionally includes ublox_dgnss/launch/ublox_mb+r_rover.launch.py
 # (single-F9P, no moving base) or ublox_mb+r_base + ublox_mb+r_rover (dual-F9P RTK)
@@ -11,8 +10,6 @@ from launch_ros.descriptions import ComposableNode
 
 
 def generate_launch_description():
-    usb_path = os.getenv('GPS_USB_PATH_ROVER', 'virtual')
-
     return LaunchDescription([
         # ublox_dgnss reads uppercase env vars, not ROS parameters.
         # DEVICE_SERIAL_STRING is intentionally omitted — this F9P has iSerial=0

@@ -1,6 +1,10 @@
 .venv/
 venv/
 *.env
+bin
+lib
+lib64
+share
 
 *.egg-info/
 *.swp

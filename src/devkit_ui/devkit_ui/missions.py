@@ -117,7 +117,7 @@ ACTIONS: dict[str, ActionDef] = {
 
 
 def action_ros_msgs(action_key: str,
-                    action_params: Optional[dict],
+                    action_params: Optional[dict],  # pylint: disable=unused-argument
                     enable: bool) -> list[tuple[str, object]]:
     """Map an action + params to the (topic, value) pairs to publish.
 
@@ -601,7 +601,7 @@ class MissionStore:
         try:
             if not os.path.exists(self._path):
                 return
-            with open(self._path) as fh:
+            with open(self._path, encoding='utf-8') as fh:
                 doc = yaml.safe_load(fh) or {}
             raw_list = doc.get('missions', []) or []
 
@@ -648,7 +648,7 @@ class MissionStore:
             if dirpath:
                 os.makedirs(dirpath, exist_ok=True)
             tmp = self._path + '.tmp'
-            with open(tmp, 'w') as fh:
+            with open(tmp, 'w', encoding='utf-8') as fh:
                 yaml.dump({'missions': snapshot}, fh,
                           default_flow_style=False, sort_keys=False,
                           allow_unicode=True)

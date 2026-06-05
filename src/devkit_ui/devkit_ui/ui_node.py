@@ -1,30 +1,44 @@
-# pylint: disable=duplicate-code
+# pylint: disable=duplicate-code,too-many-lines
 """
 ui_node.py — Sowbot web cockpit on :80
 """
 
 import json
+import math
 import os
 import re
+import subprocess
+import sys
 import threading
+import time
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Optional
 
-import rclpy
 from geometry_msgs.msg import Twist
 from sensor_msgs.msg import NavSatFix, NavSatStatus
 from nav_msgs.msg import Odometry
 from nicegui import app, ui, ui_run
 from nicegui.events import ClickEventArguments
+import rclpy
 from rclpy.executors import ExternalShutdownException
 from rclpy.node import Node
 from rclpy.qos import (
     DurabilityPolicy, Duration, HistoryPolicy,
     LivelinessPolicy, QoSProfile, ReliabilityPolicy,
 )
-from sensor_msgs.msg import BatteryState
+from sensor_msgs.msg import BatteryState, NavSatFix
 from std_msgs.msg import Bool, Empty, String
+# The following imports get generated in the Dockerfile, they aren't available to pylint
+# pylint: disable=import-error
+import fields2cover as f2c
+from shapely.geometry import LineString, MultiLineString, Polygon
+from shapely.ops import unary_union
+from ament_index_python.packages import (
+    get_package_share_directory,
+    PackageNotFoundError,
+)
+# pylint: enable=import-error
 
 # OBSTACLE: obstacle manager + UI attachment helpers
 from devkit_ui.obstacles import (
@@ -225,8 +239,10 @@ def _build_svg(nodes: dict, selected: Optional[str], current: Optional[str]) -> 
     dy = (max(ys) - min(ys)) or 1.0
     x_min, y_min = min(xs), min(ys)
 
-    def tx(x): return _MARGIN + (x - x_min) / dx * (_SVG_W - 2 * _MARGIN)
-    def ty(y): return _SVG_H - _MARGIN - (y - y_min) / dy * (_SVG_H - 2 * _MARGIN)
+    def tx(x):
+        return _MARGIN + (x - x_min) / dx * (_SVG_W - 2 * _MARGIN)
+    def ty(y):
+        return _SVG_H - _MARGIN - (y - y_min) / dy * (_SVG_H - 2 * _MARGIN)
 
     parts: list[str] = [f'<rect width="{_SVG_W}" height="{_SVG_H}" fill="#f6f8fa" rx="4"/>']
 
@@ -251,11 +267,13 @@ def _build_svg(nodes: dict, selected: Optional[str], current: Optional[str]) -> 
         is_sel = name == selected
         is_row = nd.get('meta', {}).get('row_id') is not None
 
+        # pylint: disable=multiple-statements
         if is_cur:   fill, stroke, sw = '#dafbe1', '#1a7f37', 2
         elif is_sel: fill, stroke, sw = '#fff8c5', '#9a6700', 2
         elif is_row: fill, stroke, sw = '#d8e8fd', '#0969da', 1
         elif nd.get('meta', {}).get('dropped_by'): fill, stroke, sw = '#f6f8fa', '#8c959f', 1
         else:        fill, stroke, sw = '#ffffff', '#d0d7de', 1
+        # pylint: enable=multiple-statements
 
         label_col = ('#1a7f37' if is_cur else '#9a6700' if is_sel
                      else '#0969da' if is_row else '#57606a')
@@ -295,7 +313,6 @@ def _build_svg(nodes: dict, selected: Optional[str], current: Optional[str]) -> 
 
 def _f2c_latlon_to_xy(lat: float, lon: float,
                       lat0: float, lon0: float) -> tuple[float, float]:
-    import math
     R = 6_378_137.0
     x = math.radians(lon - lon0) * R * math.cos(math.radians(lat0))
     y = math.radians(lat - lat0) * R
@@ -304,7 +321,6 @@ def _f2c_latlon_to_xy(lat: float, lon: float,
 
 def _f2c_xy_to_latlon(x: float, y: float,
                       lat0: float, lon0: float) -> tuple[float, float]:
-    import math
     R   = 6_378_137.0
     lat = lat0 + math.degrees(y / R)
     lon = lon0 + math.degrees(x / (R * math.cos(math.radians(lat0))))
@@ -346,8 +362,6 @@ def _run_f2c(corners_ll: list,
              obstacle_pad_m: float = 0.0,
              headland_width_m: float = 0.0,
              snake_order: bool = True) -> list:
-    import math, sys
-    import fields2cover as f2c
 
     def _log(msg):
         print(f'[F2C] {msg}', file=sys.stderr, flush=True)
@@ -358,8 +372,6 @@ def _run_f2c(corners_ll: list,
          f'width={tool_width}m, angle={angle_deg}°')
 
     try:
-        from shapely.geometry import LineString, MultiLineString, Polygon
-        from shapely.ops import unary_union
         has_shapely = True
         _log('shapely OK')
     except ImportError as e:
@@ -669,10 +681,10 @@ class NiceGuiNode(Node):
 
     def send_nav_goal(self, target: str) -> None:
         if not _ACTION_OK:
-            self.topo_nav_status = 'action unavailable (import failed)'; return
+            self.topo_nav_status = 'action unavailable (import failed)'
+            return
         self.topo_nav_status = f'connecting → {target}…'
         self.topo_navigating = True
-        import threading
         def _send():
             ready = self._nav_ac.wait_for_server(timeout_sec=5.0)
             if not ready:
@@ -689,7 +701,9 @@ class NiceGuiNode(Node):
     def _nav_accepted(self, future) -> None:
         gh = future.result()
         if not gh.accepted:
-            self.topo_nav_status = 'goal rejected'; self.topo_navigating = False; return
+            self.topo_nav_status = 'goal rejected'
+            self.topo_navigating = False
+            return
         self._nav_goal_handle = gh
         gh.get_result_async().add_done_callback(self._nav_result)
 
@@ -717,15 +731,20 @@ class NiceGuiNode(Node):
                        row_role: Optional[str]) -> None:
         name = re.sub(r'[^A-Z0-9_]', '', name.strip().upper().replace(' ', '_'))
         if not name:
-            self.drop_status = 'ERROR: node name required'; return
+            self.drop_status = 'ERROR: node name required'
+            return
         if not _NAME_RE.match(name):
-            self.drop_status = f'ERROR: invalid name "{name}"'; return
+            self.drop_status = f'ERROR: invalid name "{name}"'
+            return
         if name in self.topo_nodes:
-            self.drop_status = f'ERROR: {name} already exists'; return
+            self.drop_status = f'ERROR: {name} already exists'
+            return
         if self.latest_odom is None:
-            self.drop_status = 'ERROR: no odometry'; return
+            self.drop_status = 'ERROR: no odometry'
+            return
         if not self._topo_doc:
-            self.drop_status = 'ERROR: map not loaded'; return
+            self.drop_status = 'ERROR: map not loaded'
+            return
 
         x = round(self.latest_odom.pose.pose.position.x, 3)
         y = round(self.latest_odom.pose.pose.position.y, 3)
@@ -739,8 +758,10 @@ class NiceGuiNode(Node):
         nav_frame = self._topo_doc.get('transformation', {}).get('topo_frame_id', 'map')
         is_row    = row_id is not None
 
-        if is_row: edge_action, xy_tol, yaw_tol, vert_r = _ROW_ACTION, 0.1, 0.05, 0.5
-        else:      edge_action, xy_tol, yaw_tol, vert_r = _NAV_ACTION, 0.3, 0.1,  1.0
+        if is_row:
+            edge_action, xy_tol, yaw_tol, vert_r = _ROW_ACTION, 0.1, 0.05, 0.5
+        else:
+            edge_action, xy_tol, yaw_tol, vert_r = _NAV_ACTION, 0.3, 0.1,  1.0
 
         gps = self.latest_gps
         gps_meta: dict = {}
@@ -1010,7 +1031,6 @@ class NiceGuiNode(Node):
         if self.latest_gps is None:
             self.f2c_save_status = 'ERROR: no GPS message on /gnss/fix yet'; return
 
-        import math
         _lat = self.latest_gps.latitude
         _lon = self.latest_gps.longitude
         _status = self.latest_gps.status.status
@@ -2558,8 +2578,7 @@ class NiceGuiNode(Node):
             # Republish so topo nav stack sees the cleared map immediately
             try:
                 msg = __import__('std_msgs.msg', fromlist=['String']).String()
-                import json as _json
-                msg.data = _json.dumps(empty_doc, ensure_ascii=False)
+                msg.data = json.dumps(empty_doc, ensure_ascii=False)
                 self._topo_map_pub.publish(msg)
             except Exception:
                 pass
@@ -2648,7 +2667,6 @@ class NiceGuiNode(Node):
                 _explorer_proc: list = [None]
                 _explorer_lbl = ui.label('').classes('text-xs font-mono').style('color:#57606a')
                 def _start_explorer():
-                    import subprocess
                     if _explorer_proc[0] is not None and _explorer_proc[0].poll() is None:
                         _explorer_lbl.set_text('already running')
                         return
@@ -2678,7 +2696,6 @@ class NiceGuiNode(Node):
                     'font-family:\'Courier New\',monospace;">'
                     '📄 Documentation</a>'
                 )
-                _explorer_lbl
 
                 ui.separator().classes('w-full my-1')
 
@@ -2686,7 +2703,6 @@ class NiceGuiNode(Node):
                 _grapher_proc: list = [None]
                 _grapher_lbl = ui.label('').classes('text-xs font-mono').style('color:#57606a')
                 def _start_grapher():
-                    import subprocess
                     if _grapher_proc[0] is not None and _grapher_proc[0].poll() is None:
                         _grapher_lbl.set_text('already running')
                         return
@@ -2718,7 +2734,6 @@ class NiceGuiNode(Node):
                     'font-family:\'Courier New\',monospace;">'
                     '📄 Documentation</a>'
                 )
-                _grapher_lbl
 
                 ui.separator().classes('w-full my-1')
 
@@ -2728,10 +2743,6 @@ class NiceGuiNode(Node):
                 _rviz_lbl = ui.label('').classes('text-xs font-mono').style('color:#57606a')
 
                 def _start_rviz():
-                    import subprocess, time
-                    from ament_index_python.packages import (
-                        get_package_share_directory, PackageNotFoundError,
-                    )
                     if _rviz_proc[0] is not None and _rviz_proc[0].poll() is None:
                         _rviz_lbl.set_text('already running')
                         return
@@ -2747,6 +2758,9 @@ class NiceGuiNode(Node):
                         except PackageNotFoundError:
                             rviz_cfg = None
 
+                        # We don't use `with` for these because we save the process arguments and
+                        # manage them manually.
+                        # pylint: disable=consider-using-with
                         # Spawn Xvfb only if :98 isn't already taken (re-launch safe).
                         if not os.path.exists('/tmp/.X98-lock'):
                             _rviz_daemons.append(subprocess.Popen(
@@ -2777,6 +2791,7 @@ class NiceGuiNode(Node):
                             stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
                             env={**os.environ, 'DISPLAY': ':98'},
                         )
+                        # pylint: enable=consider-using-with
                         suffix = '' if rviz_cfg else ' (no topo config found)'
                         _rviz_lbl.set_text(f'started (pid {_rviz_proc[0].pid}){suffix}')
                         _rviz_lbl.style('color:#1a7f37')
@@ -2808,7 +2823,6 @@ class NiceGuiNode(Node):
                     'font-family:\'Courier New\',monospace;">'
                     '↗ RViz (noVNC)</a>'
                 )
-                _rviz_lbl
                 ui.separator().classes('w-full my-1')
 
                 # ── Gazebo Sim ───────────────────────────────────────────
@@ -2835,17 +2849,20 @@ class NiceGuiNode(Node):
                 ]
 
                 def _start_gazebo_native():
-                    import subprocess
                     if _gazebo_proc[0] is not None and _gazebo_proc[0].poll() is None:
                         _gazebo_lbl.set_text('already running')
                         return
                     try:
                         env = {**_SIM_ENV, 'DISPLAY': os.environ.get('DISPLAY', ':0')}
+                        # We don't use `with` for these because we save the process arguments and
+                        # manage them manually.
+                        # pylint: disable=consider-using-with
                         _gazebo_proc[0] = subprocess.Popen(
                             _SIM_CMD,
                             stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
                             env=env,
                         )
+                        # pylint: enable=consider-using-with
                         _gazebo_lbl.set_text(f'native window — pid {_gazebo_proc[0].pid}')
                         _gazebo_lbl.style('color:#1a7f37')
                     except Exception as exc:
@@ -2853,11 +2870,13 @@ class NiceGuiNode(Node):
                         _gazebo_lbl.style('color:#cf222e')
 
                 def _start_gazebo_browser():
-                    import subprocess, time
                     if _gazebo_proc[0] is not None and _gazebo_proc[0].poll() is None:
                         _gazebo_lbl.set_text('already running')
                         return
                     try:
+                        # We don't use `with` for these because we save the process arguments and
+                        # manage them manually.
+                        # pylint: disable=consider-using-with
                         # Spawn Xvfb on :99 only if not already taken
                         if not os.path.exists('/tmp/.X99-lock'):
                             p = subprocess.Popen(
@@ -2884,6 +2903,7 @@ class NiceGuiNode(Node):
                             stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
                             env=env,
                         )
+                        # pylint: enable=consider-using-with
                         _gazebo_lbl.set_text(f'browser mode — pid {_gazebo_proc[0].pid}')
                         _gazebo_lbl.style('color:#1a7f37')
                     except Exception as exc:
@@ -2970,7 +2990,6 @@ class NiceGuiNode(Node):
                         'font-family:\'Courier New\',monospace;">'
                         '↗ Gazebo (noVNC)</a>'
                     )
-                _gazebo_lbl
 
         with ui.card().classes('w-full mt-3'):
             ui.label('Map Archive').classes('font-semibold mb-2')
@@ -3003,17 +3022,19 @@ class NiceGuiNode(Node):
 
             ui.button('Archive & Clear Map', on_click=_do_archive).props(
                 'color=negative outline no-caps').classes('px-4')
-            archive_lbl
 
     def toggle_estop(self) -> None:
         self.soft_estop_active = not self.soft_estop_active
-        msg = Bool(); msg.data = self.soft_estop_active
+        msg = Bool()
+        msg.data = self.soft_estop_active
         self.estop_publisher.publish(msg)
 
     def send_speed(self, x: float, y: float) -> None:
         msg = Twist()
-        msg.linear.x = x; msg.angular.z = -y
-        self.linear_velocity = x; self.angular_velocity = y
+        msg.linear.x = x
+        msg.angular.z = -y
+        self.linear_velocity = x
+        self.angular_velocity = y
         self.cmd_vel_publisher.publish(msg)
 
     def store_gps(self, msg: NavSatFix) -> None:
@@ -3042,12 +3063,14 @@ class NiceGuiNode(Node):
         msg.altitude = self._FAKE_GPS_ALT
         self._fake_gps_pub.publish(msg)
 
+    # pylint: disable=multiple-statements
     def store_battery(self, msg: BatteryState) -> None:      self.latest_battery = msg
     def update_bumper_front_top(self, msg: Bool) -> None:    self.bumper_front_top_active = msg.data
     def update_bumper_front_bottom(self, msg: Bool) -> None: self.bumper_front_bottom_active = msg.data
     def update_bumper_back(self, msg: Bool) -> None:         self.bumper_back_active = msg.data
     def update_estop_front(self, msg: Bool) -> None:         self.estop_front_active = msg.data
     def update_estop_back(self, msg: Bool) -> None:          self.estop_back_active = msg.data
+    # pylint: enable=multiple-statements
 
 
 # ── entrypoints ───────────────────────────────────────────────────────────────

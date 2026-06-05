@@ -18,7 +18,7 @@ ROS convention: ENU yaw.  NED → ENU: yaw_ENU = π/2 - heading_NED_rad
 import math
 import rclpy
 from rclpy.node import Node
-from ublox_ubx_msgs.msg import UBXNavRelPosNED
+from ublox_ubx_msgs.msg import UBXNavRelPosNED  # pylint: disable=import-error
 from sensor_msgs.msg import Imu
 
 # Minimum antenna separation in metres — below this the heading geometry is unreliable
