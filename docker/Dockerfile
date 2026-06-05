@@ -234,6 +234,12 @@ RUN for i in 1 2 3 4 5; do \
 RUN sed -i 's/default_value="Test Rover"/default_value=""/' \
       src/ublox_dgnss/ublox_dgnss/launch/ublox_mb+r_rover.launch.py
 
+# vision_opencv = cv_bridge + image_geometry, rebuilt from source in Stage 10
+# against NumPy 2. This is the package that fixes the crop_row_node ABI crash.
+# Upstream has NO `jazzy` branch (default is `rolling`); the Jazzy release is
+# tag 4.1.0 (matches the 4.1.0-1noble apt cv_bridge we remove). Pin the tag and
+# hard-fail if the clone doesn't land, so a failed fetch can never silently
+# drop the package again.
 RUN for i in 1 2 3 4 5; do \
       GIT_TERMINAL_PROMPT=0 git clone --depth 1 -b 4.1.0 \
         https://github.com/ros-perception/vision_opencv.git src/vision_opencv && break || \
@@ -385,17 +391,27 @@ RUN apt-get update && \
         usbutils libusb-1.0-0-dev && \
       break || (echo "Stage 10 apt attempt $i failed, retrying in 15s..." && sleep 15); \
     done && \
-    apt-get remove -y ros-jazzy-cv-bridge ros-jazzy-image-geometry 2>/dev/null || true && \
+    # Remove only the cv_bridge/image_geometry FILES (numpy-1.x .so + python),
+    # NOT the apt packages — `apt-get remove ros-jazzy-cv-bridge` cascades into
+    # usb_cam, navigation2, nav2-bringup and the image-transport plugins, which
+    # then never come back. The source build in /workspace/install overlays the
+    # base on AMENT_PREFIX_PATH anyway; we just delete the stale numpy-1.x .so
+    # and python module from the base prefix so they can't be imported first.
+    rm -rf /opt/ros/jazzy/lib/python3.12/site-packages/cv_bridge \
+           /opt/ros/jazzy/lib/python3.12/site-packages/image_geometry \
+           /opt/ros/jazzy/lib/python3.12/site-packages/cv_bridge-*.dist-info \
+           /opt/ros/jazzy/lib/libcv_bridge.so \
+           /opt/ros/jazzy/lib/libimage_geometry.so 2>/dev/null || true && \
     pip install --break-system-packages --no-cache-dir transforms3d && \
     . /opt/ros/jazzy/setup.sh && \
     colcon build --symlink-install \
       --cmake-args -DCMAKE_BUILD_TYPE=Release && \
     apt-get clean && rm -rf /var/lib/apt/lists/*
 
+# Smoke-test: cv_bridge must import cleanly under numpy 2 (the crop_row_node fix)
 RUN . /opt/ros/jazzy/setup.sh && \
     . /workspace/install/setup.sh && \
-    (python3 -c "import numpy; from cv_bridge import CvBridge; CvBridge(); print('cv_bridge OK on numpy', numpy.__version__)" \
-     || echo "WARN: cv_bridge import failed — inspect /workspace/install after build")
+    python3 -c "import numpy; from cv_bridge import CvBridge; CvBridge(); print('cv_bridge OK on numpy', numpy.__version__)"
 
 ARG INSTALL_SIM=false
 RUN if [ "$INSTALL_SIM" = "true" ]; then \
@@ -403,6 +419,9 @@ RUN if [ "$INSTALL_SIM" = "true" ]; then \
         gz-harmonic ros-jazzy-ros-gz-sim && \
       rm -rf /var/lib/apt/lists/*; \
     fi
+# NOTE: both hardware/neo and sim images now run NumPy 2.x. gz-harmonic also
+# requires numpy>=2, so the previous per-image numpy split is gone — the only
+# difference INSTALL_SIM makes is adding gz-harmonic + ros-gz-sim.
 
 # ============================================================
 # Stage 11: Runtime Environment
