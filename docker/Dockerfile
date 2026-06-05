@@ -319,6 +319,7 @@ RUN apt-get update && \
           opencv-python-headless \
           PyQt5 PyQtWebEngine \
           ros-jazzy-cv-bridge \
+          ros-jazzy-rqt-image-view \
           cv_bridge \
           image_geometry \
           ros-jazzy-compressed-image-transport \
