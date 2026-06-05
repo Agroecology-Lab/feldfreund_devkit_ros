@@ -23,6 +23,12 @@ ENV LANG=en_US.UTF-8
 ENV LC_ALL=en_US.UTF-8
 ENV DEBIAN_FRONTEND=noninteractive
 
+# Lock numpy <2 image-wide. cv_bridge on Jazzy is built against NumPy 1.x;
+# any pip install pulling 2.x causes the C-extension ABI crash at runtime.
+# PIP_CONSTRAINT is honored by every pip invocation below.
+RUN echo "numpy<2" > /etc/pip-constraint.txt
+ENV PIP_CONSTRAINT=/etc/pip-constraint.txt
+
 # ============================================================
 # Stage 2: Third-party APT Repositories
 # ============================================================
@@ -67,7 +73,6 @@ RUN apt-get update && \
       nano \
       htop \
       libxcb-shape0 \
-      ros-jazzy-rqt-image-view \
       libgles2 \
     || (apt-get update && apt-get install -y --no-install-recommends \
       wget ca-certificates unzip git python3-pip python3-rosdep \
@@ -162,11 +167,15 @@ RUN GIT_TERMINAL_PROMPT=0 git clone --depth 1 \
 # ============================================================
 
 # 5.1 Project requirements.txt + headless OpenCV
+#     opencv pinned to a wheel-only release (cp37-abi3 manylinux) so the
+#     resolver never backtracks to the 4.5.4.60 sdist, which build-depends
+#     on numpy==1.21.2 (unavailable on py3.12). 4.12.0.88 matches the
+#     opencv-contrib-python pin rosys carries, so resolution is instant.
 COPY requirements.txt /tmp/requirements.txt
 RUN --mount=type=cache,target=/root/.cache/pip \
     pip install --break-system-packages --ignore-installed \
       --retries 10 --timeout 1000 \
-      opencv-python-headless \
+      "opencv-python-headless==4.12.0.88" \
       -r /tmp/requirements.txt
 
 # 5.2 CPU-only PyTorch + YOLOX
@@ -237,7 +246,7 @@ RUN for i in 1 2 3 4 5; do \
         https://github.com/manankharwar/fusioncore src/fusioncore && break || \
       (echo "fusioncore attempt $i failed, retrying in 15s..." && sleep 15); \
     done
-    
+
 RUN for i in 1 2 3 4 5; do \
       GIT_TERMINAL_PROMPT=0 git clone --depth 1 -b ros2-gz \
         https://github.com/FieldRobotEvent/virtual_maize_field src/virtual_maize_field && break || \
@@ -259,18 +268,18 @@ RUN for i in 1 2 3 4 5; do \
         https://github.com/LCAS/sentor src/sentor && break || \
       (echo "sentor attempt $i failed, retrying in 15s..." && sleep 15); \
     done
-    
+
 RUN for i in 1 2 3 4 5; do \
       GIT_TERMINAL_PROMPT=0 git clone --depth 1 -b main \
         https://github.com/nilseuropa/ros2graph_explorer src/ros2graph_explorer && break || \
       (echo "ros2graph_explorer attempt $i failed, retrying in 15s..." && sleep 15); \
     done
-    
-    
+
+
 RUN for i in 1 2 3 4 5; do \
       GIT_TERMINAL_PROMPT=0 git clone --depth 1 -b main \
         https://github.com/Supull/ros2grapher.git src/ros2grapher && break || \
-      (echo "ros2graph_explorer attempt $i failed, retrying in 15s..." && sleep 15); \
+      (echo "ros2grapher attempt $i failed, retrying in 15s..." && sleep 15); \
     done
 
 
@@ -331,7 +340,7 @@ RUN apt-get update && \
     done && \
     rm -rf /var/lib/apt/lists/*
 
-ARG CACHEBUST=1  ## Move this line earlier in the file if you want to start the build process earlier       
+ARG CACHEBUST=1  ## Move this line earlier in the file if you want to start the build process earlier
 
 # ============================================================
 # Stage 10: colcon Build
@@ -341,9 +350,9 @@ RUN apt-get update && \
     for i in 1 2 3 4 5; do \
       apt-get install -y --no-install-recommends \
         xvfb \
-   	x11vnc \
+        x11vnc \
         websockify \
-        novnc \ 
+        novnc \
         ros-jazzy-rmw-cyclonedds-cpp \
         ros-jazzy-rtcm-msgs \
         ros-jazzy-nmea-msgs \
@@ -367,8 +376,14 @@ ARG INSTALL_SIM=false
 RUN if [ "$INSTALL_SIM" = "true" ]; then \
       apt-get update && apt-get install -y \
         gz-harmonic ros-jazzy-ros-gz-sim && \
-      rm -rf /var/lib/apt/lists/*; \
+      rm -rf /var/lib/apt/lists/* && \
+      PIP_CONSTRAINT= pip install --break-system-packages --no-cache-dir "numpy>=2.0.0"; \
     fi
+# NOTE: hardware/neo image keeps numpy<2.0.0 (enforced by PIP_CONSTRAINT set in
+# Stage 1) so cv_bridge (compiled against NumPy 1.x) works for crop_row_node.
+# Sim image clears the constraint here (PIP_CONSTRAINT= prefix) and upgrades to
+# numpy>=2, which gz-harmonic requires. The two are never used in the same
+# running container.
 
 # ============================================================
 # Stage 11: Runtime Environment
