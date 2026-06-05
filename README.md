@@ -113,12 +113,17 @@ The primary entry point for the system. While it runs the full stack by default,
 | `./manage.py full-build` | `full-build` | Runs `run_build(full=True)`. Cleans system & Re-installs all system dependencies. |
 | `./manage.py neo` | `neo` | Runs `neo`. Runs only the line following code for the second 'neo'(cortex) perception SBC. |
 
-
 ### Interactive Shell
 To enter the running container for debugging or manual ROS 2 commands:
 ```bash
 ./login.sh
 ```
+
+### Neo (Perception SBC)
+```bash
+ros2 run rqt_image_view rqt_image_view /devkit/camera/image_raw
+```
+
 
 ### Diagnostics
 If hardware is connected but topics are not flowing, run the diagnostic tool from inside the container:
