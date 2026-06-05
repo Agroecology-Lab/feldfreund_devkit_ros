@@ -1725,7 +1725,7 @@ class NiceGuiNode(Node):
                 ui.html('<div class="sec-label mb-2">Field boundary — click to draw</div>')
                 gps_center = (
                     (self.latest_gps.latitude, self.latest_gps.longitude)
-                    if self.latest_gps else (51.5395, -2.4435)
+                    if self.latest_gps else (9.045094, 77.792024)
                 )
                 mission_map = ui.leaflet(center=gps_center, zoom=18).classes('w-full h-96')
                 mission_map.tile_layer(
@@ -2577,7 +2577,7 @@ class NiceGuiNode(Node):
                 ui.button('Configure', on_click=lambda: self.esp_configure_publisher.publish(Empty())).props('outline no-caps').classes('px-4')
         with ui.card().classes('w-full mt-3'):
             ui.label('GPS').classes('font-semibold mb-2')
-            leaflet = ui.leaflet(center=(51.5395, -2.4435), zoom=18).classes('w-full h-80')
+            leaflet = ui.leaflet(center=(9.045094, 77.792024), zoom=18).classes('w-full h-80')
             marker  = leaflet.marker(latlng=leaflet.center)
             gps_status_lbl = ui.label('—').classes('text-xs font-mono mt-1').style('color:#57606a')
             _FIX_LABELS = {-1: 'NO FIX', 0: 'AUTONOMOUS', 1: 'SBAS',
