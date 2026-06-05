@@ -23,11 +23,13 @@ ENV LANG=en_US.UTF-8
 ENV LC_ALL=en_US.UTF-8
 ENV DEBIAN_FRONTEND=noninteractive
 
-# Lock numpy <2 image-wide. cv_bridge on Jazzy is built against NumPy 1.x;
-# any pip install pulling 2.x causes the C-extension ABI crash at runtime.
-# PIP_CONSTRAINT is honored by every pip invocation below.
-
-
+# NOTE: This image runs on NumPy 2.x image-wide.
+# rosys (via nicegui) requires numpy>=1.26 with no upper bound, and
+# opencv-python-headless>=4.12 hard-requires numpy>=2,<2.3 — so numpy<2 is
+# not an option once rosys is present. The cost is that the apt-prebuilt
+# cv_bridge is compiled against NumPy 1.x and would crash under NumPy 2;
+# we therefore rebuild cv_bridge (vision_opencv) from source in Stage 10,
+# after numpy 2 is installed, and remove the apt build so it can't shadow it.
 
 # ============================================================
 # Stage 2: Third-party APT Repositories
@@ -84,6 +86,8 @@ RUN apt-get update && \
 # 3.2 ROS Jazzy binaries (with retries)
 #     NOTE: ros-jazzy-fields2cover intentionally excluded here —
 #     we build from source with BUILD_PYTHON=ON in Stage 3.5 instead.
+#     NOTE: ros-jazzy-cv-bridge intentionally NOT installed here —
+#     it is built from source in Stage 10 against NumPy 2.
 RUN for i in 1 2 3 4 5; do \
       apt-get update && \
       apt-get install -y --fix-missing --no-install-recommends \
@@ -167,13 +171,17 @@ RUN GIT_TERMINAL_PROMPT=0 git clone --depth 1 \
 # ============================================================
 
 # 5.1 Project requirements.txt + headless OpenCV
-    
+#     opencv-python-headless 4.12.0.88 ships as a cp37-abi3 manylinux wheel
+#     (no sdist build) and requires numpy>=2,<2.3 — fine now the image is on
+#     numpy 2. Matches the opencv-contrib-python pin rosys carries.
+#     IMPORTANT: requirements.txt must NOT pin numpy<2 anymore. If it still
+#     contains `numpy<2.0.0`, change it to `numpy>=2,<2.3` or remove the line.
 COPY requirements.txt /tmp/requirements.txt
 RUN --mount=type=cache,target=/root/.cache/pip \
     pip install --break-system-packages --ignore-installed \
       --retries 10 --timeout 1000 \
       "opencv-python-headless==4.12.0.88" \
-      -r /tmp/requirements.txt      
+      -r /tmp/requirements.txt
 
 # 5.2 CPU-only PyTorch + YOLOX
 RUN pip install --break-system-packages --no-cache-dir \
@@ -226,12 +234,13 @@ RUN for i in 1 2 3 4 5; do \
 RUN sed -i 's/default_value="Test Rover"/default_value=""/' \
       src/ublox_dgnss/ublox_dgnss/launch/ublox_mb+r_rover.launch.py
 
+# vision_opencv = cv_bridge + image_geometry, rebuilt from source in Stage 10
+# against NumPy 2. This is the package that fixes the crop_row_node ABI crash.
 RUN for i in 1 2 3 4 5; do \
       GIT_TERMINAL_PROMPT=0 git clone --depth 1 -b jazzy \
         https://github.com/ros-perception/vision_opencv.git src/vision_opencv && break || \
       (echo "vision_opencv attempt $i failed, retrying in 15s..." && sleep 15); \
     done
-
 
 RUN for i in 1 2 3 4 5; do \
       GIT_TERMINAL_PROMPT=0 git clone --depth 1 -b aoc_refactor \
@@ -303,6 +312,9 @@ RUN apt-get update && \
           libopencv-dev \
           opencv-python-headless \
           PyQt5 PyQtWebEngine \
+          ros-jazzy-cv-bridge \
+          cv_bridge \
+          image_geometry \
           ros-jazzy-compressed-image-transport \
           ros-jazzy-compressed-depth-image-transport \
           ros-jazzy-theora-image-transport \
@@ -348,16 +360,10 @@ ARG CACHEBUST=1  ## Move this line earlier in the file if you want to start the 
 # ============================================================
 # Stage 10: colcon Build
 # ============================================================
-
-RUN apt-get remove -y ros-jazzy-cv-bridge || true && \
-    . /opt/ros/jazzy/setup.sh && \
-    colcon build --symlink-install \
-      --cmake-args -DCMAKE_BUILD_TYPE=Release && \
-
-
-
-
-
+# cv_bridge / image_geometry come from src/vision_opencv and are built here,
+# AFTER numpy 2 is in place, so the boost extension links against numpy 2's
+# headers. Any apt-prebuilt cv_bridge is removed first so its numpy-1.x .so
+# cannot shadow the source build on the ament prefix.
 RUN apt-get update && \
     apt-get install -f -y && \
     for i in 1 2 3 4 5; do \
@@ -379,24 +385,27 @@ RUN apt-get update && \
         usbutils libusb-1.0-0-dev && \
       break || (echo "Stage 10 apt attempt $i failed, retrying in 15s..." && sleep 15); \
     done && \
+    apt-get remove -y ros-jazzy-cv-bridge ros-jazzy-image-geometry 2>/dev/null || true && \
     pip install --break-system-packages --no-cache-dir transforms3d && \
     . /opt/ros/jazzy/setup.sh && \
     colcon build --symlink-install \
       --cmake-args -DCMAKE_BUILD_TYPE=Release && \
     apt-get clean && rm -rf /var/lib/apt/lists/*
 
+# Smoke-test: cv_bridge must import cleanly under numpy 2 (the crop_row_node fix)
+RUN . /opt/ros/jazzy/setup.sh && \
+    . /workspace/install/setup.sh && \
+    python3 -c "import numpy; from cv_bridge import CvBridge; CvBridge(); print('cv_bridge OK on numpy', numpy.__version__)"
+
 ARG INSTALL_SIM=false
 RUN if [ "$INSTALL_SIM" = "true" ]; then \
       apt-get update && apt-get install -y \
         gz-harmonic ros-jazzy-ros-gz-sim && \
-      rm -rf /var/lib/apt/lists/* && \
-      PIP_CONSTRAINT= pip install --break-system-packages --no-cache-dir "numpy>=2.0.0"; \
+      rm -rf /var/lib/apt/lists/*; \
     fi
-# NOTE: hardware/neo image keeps numpy<2.0.0 (enforced by PIP_CONSTRAINT set in
-# Stage 1) so cv_bridge (compiled against NumPy 1.x) works for crop_row_node.
-# Sim image clears the constraint here (PIP_CONSTRAINT= prefix) and upgrades to
-# numpy>=2, which gz-harmonic requires. The two are never used in the same
-# running container.
+# NOTE: both hardware/neo and sim images now run NumPy 2.x. gz-harmonic also
+# requires numpy>=2, so the previous per-image numpy split is gone — the only
+# difference INSTALL_SIM makes is adding gz-harmonic + ros-gz-sim.
 
 # ============================================================
 # Stage 11: Runtime Environment
