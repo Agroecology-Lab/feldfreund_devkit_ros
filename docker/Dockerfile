@@ -26,8 +26,8 @@ ENV DEBIAN_FRONTEND=noninteractive
 # Lock numpy <2 image-wide. cv_bridge on Jazzy is built against NumPy 1.x;
 # any pip install pulling 2.x causes the C-extension ABI crash at runtime.
 # PIP_CONSTRAINT is honored by every pip invocation below.
-RUN echo "numpy<2" > /etc/pip-constraint.txt
-ENV PIP_CONSTRAINT=/etc/pip-constraint.txt
+
+
 
 # ============================================================
 # Stage 2: Third-party APT Repositories
@@ -167,16 +167,13 @@ RUN GIT_TERMINAL_PROMPT=0 git clone --depth 1 \
 # ============================================================
 
 # 5.1 Project requirements.txt + headless OpenCV
-#     opencv pinned to a wheel-only release (cp37-abi3 manylinux) so the
-#     resolver never backtracks to the 4.5.4.60 sdist, which build-depends
-#     on numpy==1.21.2 (unavailable on py3.12). 4.12.0.88 matches the
-#     opencv-contrib-python pin rosys carries, so resolution is instant.
+    
 COPY requirements.txt /tmp/requirements.txt
 RUN --mount=type=cache,target=/root/.cache/pip \
     pip install --break-system-packages --ignore-installed \
       --retries 10 --timeout 1000 \
       "opencv-python-headless==4.12.0.88" \
-      -r /tmp/requirements.txt
+      -r /tmp/requirements.txt      
 
 # 5.2 CPU-only PyTorch + YOLOX
 RUN pip install --break-system-packages --no-cache-dir \
@@ -228,6 +225,13 @@ RUN for i in 1 2 3 4 5; do \
 
 RUN sed -i 's/default_value="Test Rover"/default_value=""/' \
       src/ublox_dgnss/ublox_dgnss/launch/ublox_mb+r_rover.launch.py
+
+RUN for i in 1 2 3 4 5; do \
+      GIT_TERMINAL_PROMPT=0 git clone --depth 1 -b jazzy \
+        https://github.com/ros-perception/vision_opencv.git src/vision_opencv && break || \
+      (echo "vision_opencv attempt $i failed, retrying in 15s..." && sleep 15); \
+    done
+
 
 RUN for i in 1 2 3 4 5; do \
       GIT_TERMINAL_PROMPT=0 git clone --depth 1 -b aoc_refactor \
@@ -299,7 +303,6 @@ RUN apt-get update && \
           libopencv-dev \
           opencv-python-headless \
           PyQt5 PyQtWebEngine \
-          ros-jazzy-cv-bridge \
           ros-jazzy-compressed-image-transport \
           ros-jazzy-compressed-depth-image-transport \
           ros-jazzy-theora-image-transport \
@@ -345,6 +348,16 @@ ARG CACHEBUST=1  ## Move this line earlier in the file if you want to start the 
 # ============================================================
 # Stage 10: colcon Build
 # ============================================================
+
+RUN apt-get remove -y ros-jazzy-cv-bridge || true && \
+    . /opt/ros/jazzy/setup.sh && \
+    colcon build --symlink-install \
+      --cmake-args -DCMAKE_BUILD_TYPE=Release && \
+
+
+
+
+
 RUN apt-get update && \
     apt-get install -f -y && \
     for i in 1 2 3 4 5; do \
