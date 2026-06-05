@@ -67,6 +67,7 @@ RUN apt-get update && \
       nano \
       htop \
       libxcb-shape0 \
+      ros-jazzy-rqt-image-view \
       libgles2 \
     || (apt-get update && apt-get install -y --no-install-recommends \
       wget ca-certificates unzip git python3-pip python3-rosdep \
