@@ -1,0 +1,230 @@
+# sowbot_monitor.yaml
+# ===================
+# LCAS Sentor monitoring config for Sowbot.
+#
+# Heartbeat semantics (verified against this fork's sentor_node.py):
+#   /safety/heartbeat   true while no SAFETY-critical monitor is tripped.
+#                       A monitor counts as safety-critical if its signal_when
+#                       OR any of its signal_lambdas has safety_critical: true,
+#                       or (node monitors) safety_critical: true.
+#   /warning/heartbeat  same, driven by autonomy_critical: true.
+#
+# rate semantics (TopicMonitor): `rate` is a MINIMUM expected Hz. Liveliness is
+#   alive only while measured Hz >= rate AND no critical lambda is tripped.
+#   N is the hz-window throttle. Set `rate` BELOW nominal publish rate to leave
+#   headroom, or a transient dip will flap the heartbeat.
+#
+# Topic reference (from devkit_driver + caatingarobotics crop_row_node):
+#   /estop/front /estop/back              std_msgs/Bool  SAFETY_QOS reliable/transient_local
+#   /bumper/front_top /front_bottom /back std_msgs/Bool  SAFETY_QOS
+#   /battery_state                        sensor_msgs/BatteryState
+#   /odom                                 nav_msgs/Odometry
+#   /devkit/camera/image_raw              sensor_msgs/Image
+#   /aoc/heartbeat/neo_vision             std_msgs/Bool  (crop_row_node, 5 Hz,
+#                                         publishes data:false when rows lost — verified)
+
+monitors:
+
+  # ── SAFETY-CRITICAL ────────────────────────────────────────────────────
+  # estop/bumper publish at ~1 Hz keep-alive. `rate: 0.5` = warn if silent.
+  # The data==True lambda is the trip; flips /safety/heartbeat false.
+
+  - name: "/estop/front"
+    message_type: "std_msgs/msg/Bool"
+    rate: 0.5
+    N: 1
+    qos: { reliability: "reliable", durability: "transient_local", depth: 1 }
+    signal_when:
+      condition: "published"
+      timeout: 5.0
+      safety_critical: true
+      autonomy_critical: true
+    signal_lambdas:
+      - expression: "lambda x: x.data == True"
+        timeout: 0.1
+        safety_critical: true
+        autonomy_critical: true
+        tags: ["estop_active"]
+    execute: []
+    timeout: 5.0
+    default_notifications: true
+
+  - name: "/estop/back"
+    message_type: "std_msgs/msg/Bool"
+    rate: 0.5
+    N: 1
+    qos: { reliability: "reliable", durability: "transient_local", depth: 1 }
+    signal_when:
+      condition: "published"
+      timeout: 5.0
+      safety_critical: true
+      autonomy_critical: true
+    signal_lambdas:
+      - expression: "lambda x: x.data == True"
+        timeout: 0.1
+        safety_critical: true
+        autonomy_critical: true
+        tags: ["estop_active"]
+    execute: []
+    timeout: 5.0
+    default_notifications: true
+
+  - name: "/bumper/front_top"
+    message_type: "std_msgs/msg/Bool"
+    rate: 0.5
+    N: 1
+    qos: { reliability: "reliable", durability: "transient_local", depth: 1 }
+    signal_when:
+      condition: "published"
+      timeout: 5.0
+      safety_critical: true
+      autonomy_critical: true
+    signal_lambdas:
+      - expression: "lambda x: x.data == True"
+        timeout: 0.1
+        safety_critical: true
+        autonomy_critical: true
+        tags: ["collision"]
+    execute: []
+    timeout: 5.0
+    default_notifications: true
+
+  - name: "/bumper/front_bottom"
+    message_type: "std_msgs/msg/Bool"
+    rate: 0.5
+    N: 1
+    qos: { reliability: "reliable", durability: "transient_local", depth: 1 }
+    signal_when:
+      condition: "published"
+      timeout: 5.0
+      safety_critical: true
+      autonomy_critical: true
+    signal_lambdas:
+      - expression: "lambda x: x.data == True"
+        timeout: 0.1
+        safety_critical: true
+        autonomy_critical: true
+        tags: ["collision"]
+    execute: []
+    timeout: 5.0
+    default_notifications: true
+
+  - name: "/bumper/back"
+    message_type: "std_msgs/msg/Bool"
+    rate: 0.5
+    N: 1
+    qos: { reliability: "reliable", durability: "transient_local", depth: 1 }
+    signal_when:
+      condition: "published"
+      timeout: 5.0
+      safety_critical: true
+      autonomy_critical: true
+    signal_lambdas:
+      - expression: "lambda x: x.data == True"
+        timeout: 0.1
+        safety_critical: true
+        autonomy_critical: true
+        tags: ["collision"]
+    execute: []
+    timeout: 5.0
+    default_notifications: true
+
+  # ── AUTONOMY-CRITICAL ─────────────────────────────────────────────────
+
+  - name: "/devkit/camera/image_raw"
+    message_type: "sensor_msgs/msg/Image"
+    rate: 6                       # nominal ~8 Hz; 6 leaves headroom (ticket said warn <8)
+    N: 5
+    signal_when:
+      condition: "published"
+      timeout: 2.0
+      safety_critical: false
+      autonomy_critical: true
+    signal_lambdas:
+      - expression: "lambda x: x.width == 0 or x.height == 0"
+        timeout: 2.0
+        safety_critical: false
+        autonomy_critical: true
+        tags: ["camera_resolution"]
+    execute: []
+    timeout: 2.0
+    default_notifications: false
+
+  - name: "/odom"
+    message_type: "nav_msgs/msg/Odometry"
+    rate: 15                      # nominal ~20 Hz
+    N: 10
+    signal_when:
+      condition: "published"
+      timeout: 2.0
+      safety_critical: false
+      autonomy_critical: true
+    execute: []
+    timeout: 2.0
+    default_notifications: false
+
+  - name: "/battery_state"
+    message_type: "sensor_msgs/msg/BatteryState"
+    rate: 0.2
+    N: 1
+    signal_when:
+      condition: "published"
+      timeout: 30.0
+      safety_critical: false
+      autonomy_critical: false
+    signal_lambdas:
+      - expression: "lambda x: x.percentage < 0.10"
+        timeout: 5.0
+        safety_critical: false
+        autonomy_critical: true
+        tags: ["battery_low"]
+      - expression: "lambda x: x.voltage < 44.0"   # TODO: CONFIRM Sowbot BMS cutoff
+        timeout: 5.0
+        safety_critical: true
+        autonomy_critical: true
+        tags: ["battery_critical"]
+    execute: []
+    timeout: 30.0
+    default_notifications: false
+
+  - name: "/aoc/heartbeat/neo_vision"
+    message_type: "std_msgs/msg/Bool"
+    rate: 3                       # publisher runs 5 Hz (verified); 3 leaves headroom
+    N: 5
+    signal_when:
+      condition: "published"
+      timeout: 2.0
+      safety_critical: false
+      autonomy_critical: true
+    signal_lambdas:
+      - expression: "lambda x: x.data == False"   # crop_row_node publishes false on row loss
+        timeout: 2.0
+        safety_critical: false
+        autonomy_critical: true
+        tags: ["perception_degraded"]
+    execute: []
+    timeout: 2.0
+    default_notifications: false
+
+# ── NODE MONITORS ────────────────────────────────────────────────────────
+# NOTE: NodeMonitor matches `name` verbatim against get_node_names() — no
+# leading slash, no namespace. Confirm each against `ros2 node list` output.
+
+node_monitors:
+  - name: "devkit_driver"
+    timeout: 5.0
+    poll_rate: 1.0
+    safety_critical: true
+    autonomy_critical: true
+
+  - name: "usb_cam"
+    timeout: 5.0
+    poll_rate: 1.0
+    safety_critical: false
+    autonomy_critical: true
+
+  - name: "crop_row_node"
+    timeout: 5.0
+    poll_rate: 1.0
+    safety_critical: false
+    autonomy_critical: true
