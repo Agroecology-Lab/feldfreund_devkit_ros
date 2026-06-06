@@ -376,6 +376,7 @@ RUN apt-get update && \
     apt-get install -f -y && \
     for i in 1 2 3 4 5; do \
       apt-get install -y --no-install-recommends \
+        ros-jazzy-web-video-server \
         xvfb \
         x11vnc \
         websockify \
