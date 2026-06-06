@@ -113,6 +113,8 @@ The primary entry point for the system. While it runs the full stack by default,
 | `./manage.py full-build` | `full-build` | Runs `run_build(full=True)`. Cleans system & Re-installs all system dependencies. |
 | `./manage.py neo` | `neo` | Runs `neo`. Runs only the line following code for the second 'neo'(cortex) perception SBC. |
 
+*Note `--net=host` in `manage.py`'s `_base_docker_cmd` doesn't bridge to the host on macOS Docker Desktop (Docker runs inside a Linux VM there), making `localhost` unreachable. Fix this by replacing the `--net=host` parameter with explicit port mappings `-p 80:80 -p 8080:8080 -p 8765:8765` in `_base_docker_cmd` in `manage.py`.
+
 ### Interactive Shell
 To enter the running container for debugging or manual ROS 2 commands:
 ```bash
