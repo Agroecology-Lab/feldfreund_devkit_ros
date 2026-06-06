@@ -111,7 +111,10 @@ The primary entry point for the system. While it runs the full stack by default,
 | `./manage.py` | (No arguments) | Runs `run_runtime()` immediately using live volumes. |
 | `./manage.py build` | `build` | Runs `run_build(full=False)`. Re-compiles ROS code. |
 | `./manage.py full-build` | `full-build` | Runs `run_build(full=True)`. Cleans system & Re-installs all system dependencies. |
-| `./manage.py neo` | `neo` | Runs `neo`. Runs only the line following code for the second 'neo'(cortex) perception SBC. |
+| `./manage.py neo` | `neo` | Runs `neo`. Runs only the line following code for the second 'neo'(cortex) perception SBC. Then check 
+```bash
+http://localhost:8080
+``` |
 
 *Note `--net=host` in `manage.py`'s `_base_docker_cmd` doesn't bridge to the host on macOS Docker Desktop (Docker runs inside a Linux VM there), making `localhost` unreachable. Fix this by replacing the `--net=host` parameter with explicit port mappings `-p 80:80 -p 8080:8080 -p 8765:8765` in `_base_docker_cmd` in `manage.py`.
 
@@ -120,12 +123,6 @@ To enter the running container for debugging or manual ROS 2 commands:
 ```bash
 ./login.sh
 ```
-
-### Neo (Perception SBC)
-```bash
-ros2 run rqt_image_view rqt_image_view /devkit/camera/image_raw
-```
-
 
 ### Diagnostics
 If hardware is connected but topics are not flowing, run the diagnostic tool from inside the container:
