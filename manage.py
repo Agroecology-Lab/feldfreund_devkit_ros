@@ -356,6 +356,10 @@ if __name__ == '__main__':
         manager.build(full_clean=True, sim=sim)
     elif action == 'neo':
         manager.run_neo(sys.argv[2:])
+    elif action == 'neo-tsm':
+        # Same Neo stack, Triangle Scan Method detector. detector:=tsm is
+        # prepended so an explicit detector:= on the command line still wins.
+        manager.run_neo(['detector:=tsm'] + sys.argv[2:])
     else:
         # 'up' or bare invocation: pass remaining args (or all argv[1:] if not 'up')
         manager.run(sys.argv[2:] if action == 'up' else sys.argv[1:])
