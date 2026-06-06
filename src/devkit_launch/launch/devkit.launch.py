@@ -500,5 +500,32 @@ def generate_launch_description():
             ],
         ),
 
+        # ── Sentor System Health Monitoring (real hardware only) ─────────────
+        # LCAS Sentor publishes /safety/heartbeat (estop/bumper + devkit_driver
+        # node) and /warning/heartbeat (camera/odom/battery/neo_vision
+        # perception). Gated to real hardware: the safety topics (/estop/*,
+        # /bumper/*) and the monitored nodes (devkit_driver, usb_cam,
+        # crop_row_node) do not exist in sim, so the safety beat would sit
+        # false continuously. Config installs to share/devkit_launch/config via
+        # the install(DIRECTORY ... config) rule in CMakeLists.txt.
+        # NOTE: executable is sentor_node.py (scripts/), NOT test_sentor.py.
+        # The heartbeat publish rate / timeout are owned by SafetyMonitor's own
+        # node and are not parameterisable from here, so no rate params passed.
+        GroupAction(
+            condition=real_condition,
+            actions=[
+                Node(
+                    package='sentor',
+                    executable='sentor_node.py',
+                    name='sentor',
+                    output='screen',
+                    parameters=[{
+                        'config_file': os.path.join(
+                            devkit_launch_pkg, 'config', 'sowbot_monitor.yaml'),
+                    }],
+                ),
+            ],
+        ),
+
         # ── Topological Navigation ───────────────────────────────────────────
     ] + _topo_nav_nodes(tmap2_file, sim_condition, real_condition, devkit_launch_pkg))
