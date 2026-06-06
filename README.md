@@ -112,6 +112,9 @@ The primary entry point for the system. While it runs the full stack by default,
 | `./manage.py build` | `build` | Runs `run_build(full=False)`. Re-compiles ROS code. |
 | `./manage.py full-build` | `full-build` | Runs `run_build(full=True)`. Cleans system & Re-installs all system dependencies. |
 | `./manage.py neo` | `neo` | Runs `neo`. Runs only the line following code for the second 'neo'(cortex) perception SBC. Then check `http://localhost:8080` |
+| `./manage.py neo-tsm` | `neo-tsm` | Runs `neo-tsm`. Runs experimental line following informed by [Vision based Crop Row Navigation under Varying Field Conditions in Arable Fields - Rajitha de Silva1, Grzegorz Cielniak2 and Junfeng Gao|https://arxiv.org/pdf/2209.14003]. Then check `http://localhost:8080` |
+
+
 
 *Note `--net=host` in `manage.py`'s `_base_docker_cmd` doesn't bridge to the host on macOS Docker Desktop (Docker runs inside a Linux VM there), making `localhost` unreachable. Fix this by replacing the `--net=host` parameter with explicit port mappings `-p 80:80 -p 8080:8080 -p 8765:8765` in `_base_docker_cmd` in `manage.py`.
 
