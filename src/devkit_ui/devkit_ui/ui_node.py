@@ -1030,8 +1030,8 @@ class NiceGuiNode(Node):
         if not self._topo_doc:
             self.f2c_save_status = 'ERROR: map not loaded'; return
 
-        anchor_x   = self.latest_odom.pose.pose.position.x
-        anchor_y   = self.latest_odom.pose.pose.position.y
+        anchor_x   = 0.0 if self._is_sim else self.latest_odom.pose.pose.position.x
+        anchor_y   = 0.0 if self._is_sim else self.latest_odom.pose.pose.position.y  
         # Anchor for the lat/lon -> local xy conversion. On real hardware
         # latest_gps IS the survey origin and is correct. In sim, latest_gps is
         # the static datum fix, which is generally NOT where the F2C field was
