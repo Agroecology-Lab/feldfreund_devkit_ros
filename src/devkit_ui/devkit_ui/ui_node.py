@@ -13,7 +13,7 @@ from typing import Optional
 
 import rclpy
 from geometry_msgs.msg import Twist
-from sensor_msgs.msg import NavSatFix
+from sensor_msgs.msg import NavSatFix, NavSatStatus
 from nav_msgs.msg import Odometry
 from nicegui import app, ui, ui_run
 from nicegui.events import ClickEventArguments
@@ -526,6 +526,24 @@ class NiceGuiNode(Node):
             reliability=ReliabilityPolicy.BEST_EFFORT,
         )
         self.create_subscription(NavSatFix,    '/gnss/fix',           self.store_gps,                  _SENSOR_QOS)
+
+        # Sim GPS shim: Gazebo doesn't publish /gnss/fix, but saving a topo map
+        # hard-requires a finite, non-zero fix (see save path) to anchor nodes
+        # to a datum. We publish a fake fix at the field datum whenever no real
+        # fix has been seen recently — so it activates in sim and yields the
+        # instant a real publisher appears on hardware. The India datum matches
+        # the leaflet centre / F2C fallback used elsewhere in this UI.
+        self._FAKE_GPS_LAT = 9.045094
+        self._FAKE_GPS_LON = 77.792024
+        self._FAKE_GPS_ALT = 40.0
+        # Sentinel marking our own synthetic fixes so store_gps doesn't mistake
+        # them for a real GPS and disable the shim. status.service is uint16 and
+        # real receivers only set the low bits (GPS=1/GLONASS=2/COMPASS=4/
+        # GALILEO=8, max 15), so a high value is unambiguous and assignable.
+        self._FAKE_GPS_SENTINEL = 0xF000
+        self._last_real_gps_t = 0.0
+        self._fake_gps_pub = self.create_publisher(NavSatFix, '/gnss/fix', _SENSOR_QOS)
+        self.create_timer(1.0, self._publish_fake_gps)
         self.create_subscription(BatteryState, 'battery_state',       self.store_battery,               1)
         self.create_subscription(Bool,         'bumper/front_top',    self.update_bumper_front_top,    SAFETY_QOS)
         self.create_subscription(Bool,         'bumper/front_bottom', self.update_bumper_front_bottom, SAFETY_QOS)
@@ -2973,7 +2991,32 @@ class NiceGuiNode(Node):
         self.linear_velocity = x; self.angular_velocity = y
         self.cmd_vel_publisher.publish(msg)
 
-    def store_gps(self, msg: NavSatFix) -> None:             self.latest_gps = msg
+    def store_gps(self, msg: NavSatFix) -> None:
+        self.latest_gps = msg
+        # Only a fix from outside this node (no sentinel) counts as "real GPS
+        # present" and suppresses the sim shim.
+        if msg.status.service != self._FAKE_GPS_SENTINEL:
+            self._last_real_gps_t = self.get_clock().now().nanoseconds * 1e-9
+
+    def _publish_fake_gps(self) -> None:
+        """Publish a fix at the field datum unless a real one arrived recently.
+
+        Self-gating: stays quiet on hardware with a live GPS, fills in for
+        Gazebo (which never publishes /gnss/fix) so topo maps can be saved.
+        """
+        now = self.get_clock().now().nanoseconds * 1e-9
+        if now - self._last_real_gps_t < 20.0:
+            return  # a real fix was seen recently; don't interfere
+        msg = NavSatFix()
+        msg.header.stamp = self.get_clock().now().to_msg()
+        msg.header.frame_id = 'gps'
+        msg.status.status = NavSatStatus.STATUS_FIX
+        msg.status.service = self._FAKE_GPS_SENTINEL
+        msg.latitude = self._FAKE_GPS_LAT
+        msg.longitude = self._FAKE_GPS_LON
+        msg.altitude = self._FAKE_GPS_ALT
+        self._fake_gps_pub.publish(msg)
+
     def store_battery(self, msg: BatteryState) -> None:      self.latest_battery = msg
     def update_bumper_front_top(self, msg: Bool) -> None:    self.bumper_front_top_active = msg.data
     def update_bumper_front_bottom(self, msg: Bool) -> None: self.bumper_front_bottom_active = msg.data
