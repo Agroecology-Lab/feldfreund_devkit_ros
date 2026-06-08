@@ -288,9 +288,9 @@ if __name__ == '__main__':
                     help='Max lateral jitter per plant (m).')
     ap.add_argument('--skip-prob', type=float, default=0.0,
                     help='Per-plant probability of a gap (missing plant).')
-    ap.add_argument('--plant-scale', type=float, default=0.33,
+    ap.add_argument('--plant-scale', type=float, default=0.15,
                     help='Uniform scale applied to each maize model '
-                         '(0.33 = one-third size / much shorter).')
+                         '(0.15 = 85%% shorter than original size).')
     ap.add_argument('--seed', type=int, default=-1,
                     help='RNG seed (-1 = nondeterministic).')
     args = ap.parse_args()
