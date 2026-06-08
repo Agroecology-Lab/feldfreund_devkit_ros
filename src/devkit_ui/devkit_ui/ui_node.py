@@ -2860,7 +2860,60 @@ class NiceGuiNode(Node):
                     _gazebo_lbl.set_text('stopped')
                     _gazebo_lbl.style('color:#57606a')
 
+                # Rebuild maize.world FROM the saved topo map: plants are
+                # studded in the inter-row gaps of the R*_IN/OUT nodes. Gazebo
+                # reads the world only at launch, so a running sim must be
+                # stopped and relaunched to see a rebuild — we refuse mid-run
+                # rather than silently no-op. The generator script is mounted
+                # at /workspace/get_topo_maize_world.py by manage.py.
+                _MAP_FILE   = '/workspace/maps/maize_map'
+                _WORLD_FILE = ('/workspace/install/agro_robot_sim/share/'
+                               'agro_robot_sim/worlds/maize.world')
+
+                def _rebuild_world():
+                    import subprocess
+                    if _gazebo_proc[0] is not None and _gazebo_proc[0].poll() is None:
+                        _gazebo_lbl.set_text(
+                            'stop the sim before rebuilding — Gazebo reads the '
+                            'world only at launch')
+                        _gazebo_lbl.style('color:#cf222e')
+                        return
+                    if not os.path.exists(_MAP_FILE):
+                        _gazebo_lbl.set_text(
+                            f'no saved map at {_MAP_FILE} — drop/save nodes first')
+                        _gazebo_lbl.style('color:#cf222e')
+                        return
+                    try:
+                        _gazebo_lbl.set_text('rebuilding world from map…')
+                        _gazebo_lbl.style('color:#57606a')
+                        r = subprocess.run(
+                            ['python3', '/workspace/get_topo_maize_world.py',
+                             '--topo', _MAP_FILE,
+                             '--out', _WORLD_FILE,
+                             '--name', 'maize_field'],
+                            capture_output=True, text=True, timeout=120,
+                        )
+                        if r.returncode != 0:
+                            err = (r.stderr or r.stdout or 'unknown error').strip()
+                            _gazebo_lbl.set_text(f'rebuild failed: {err[-200:]}')
+                            _gazebo_lbl.style('color:#cf222e')
+                            return
+                        # Script prints "Wrote N plants -> ..." on success.
+                        summary = next(
+                            (ln for ln in r.stdout.splitlines()
+                             if ln.startswith('Wrote ')), 'world rebuilt')
+                        _gazebo_lbl.set_text(f'{summary} — relaunch to view')
+                        _gazebo_lbl.style('color:#1a7f37')
+                    except subprocess.TimeoutExpired:
+                        _gazebo_lbl.set_text('rebuild timed out')
+                        _gazebo_lbl.style('color:#cf222e')
+                    except Exception as exc:
+                        _gazebo_lbl.set_text(f'ERROR: {exc}')
+                        _gazebo_lbl.style('color:#cf222e')
+
                 with ui.row().classes('items-center gap-2 flex-wrap'):
+                    ui.button('Rebuild World from Map', on_click=_rebuild_world).props(
+                        'outline no-caps').classes('px-4')
                     ui.button('Launch Sim (native)', on_click=_start_gazebo_native).props(
                         'outline no-caps').classes('px-4')
                     ui.button('Launch Sim (browser)', on_click=_start_gazebo_browser).props(
