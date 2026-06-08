@@ -529,21 +529,29 @@ class NiceGuiNode(Node):
 
         # Sim GPS shim: Gazebo doesn't publish /gnss/fix, but saving a topo map
         # hard-requires a finite, non-zero fix (see save path) to anchor nodes
-        # to a datum. We publish a fake fix at the field datum whenever no real
-        # fix has been seen recently — so it activates in sim and yields the
-        # instant a real publisher appears on hardware. The India datum matches
-        # the leaflet centre / F2C fallback used elsewhere in this UI.
+        # to a datum. In sim we publish a fake fix at the field datum. The sim
+        # flag is the authoritative signal, plumbed from manage.py's is_sim
+        # through devkit.launch.py -> ui.launch.py, so we never race a real GPS
+        # on hardware. The India datum matches the leaflet centre / F2C fallback
+        # used elsewhere in this UI.
+        self.declare_parameter('sim', False)
+        self._is_sim = bool(self.get_parameter('sim').value)
         self._FAKE_GPS_LAT = 9.045094
         self._FAKE_GPS_LON = 77.792024
         self._FAKE_GPS_ALT = 40.0
-        # Sentinel marking our own synthetic fixes so store_gps doesn't mistake
-        # them for a real GPS and disable the shim. status.service is uint16 and
-        # real receivers only set the low bits (GPS=1/GLONASS=2/COMPASS=4/
-        # GALILEO=8, max 15), so a high value is unambiguous and assignable.
+        # Sentinel marking our own synthetic fixes so store_gps doesn't treat
+        # them as a real GPS. status.service is uint16 and real receivers only
+        # set the low bits (GPS=1/GLONASS=2/COMPASS=4/GALILEO=8, max 15), so a
+        # high value is unambiguous and assignable.
         self._FAKE_GPS_SENTINEL = 0xF000
         self._last_real_gps_t = 0.0
-        self._fake_gps_pub = self.create_publisher(NavSatFix, '/gnss/fix', _SENSOR_QOS)
-        self.create_timer(1.0, self._publish_fake_gps)
+        if self._is_sim:
+            self._fake_gps_pub = self.create_publisher(
+                NavSatFix, '/gnss/fix', _SENSOR_QOS)
+            self.create_timer(1.0, self._publish_fake_gps)
+            self.get_logger().info(
+                'Sim mode: publishing fake /gnss/fix at datum '
+                f'({self._FAKE_GPS_LAT}, {self._FAKE_GPS_LON})')
         self.create_subscription(BatteryState, 'battery_state',       self.store_battery,               1)
         self.create_subscription(Bool,         'bumper/front_top',    self.update_bumper_front_top,    SAFETY_QOS)
         self.create_subscription(Bool,         'bumper/front_bottom', self.update_bumper_front_bottom, SAFETY_QOS)
@@ -2999,10 +3007,10 @@ class NiceGuiNode(Node):
             self._last_real_gps_t = self.get_clock().now().nanoseconds * 1e-9
 
     def _publish_fake_gps(self) -> None:
-        """Publish a fix at the field datum unless a real one arrived recently.
-
-        Self-gating: stays quiet on hardware with a live GPS, fills in for
-        Gazebo (which never publishes /gnss/fix) so topo maps can be saved.
+        """Publish a fix at the field datum (sim only — timer isn't created
+        on hardware). If a real fix unexpectedly appears on /gnss/fix (e.g. a
+        real GPS attached during a sim launch), yield to it rather than
+        corrupt the stream.
         """
         now = self.get_clock().now().nanoseconds * 1e-9
         if now - self._last_real_gps_t < 20.0:
