@@ -618,6 +618,7 @@ class NiceGuiNode(Node):
         self._f2c_row_start:  int   = 1
         self._f2c_tool_width: float = 1.2
         self._f2c_angle_deg:  float = 0.0
+        self._f2c_origin_ll = None
         self.f2c_save_status: str   = ''
         self.delete_status:   str   = ''
 
@@ -1031,8 +1032,18 @@ class NiceGuiNode(Node):
 
         anchor_x   = self.latest_odom.pose.pose.position.x
         anchor_y   = self.latest_odom.pose.pose.position.y
-        anchor_lat = self.latest_gps.latitude
-        anchor_lon = self.latest_gps.longitude
+        # Anchor for the lat/lon -> local xy conversion. On real hardware
+        # latest_gps IS the survey origin and is correct. In sim, latest_gps is
+        # the static datum fix, which is generally NOT where the F2C field was
+        # drawn — anchoring to it offsets every row by the field-to-datum
+        # distance (the "robot drove to India / off the map" bug). Anchoring to
+        # the field's own reference corner instead makes the round-trip cancel,
+        # so rows land at the local odom origin like get_maize_topo.py output.
+        if self._is_sim and self._f2c_origin_ll is not None:
+            anchor_lat, anchor_lon = self._f2c_origin_ll
+        else:
+            anchor_lat = self.latest_gps.latitude
+            anchor_lon = self.latest_gps.longitude
         fix_type   = int(self.latest_gps.status.status)
 
         map_name  = self._topo_doc.get('name', 'mixed_test_map')
@@ -1931,6 +1942,12 @@ class NiceGuiNode(Node):
             self._f2c_row_start  = row_start
             self._f2c_tool_width = width
             self._f2c_angle_deg  = angle_deg
+            # Field reference origin = first boundary corner, the same lat0/lon0
+            # _run_f2c projected from. The save path re-anchors to this so the
+            # lat/lon round-trip cancels and rows land at the local odom origin
+            # — instead of being offset by the distance between the field and
+            # whatever latest_gps happened to read (in sim, the datum fix).
+            self._f2c_origin_ll = tuple(corners_ll[0]) if corners_ll else None
 
             hl_note  = f' · {headland_m}m headland' if headland_m > 0 else ''
             snk_note = ' · snake' if snake else ''
