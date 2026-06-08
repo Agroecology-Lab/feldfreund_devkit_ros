@@ -224,12 +224,15 @@ def sdf_header(name):
 """
 
 
-def sdf_include(inst_name, model_uri, x, y, yaw):
+def sdf_include(inst_name, model_uri, x, y, yaw, scale):
+    scale_line = ""
+    if abs(scale - 1.0) > 1e-6:
+        scale_line = f"      <scale>{scale:.3f} {scale:.3f} {scale:.3f}</scale>\n"
     return f"""    <include>
       <name>{inst_name}</name>
       <uri>model://{model_uri}</uri>
       <pose>{x:.3f} {y:.3f} 0 0 0 {yaw:.3f}</pose>
-    </include>
+{scale_line}    </include>
 """
 
 
@@ -238,12 +241,13 @@ def sdf_footer():
 
 
 def generate(topo_path, out_path, world_name, crop_types, spacing,
-             placement_err, seed, skip_prob):
+             placement_err, seed, skip_prob, plant_scale):
     rng = random.Random(None if seed < 0 else seed)
     nodes = load_topo(topo_path)
     rows, cross = extract_rows(nodes)
     print(f"Loaded {len(rows)} rows (cross-axis={cross}); "
-          f"placing maize in {len(rows) - 1} inter-row gaps")
+          f"placing maize in {len(rows) - 1} inter-row gaps "
+          f"(scale={plant_scale})")
 
     out = sdf_header(world_name)
     plant_idx = 0
@@ -254,7 +258,8 @@ def generate(topo_path, out_path, world_name, crop_types, spacing,
             if skip_prob > 0 and rng.random() < skip_prob:
                 continue  # simulate the occasional missing plant
             model = crop_types[plant_idx % len(crop_types)]
-            out += sdf_include(f"plant_{plant_idx:04d}", model, x, y, yaw)
+            out += sdf_include(f"plant_{plant_idx:04d}", model, x, y, yaw,
+                               plant_scale)
             plant_idx += 1
             gap_n += 1
         print(f"  gap {rows[k]['rid']}->{rows[k+1]['rid']}: {gap_n} plants")
@@ -283,10 +288,13 @@ if __name__ == '__main__':
                     help='Max lateral jitter per plant (m).')
     ap.add_argument('--skip-prob', type=float, default=0.0,
                     help='Per-plant probability of a gap (missing plant).')
+    ap.add_argument('--plant-scale', type=float, default=0.33,
+                    help='Uniform scale applied to each maize model '
+                         '(0.33 = one-third size / much shorter).')
     ap.add_argument('--seed', type=int, default=-1,
                     help='RNG seed (-1 = nondeterministic).')
     args = ap.parse_args()
 
     generate(args.topo, args.out, args.name, args.crop_types,
              args.plant_spacing, args.placement_error, args.seed,
-             args.skip_prob)
+             args.skip_prob, args.plant_scale)
