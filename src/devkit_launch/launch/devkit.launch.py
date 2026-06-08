@@ -478,6 +478,7 @@ def generate_launch_description():
             PythonLaunchDescriptionSource(
                 os.path.join(ui_pkg, 'launch', 'ui.launch.py')
             ),
+            launch_arguments={'sim': sim}.items(),
         ),
 
         # ── Row Follow action server (real hardware only) ────────────────────
