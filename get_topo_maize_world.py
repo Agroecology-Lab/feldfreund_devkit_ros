@@ -230,12 +230,15 @@ def sdf_header(name):
 """
 
 
-def sdf_include(inst_name, model_uri, x, y, yaw):
+def sdf_include(inst_name, model_uri, x, y, yaw, scale=1.0):
+    scale_line = ""
+    if abs(scale - 1.0) > 1e-6:
+        scale_line = f"      <scale>{scale:.3f} {scale:.3f} {scale:.3f}</scale>\n"
     return f"""    <include>
       <name>{inst_name}</name>
       <uri>model://{model_uri}</uri>
       <pose>{x:.3f} {y:.3f} 0 0 0 {yaw:.3f}</pose>
-    </include>
+{scale_line}    </include>
 """
 
 
@@ -244,12 +247,13 @@ def sdf_footer():
 
 
 def generate(topo_path, out_path, world_name, crop_types, spacing,
-             placement_err, seed, skip_prob, headland_m):
+             placement_err, seed, skip_prob, headland_m, plant_scale):
     rng = random.Random(None if seed < 0 else seed)
     nodes = load_topo(topo_path)
     rows, cross = extract_rows(nodes)
     print(f"Loaded {len(rows)} rows (cross-axis={cross}); "
-          f"planting on row lines with {headland_m}m headland clearance")
+          f"planting on row lines with {headland_m}m headland clearance "
+          f"(scale={plant_scale})")
 
     out = sdf_header(world_name)
     plant_idx = 0
@@ -260,7 +264,8 @@ def generate(topo_path, out_path, world_name, crop_types, spacing,
             if skip_prob > 0 and rng.random() < skip_prob:
                 continue
             model = crop_types[plant_idx % len(crop_types)]
-            out += sdf_include(f"plant_{plant_idx:04d}", model, x, y, yaw)
+            out += sdf_include(f"plant_{plant_idx:04d}", model, x, y, yaw,
+                               plant_scale)
             plant_idx += 1
             row_n += 1
         print(f"  row {row['rid']}: {row_n} plants")
@@ -290,6 +295,9 @@ if __name__ == '__main__':
                     help='Max lateral jitter per plant (m).')
     ap.add_argument('--skip-prob', type=float, default=0.0,
                     help='Per-plant probability of a gap (missing plant).')
+    ap.add_argument('--plant-scale', type=float, default=0.25,
+                    help='Uniform scale applied to each maize model '
+                         '(0.25 = short seedling, passable by robot).')
     ap.add_argument('--headland', type=float, default=0.5,
                     help='Metres to clear at each row end (headland zone).')
     ap.add_argument('--seed', type=int, default=-1,
@@ -298,4 +306,4 @@ if __name__ == '__main__':
 
     generate(args.topo, args.out, args.name, args.crop_types,
              args.plant_spacing, args.placement_error, args.seed,
-             args.skip_prob, args.headland)
+             args.skip_prob, args.headland, args.plant_scale)
