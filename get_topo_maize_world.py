@@ -142,16 +142,22 @@ def extract_rows(nodes):
 
 # ── geometry ──────────────────────────────────────────────────────────────────
 
-def midline(rowA, rowB):
-    """Return ((x0,y0),(x1,y1)) — the line halfway between two row segments.
+def row_line_inset(row, headland_m):
+    """Return ((x0,y0),(x1,y1)) for the row segment with headland cleared.
 
-    Uses IN endpoints for the start, OUT endpoints for the end, so the
-    midline runs the same direction the robot travels.
+    IN and OUT points mark the row ends; we inset by headland_m from each
+    end so the robot's turn-around zone stays plant-free.
     """
-    ax0, ay0 = rowA['a']; ax1, ay1 = rowA['b']
-    bx0, by0 = rowB['a']; bx1, by1 = rowB['b']
-    return ((((ax0 + bx0) / 2), ((ay0 + by0) / 2)),
-            (((ax1 + bx1) / 2), ((ay1 + by1) / 2)))
+    ax, ay = row['a']
+    bx, by = row['b']
+    dx, dy = bx - ax, by - ay
+    length = math.hypot(dx, dy)
+    if length < 1e-6:
+        return (ax, ay), (bx, by)
+    ux, uy = dx / length, dy / length
+    inset = min(headland_m, length * 0.4)   # never inset more than 40% each end
+    return ((ax + ux * inset, ay + uy * inset),
+            (bx - ux * inset, by - uy * inset))
 
 
 def stud_line(p0, p1, spacing, placement_err, rng):
@@ -241,28 +247,28 @@ def sdf_footer():
 
 
 def generate(topo_path, out_path, world_name, crop_types, spacing,
-             placement_err, seed, skip_prob, plant_scale):
+             placement_err, seed, skip_prob, plant_scale, headland_m):
     rng = random.Random(None if seed < 0 else seed)
     nodes = load_topo(topo_path)
     rows, cross = extract_rows(nodes)
     print(f"Loaded {len(rows)} rows (cross-axis={cross}); "
-          f"placing maize in {len(rows) - 1} inter-row gaps "
+          f"planting on row lines with {headland_m}m headland clearance "
           f"(scale={plant_scale})")
 
     out = sdf_header(world_name)
     plant_idx = 0
-    for k in range(len(rows) - 1):
-        p0, p1 = midline(rows[k], rows[k + 1])
-        gap_n = 0
+    for row in rows:
+        p0, p1 = row_line_inset(row, headland_m)
+        row_n = 0
         for x, y, yaw in stud_line(p0, p1, spacing, placement_err, rng):
             if skip_prob > 0 and rng.random() < skip_prob:
-                continue  # simulate the occasional missing plant
+                continue
             model = crop_types[plant_idx % len(crop_types)]
             out += sdf_include(f"plant_{plant_idx:04d}", model, x, y, yaw,
                                plant_scale)
             plant_idx += 1
-            gap_n += 1
-        print(f"  gap {rows[k]['rid']}->{rows[k+1]['rid']}: {gap_n} plants")
+            row_n += 1
+        print(f"  row {row['rid']}: {row_n} plants")
     out += sdf_footer()
 
     Path(out_path).parent.mkdir(parents=True, exist_ok=True)
@@ -282,19 +288,21 @@ if __name__ == '__main__':
                     help='SDF <world> name.')
     ap.add_argument('--crop-types', nargs='+', default=['maize_01', 'maize_02'],
                     help='virtual_maize_field model names to alternate.')
-    ap.add_argument('--plant-spacing', type=float, default=0.15,
-                    help='Intra-row plant spacing along the gap midline (m).')
+    ap.add_argument('--plant-spacing', type=float, default=0.25,
+                    help='Along-row plant spacing (m).')
     ap.add_argument('--placement-error', type=float, default=0.02,
                     help='Max lateral jitter per plant (m).')
     ap.add_argument('--skip-prob', type=float, default=0.0,
                     help='Per-plant probability of a gap (missing plant).')
-    ap.add_argument('--plant-scale', type=float, default=0.15,
+    ap.add_argument('--plant-scale', type=float, default=0.04,
                     help='Uniform scale applied to each maize model '
-                         '(0.15 = 85%% shorter than original size).')
+                         '(0.04 = small seedling size).')
+    ap.add_argument('--headland', type=float, default=0.5,
+                    help='Metres to clear at each row end (headland zone).')
     ap.add_argument('--seed', type=int, default=-1,
                     help='RNG seed (-1 = nondeterministic).')
     args = ap.parse_args()
 
     generate(args.topo, args.out, args.name, args.crop_types,
              args.plant_spacing, args.placement_error, args.seed,
-             args.skip_prob, args.plant_scale)
+             args.skip_prob, args.plant_scale, args.headland)
