@@ -33,8 +33,11 @@ def generate_launch_description():
     return LaunchDescription([
         DeclareLaunchArgument('camera_index', default_value='0',
                               description='OpenCV VideoCapture index'),
-        DeclareLaunchArgument('video_device', default_value='/dev/video0',
-                              description='V4L2 device node for the USB camera'),
+        DeclareLaunchArgument('video_device',
+                              default_value=os.environ.get('USB_CAM_DEVICE', '/dev/video0'),
+                              description='V4L2 device node for the USB camera. '
+                                          'Defaults to $USB_CAM_DEVICE (HiCamera preferred, '
+                                          'integrated fallback) written by fixusb.py.'),
         DeclareLaunchArgument('use_camera', default_value='true',
                               description='Launch usb_cam here; set false for an external camera source'),
         DeclareLaunchArgument('detector', default_value='scanwin',
