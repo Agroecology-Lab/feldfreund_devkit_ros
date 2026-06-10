@@ -97,6 +97,90 @@ def find_usb_bus_path(vid: int) -> str:
         print(f'Warning: USB bus path detection failed: {e}')
     return 'virtual'
 
+
+def detect_camera() -> tuple[str, str]:
+    """Detect the preferred camera device node using v4l2-ctl.
+
+    Strategy:
+      1. Run ``v4l2-ctl --list-devices`` and parse the output.
+      2. Prefer any device whose human-readable name contains "HiCamera"
+         (case-insensitive). Use the *first* /dev/videoN listed under that
+         entry — that is always the capture node; the second entry is the
+         metadata node.
+      3. Fall back to the first /dev/videoN listed under any "Integrated
+         Camera" entry.
+      4. Final fallback: /dev/video0 if v4l2-ctl is unavailable or returns
+         nothing useful.
+
+    Returns (device_path, label) where label is a human-readable string for
+    the .env comment and startup log, e.g. "HiCamera /dev/video2" or
+    "Integrated /dev/video0".
+
+    v4l2-ctl output format (relevant excerpt):
+        HiCamera: UVC Camera (usb-0000:00:14.0-2):
+            /dev/video2
+            /dev/video3
+            /dev/media1
+        Integrated Camera: Integrated C (usb-0000:00:14.0-8):
+            /dev/video0
+            /dev/video1
+            /dev/media0
+
+    The parser collects /dev/videoN nodes under each named heading and picks
+    the first one, which is always the capture interface.
+    """
+    hicamera_dev = None
+    integrated_dev = None
+
+    try:
+        result = subprocess.run(
+            ['v4l2-ctl', '--list-devices'],
+            capture_output=True, text=True, timeout=5)
+        output = result.stdout
+
+        current_is_hi = False
+        current_is_integrated = False
+
+        for raw_line in output.splitlines():
+            line = raw_line.strip()
+
+            if not line:
+                current_is_hi = False
+                current_is_integrated = False
+                continue
+
+            if line.startswith('/dev/video'):
+                dev = line.split()[0]
+                if current_is_hi and hicamera_dev is None:
+                    hicamera_dev = dev
+                elif current_is_integrated and integrated_dev is None:
+                    integrated_dev = dev
+                # Skip /dev/media* lines — they don't start with /dev/video
+                continue
+
+            # Heading line — determine camera type for the block that follows.
+            lower = line.lower()
+            current_is_hi = 'hicamera' in lower
+            current_is_integrated = (not current_is_hi) and 'integrated' in lower
+
+    except FileNotFoundError:
+        print('Warning: v4l2-ctl not found; camera detection unavailable.')
+    except subprocess.TimeoutExpired:
+        print('Warning: v4l2-ctl timed out during camera detection.')
+    except Exception as e:
+        print(f'Warning: camera detection failed: {e}')
+
+    if hicamera_dev:
+        print(f'Found HiCamera: {hicamera_dev} (preferred)')
+        return hicamera_dev, f'HiCamera {hicamera_dev}'
+    if integrated_dev:
+        print(f'HiCamera not found; using Integrated Camera: {integrated_dev}')
+        return integrated_dev, f'Integrated {integrated_dev}'
+
+    print('Warning: no camera detected by v4l2-ctl; defaulting to /dev/video0')
+    return '/dev/video0', 'fallback /dev/video0'
+
+
 def scan_and_export():
     print('Scanning for Open Agbot Hardware...')
     check_host_tools()
@@ -203,7 +287,13 @@ def scan_and_export():
     sanitize_hardware(r1_port, '460800')
     sanitize_hardware(mcu_p,   '115200')
 
-    usb_cam = 'true' if Path('/dev/video0').exists() else 'false'
+    # ── Camera detection ─────────────────────────────────────────────────────
+    # Prefer HiCamera (external crop-row camera); fall back to integrated.
+    # USB_CAM_DEVICE carries the /dev/videoN path for the launch file.
+    # USB_CAM_ENABLED stays true whenever any /dev/videoN exists (unchanged
+    # semantics — it gates the usb_cam node in docker-compose).
+    cam_device, cam_label = detect_camera()
+    usb_cam = 'true' if Path(cam_device).exists() else 'false'
 
     # Axis camera — optional network device, short timeout
     try:
@@ -229,6 +319,7 @@ def scan_and_export():
         f.write(f'GPS_SERIAL_ROVER1={r1_serial}\n')
         f.write(f'MCU_PORT={mcu_p}\n')
         f.write(f'USB_CAM_ENABLED={usb_cam}\n')
+        f.write(f'USB_CAM_DEVICE={cam_device}\n')        # /dev/videoN for crop-row camera
         f.write(f'AXIS_CAM_ENABLED={axis_cam}\n')
         f.write(f'USER_ID={os.getuid()}\n')
         f.write(f'GROUP_ID={os.getgid()}\n')
@@ -244,6 +335,7 @@ def scan_and_export():
     print(f'Safety Ack: {safety_ack} | MCU: {mcu_p}')
     print(f'Rover:  {r_port}  usb={r_usb_path}  serial={r_serial or "none"}  type={r_type}')
     print(f'Rover1: {r1_port}  usb={r1_usb_path}  serial={r1_serial or "none"}  type={r1_type}')
+    print(f'Camera: {cam_label}  enabled={usb_cam}')
 
 if __name__ == '__main__':
     scan_and_export()
