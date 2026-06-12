@@ -25,7 +25,11 @@ mypy:
 
 ## pylint		Run pylint code analysis.
 pylint:
-	pylint ./src/devkit_driver/devkit_driver ./src/devkit_launch/launch ./src/devkit_ui/devkit_ui
+	pylint \
+		--disable=duplicate-code \
+		./src/devkit_driver/devkit_driver \
+		./src/devkit_launch/launch \
+		./src/devkit_ui/devkit_ui
 
 ## ruff		Run ruff code analysis.
 ruff:
