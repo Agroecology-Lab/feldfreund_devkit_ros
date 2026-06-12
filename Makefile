@@ -21,15 +21,21 @@ install-ci:
 
 ## mypy		Run mypy type checks.
 mypy:
-	mypy ./devkit_driver ./devkit_launch ./devkit_ui --exclude 'setup\.py$$' --non-interactive --install-types
+	mypy ./src/devkit_driver ./src/devkit_launch ./src/devkit_ui --exclude 'setup\.py$$' --non-interactive --install-types
 
 ## pylint		Run pylint code analysis.
 pylint:
-	pylint ./devkit_driver/devkit_driver ./devkit_launch/launch ./devkit_ui/devkit_ui
+	pylint \
+		--disable=duplicate-code \
+		./src/devkit_driver/devkit_driver \
+		./src/devkit_launch/launch \
+		./src/devkit_ui/devkit_ui
 
 ## ruff		Run ruff code analysis.
 ruff:
-	ruff check ./devkit_driver/devkit_driver ./devkit_launch/launch ./devkit_ui/devkit_ui
+	find ./src/devkit_driver/devkit_driver -name '*.py' | xargs ruff check
+	find ./src/devkit_launch/launch -name '*.py' | xargs ruff check
+	find ./src/devkit_ui/devkit_ui -name '*.py' | xargs ruff check
 
 ## pre-commit	Run pre-commit hooks on all files.
 pre-commit:

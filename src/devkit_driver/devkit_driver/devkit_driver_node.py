@@ -56,7 +56,6 @@ class DevkitDriver(Node):
 
 def main() -> None:
     """ROS entry point for colcon; execution is deferred to NiceGUI startup."""
-    pass
 
 
 def on_startup() -> None:

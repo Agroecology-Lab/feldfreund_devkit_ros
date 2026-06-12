@@ -11,8 +11,6 @@ fusioncore.yaml.  The devkit_driver_node instantiates this handler
 whenever system.feldfreund.imu is present.
 """
 
-import math
-
 from geometry_msgs.msg import Vector3
 from rclpy.node import Node
 from sensor_msgs.msg import Imu

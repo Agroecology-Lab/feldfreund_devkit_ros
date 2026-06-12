@@ -1,30 +1,47 @@
-# pylint: disable=duplicate-code
+# pylint: disable=duplicate-code,too-many-lines,consider-using-with
 """
 ui_node.py — Sowbot web cockpit on :80
 """
 
+import copy
 import json
+import math
 import os
 import re
+import subprocess
+import sys
 import threading
+import time
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Optional
 
-import rclpy
+import yaml
+
 from geometry_msgs.msg import Twist
 from sensor_msgs.msg import NavSatFix, NavSatStatus
 from nav_msgs.msg import Odometry
-from nicegui import app, ui, ui_run
+from nicegui import app, ui, ui_run, run as ng_run
 from nicegui.events import ClickEventArguments
+import rclpy
 from rclpy.executors import ExternalShutdownException
 from rclpy.node import Node
 from rclpy.qos import (
     DurabilityPolicy, Duration, HistoryPolicy,
     LivelinessPolicy, QoSProfile, ReliabilityPolicy,
 )
-from sensor_msgs.msg import BatteryState
-from std_msgs.msg import Bool, Empty, String
+from sensor_msgs.msg import BatteryState, NavSatFix
+from std_msgs.msg import Bool, Empty, Float64, String
+# The following imports get generated in the Dockerfile, they aren't available to pylint
+# pylint: disable=import-error
+import fields2cover as f2c
+from shapely.geometry import LineString, MultiLineString, Polygon
+from shapely.ops import unary_union
+from ament_index_python.packages import (
+    get_package_share_directory,
+    PackageNotFoundError,
+)
+# pylint: enable=import-error
 
 # OBSTACLE: obstacle manager + UI attachment helpers
 from devkit_ui.obstacles import (
@@ -39,6 +56,7 @@ from devkit_ui.missions import ACTIONS, MissionStore, action_ros_msgs
 
 _TOPO_SRV_OK = False
 try:
+    from topological_navigation_msgs.action import GotoNode
     from topological_navigation_msgs.srv import WriteTopologicalMap
     _TOPO_SRV_OK = True
 except ImportError:
@@ -46,8 +64,7 @@ except ImportError:
 
 _ACTION_OK = False
 try:
-    from rclpy.action import ActionClient
-    from topological_navigation_msgs.action import GotoNode
+    from rclpy.action import ActionClient # pylint: disable=ungrouped-imports
     _ACTION_OK = True
 except ImportError:
     pass
@@ -225,8 +242,10 @@ def _build_svg(nodes: dict, selected: Optional[str], current: Optional[str]) -> 
     dy = (max(ys) - min(ys)) or 1.0
     x_min, y_min = min(xs), min(ys)
 
-    def tx(x): return _MARGIN + (x - x_min) / dx * (_SVG_W - 2 * _MARGIN)
-    def ty(y): return _SVG_H - _MARGIN - (y - y_min) / dy * (_SVG_H - 2 * _MARGIN)
+    def tx(x):
+        return _MARGIN + (x - x_min) / dx * (_SVG_W - 2 * _MARGIN)
+    def ty(y):
+        return _SVG_H - _MARGIN - (y - y_min) / dy * (_SVG_H - 2 * _MARGIN)
 
     parts: list[str] = [f'<rect width="{_SVG_W}" height="{_SVG_H}" fill="#f6f8fa" rx="4"/>']
 
@@ -251,11 +270,13 @@ def _build_svg(nodes: dict, selected: Optional[str], current: Optional[str]) -> 
         is_sel = name == selected
         is_row = nd.get('meta', {}).get('row_id') is not None
 
+        # pylint: disable=multiple-statements
         if is_cur:   fill, stroke, sw = '#dafbe1', '#1a7f37', 2
         elif is_sel: fill, stroke, sw = '#fff8c5', '#9a6700', 2
         elif is_row: fill, stroke, sw = '#d8e8fd', '#0969da', 1
         elif nd.get('meta', {}).get('dropped_by'): fill, stroke, sw = '#f6f8fa', '#8c959f', 1
         else:        fill, stroke, sw = '#ffffff', '#d0d7de', 1
+        # pylint: enable=multiple-statements
 
         label_col = ('#1a7f37' if is_cur else '#9a6700' if is_sel
                      else '#0969da' if is_row else '#57606a')
@@ -295,7 +316,6 @@ def _build_svg(nodes: dict, selected: Optional[str], current: Optional[str]) -> 
 
 def _f2c_latlon_to_xy(lat: float, lon: float,
                       lat0: float, lon0: float) -> tuple[float, float]:
-    import math
     R = 6_378_137.0
     x = math.radians(lon - lon0) * R * math.cos(math.radians(lat0))
     y = math.radians(lat - lat0) * R
@@ -304,7 +324,6 @@ def _f2c_latlon_to_xy(lat: float, lon: float,
 
 def _f2c_xy_to_latlon(x: float, y: float,
                       lat0: float, lon0: float) -> tuple[float, float]:
-    import math
     R   = 6_378_137.0
     lat = lat0 + math.degrees(y / R)
     lon = lon0 + math.degrees(x / (R * math.cos(math.radians(lat0))))
@@ -346,8 +365,6 @@ def _run_f2c(corners_ll: list,
              obstacle_pad_m: float = 0.0,
              headland_width_m: float = 0.0,
              snake_order: bool = True) -> list:
-    import math, sys
-    import fields2cover as f2c
 
     def _log(msg):
         print(f'[F2C] {msg}', file=sys.stderr, flush=True)
@@ -358,8 +375,6 @@ def _run_f2c(corners_ll: list,
          f'width={tool_width}m, angle={angle_deg}°')
 
     try:
-        from shapely.geometry import LineString, MultiLineString, Polygon
-        from shapely.ops import unary_union
         has_shapely = True
         _log('shapely OK')
     except ImportError as e:
@@ -669,10 +684,10 @@ class NiceGuiNode(Node):
 
     def send_nav_goal(self, target: str) -> None:
         if not _ACTION_OK:
-            self.topo_nav_status = 'action unavailable (import failed)'; return
+            self.topo_nav_status = 'action unavailable (import failed)'
+            return
         self.topo_nav_status = f'connecting → {target}…'
         self.topo_navigating = True
-        import threading
         def _send():
             ready = self._nav_ac.wait_for_server(timeout_sec=5.0)
             if not ready:
@@ -689,7 +704,9 @@ class NiceGuiNode(Node):
     def _nav_accepted(self, future) -> None:
         gh = future.result()
         if not gh.accepted:
-            self.topo_nav_status = 'goal rejected'; self.topo_navigating = False; return
+            self.topo_nav_status = 'goal rejected'
+            self.topo_navigating = False
+            return
         self._nav_goal_handle = gh
         gh.get_result_async().add_done_callback(self._nav_result)
 
@@ -717,15 +734,20 @@ class NiceGuiNode(Node):
                        row_role: Optional[str]) -> None:
         name = re.sub(r'[^A-Z0-9_]', '', name.strip().upper().replace(' ', '_'))
         if not name:
-            self.drop_status = 'ERROR: node name required'; return
+            self.drop_status = 'ERROR: node name required'
+            return
         if not _NAME_RE.match(name):
-            self.drop_status = f'ERROR: invalid name "{name}"'; return
+            self.drop_status = f'ERROR: invalid name "{name}"'
+            return
         if name in self.topo_nodes:
-            self.drop_status = f'ERROR: {name} already exists'; return
+            self.drop_status = f'ERROR: {name} already exists'
+            return
         if self.latest_odom is None:
-            self.drop_status = 'ERROR: no odometry'; return
+            self.drop_status = 'ERROR: no odometry'
+            return
         if not self._topo_doc:
-            self.drop_status = 'ERROR: map not loaded'; return
+            self.drop_status = 'ERROR: map not loaded'
+            return
 
         x = round(self.latest_odom.pose.pose.position.x, 3)
         y = round(self.latest_odom.pose.pose.position.y, 3)
@@ -739,8 +761,10 @@ class NiceGuiNode(Node):
         nav_frame = self._topo_doc.get('transformation', {}).get('topo_frame_id', 'map')
         is_row    = row_id is not None
 
-        if is_row: edge_action, xy_tol, yaw_tol, vert_r = _ROW_ACTION, 0.1, 0.05, 0.5
-        else:      edge_action, xy_tol, yaw_tol, vert_r = _NAV_ACTION, 0.3, 0.1,  1.0
+        if is_row:
+            edge_action, xy_tol, yaw_tol, vert_r = _ROW_ACTION, 0.1, 0.05, 0.5
+        else:
+            edge_action, xy_tol, yaw_tol, vert_r = _NAV_ACTION, 0.3, 0.1,  1.0
 
         gps = self.latest_gps
         gps_meta: dict = {}
@@ -770,8 +794,8 @@ class NiceGuiNode(Node):
                            {'x':  vert_r, 'y':  vert_r}, {'x': -vert_r, 'y':  vert_r}],
             }}
 
-        new_entry = _make_node_dict(node_meta_ui, {'xy_goal_tolerance': xy_tol,
-                                                    'yaw_goal_tolerance': yaw_tol})
+        _make_node_dict(node_meta_ui, {'xy_goal_tolerance': xy_tol,
+                                       'yaw_goal_tolerance': yaw_tol})
         new_nodes = dict(self.topo_nodes)
         new_nodes[name] = {'x': x, 'y': y,
                            'edges': [connect_to] if connect_to else [],
@@ -779,7 +803,8 @@ class NiceGuiNode(Node):
         if connect_to:
             if connect_to in new_nodes:
                 rev = list(new_nodes[connect_to]['edges'])
-                if name not in rev: rev.append(name)
+                if name not in rev:
+                    rev.append(name)
                 new_nodes[connect_to] = {**new_nodes[connect_to], 'edges': rev}
             for entry in self._topo_doc.get('nodes', []):
                 n = entry.get('node', {})
@@ -798,15 +823,16 @@ class NiceGuiNode(Node):
 
         def _publish_and_persist():
             try:
-                import copy, yaml as _yaml
                 map_file      = f'/workspace/maps/{map_name}'
                 installed_src = ('/workspace/install/topological_navigation/share/'
                                  'topological_navigation/config/mixed_actions_map.yaml')
 
                 if os.path.exists(map_file):
-                    with open(map_file) as f: file_doc = _yaml.safe_load(f)
+                    with open(map_file, encoding='utf-8') as f:
+                        file_doc = yaml.safe_load(f)
                 elif os.path.exists(installed_src):
-                    with open(installed_src) as f: file_doc = _yaml.safe_load(f)
+                    with open(installed_src, encoding='utf-8') as f:
+                        file_doc = yaml.safe_load(f)
                     self.get_logger().info('Seeding from installed source')
                 else:
                     file_doc = copy.deepcopy(self._topo_doc)
@@ -835,8 +861,8 @@ class NiceGuiNode(Node):
                                 {'action': edge_action,
                                  'edge_id': f'{connect_to}_{name}', 'node': name})
                             break
-                with open(map_file, 'w') as f:
-                    _yaml.dump(file_doc, f, default_flow_style=False,
+                with open(map_file, 'w', encoding='utf-8') as f:
+                    yaml.dump(file_doc, f, default_flow_style=False,
                                allow_unicode=True, sort_keys=False)
 
                 self._topo_doc = file_doc
@@ -845,26 +871,33 @@ class NiceGuiNode(Node):
                                     f'{row_str}{gps_str} — reloading…')
 
                 def _call(client, req, timeout=5.0):
-                    ev = threading.Event(); res = [None]
-                    def _cb(f): res[0] = f.result(); ev.set()
+                    ev = threading.Event()
+                    res = [None]
+                    def _cb(f):
+                        res[0] = f.result()
+                        ev.set()
                     client.call_async(req).add_done_callback(_cb)
-                    ev.wait(timeout=timeout); return res[0]
+                    ev.wait(timeout=timeout)
+                    return res[0]
 
                 if _TOPO_SRV_OK:
                     sw = WriteTopologicalMap.Request()
-                    sw.filename = f'/workspace/maps/{map_name}'; sw.no_alias = True
+                    sw.filename = f'/workspace/maps/{map_name}'
+                    sw.no_alias = True
                     sr = _call(self._switch_map_cli, sw)
                     if sr and sr.success:
                         self.drop_status = (f'{name}{conn_str} at ({x},{y})'
                                             f'{row_str}{gps_str} — live')
                     else:
-                        msg = String(); msg.data = json.dumps(self._topo_doc, ensure_ascii=False)
+                        msg = String()
+                        msg.data = json.dumps(self._topo_doc, ensure_ascii=False)
                         self._topo_map_pub.publish(msg)
                         err = sr.message if sr else 'timeout'
                         self.drop_status = f'{name}{conn_str} saved (switch failed: {err})'
                         self.get_logger().warn(f'switch_topological_map failed ({err})')
                 else:
-                    msg = String(); msg.data = json.dumps(self._topo_doc, ensure_ascii=False)
+                    msg = String()
+                    msg.data = json.dumps(self._topo_doc, ensure_ascii=False)
                     self._topo_map_pub.publish(msg)
                     self.drop_status = (f'{name}{conn_str} at ({x},{y})'
                                         f'{row_str}{gps_str} — live (no srv)')
@@ -882,9 +915,11 @@ class NiceGuiNode(Node):
                     row_id: Optional[int], row_role: Optional[str]) -> None:
         prefix = re.sub(r'[^A-Z0-9_]', '', prefix.strip().upper().replace(' ', '_'))
         if not prefix:
-            self.track_status = 'ERROR: prefix required'; return
+            self.track_status = 'ERROR: prefix required'
+            return
         if self._track_timer is not None:
-            self.track_status = 'ERROR: already running'; return
+            self.track_status = 'ERROR: already running'
+            return
         existing = [n for n in self.topo_nodes
                     if n.startswith(prefix + '_') and n[len(prefix)+1:].isdigit()]
         self._track_counter = (max(int(n[len(prefix)+1:]) for n in existing)
@@ -910,7 +945,8 @@ class NiceGuiNode(Node):
 
     def stop_track(self) -> None:
         if self._track_timer is not None:
-            self._track_timer.cancel(); self._track_timer = None
+            self._track_timer.cancel()
+            self._track_timer = None
         if self._track_is_row and self._track_counter > 0:
             last_name = f'{self._track_prefix}_{self._track_counter}'
             self._patch_node_role(last_name, 'exit')
@@ -918,8 +954,11 @@ class NiceGuiNode(Node):
                                  f'  (#{self._track_counter} nodes)')
         else:
             self.track_status = f'stopped at #{self._track_counter}'
-        self._track_counter = 0; self._track_prefix = ''
-        self._track_row_id  = None; self._track_is_row = False; self._track_first = True
+        self._track_counter = 0
+        self._track_prefix = ''
+        self._track_row_id  = None
+        self._track_is_row = False
+        self._track_first = True
 
     # ── shared topo-map persistence helper ────────────────────────────────────
 
@@ -932,11 +971,12 @@ class NiceGuiNode(Node):
 
         def _work():
             try:
-                import copy, yaml as _yaml
                 if os.path.exists(map_file):
-                    with open(map_file) as f: file_doc = _yaml.safe_load(f)
+                    with open(map_file, encoding='utf-8') as f:
+                        file_doc = yaml.safe_load(f)
                 elif os.path.exists(installed_src):
-                    with open(installed_src) as f: file_doc = _yaml.safe_load(f)
+                    with open(installed_src, encoding='utf-8') as f:
+                        file_doc = yaml.safe_load(f)
                 else:
                     file_doc = copy.deepcopy(self._topo_doc)
 
@@ -960,31 +1000,38 @@ class NiceGuiNode(Node):
 
                 modify_fn(file_doc)
 
-                with open(map_file, 'w') as f:
-                    _yaml.dump(file_doc, f, default_flow_style=False,
+                with open(map_file, 'w', encoding='utf-8') as f:
+                    yaml.dump(file_doc, f, default_flow_style=False,
                                allow_unicode=True, sort_keys=False)
                 self._topo_doc = file_doc
 
                 def _call(client, req, timeout=5.0):
-                    ev = threading.Event(); res = [None]
-                    def _cb(f): res[0] = f.result(); ev.set()
+                    ev = threading.Event()
+                    res = [None]
+                    def _cb(f):
+                        res[0] = f.result()
+                        ev.set()
                     client.call_async(req).add_done_callback(_cb)
-                    ev.wait(timeout=timeout); return res[0]
+                    ev.wait(timeout=timeout)
+                    return res[0]
 
                 if _TOPO_SRV_OK:
                     sw = WriteTopologicalMap.Request()
-                    sw.filename = map_file; sw.no_alias = True
+                    sw.filename = map_file
+                    sw.no_alias = True
                     sr = _call(self._switch_map_cli, sw)
                     if sr and sr.success:
                         setattr(self, status_attr, f'{success_msg} — live')
                     else:
-                        msg = String(); msg.data = json.dumps(self._topo_doc, ensure_ascii=False)
+                        msg = String()
+                        msg.data = json.dumps(self._topo_doc, ensure_ascii=False)
                         self._topo_map_pub.publish(msg)
                         err = sr.message if sr else 'timeout'
                         setattr(self, status_attr,
                                 f'{success_msg} (switch failed: {err})')
                 else:
-                    msg = String(); msg.data = json.dumps(self._topo_doc, ensure_ascii=False)
+                    msg = String()
+                    msg.data = json.dumps(self._topo_doc, ensure_ascii=False)
                     self._topo_map_pub.publish(msg)
                     setattr(self, status_attr, f'{success_msg} — live (no srv)')
                 self.get_logger().info(f'_persist_and_reload: {success_msg}')
@@ -1001,16 +1048,18 @@ class NiceGuiNode(Node):
         prefix = re.sub(r'[^A-Z0-9_]', '',
                         (prefix or '').strip().upper().replace(' ', '_'))
         if not prefix:
-            self.f2c_save_status = 'ERROR: prefix required'; return
+            self.f2c_save_status = 'ERROR: prefix required'
+            return
         if not self._f2c_swaths:
             self.f2c_save_status = 'ERROR: no rows planned — click Plan Rows first'
             return
         if self.latest_odom is None:
-            self.f2c_save_status = 'ERROR: no odometry'; return
+            self.f2c_save_status = 'ERROR: no odometry'
+            return
         if self.latest_gps is None:
-            self.f2c_save_status = 'ERROR: no GPS message on /gnss/fix yet'; return
+            self.f2c_save_status = 'ERROR: no GPS message on /gnss/fix yet'
+            return
 
-        import math
         _lat = self.latest_gps.latitude
         _lon = self.latest_gps.longitude
         _status = self.latest_gps.status.status
@@ -1028,7 +1077,8 @@ class NiceGuiNode(Node):
                 f'(lat={_lat:.7f}, lon={_lon:.7f})')
 
         if not self._topo_doc:
-            self.f2c_save_status = 'ERROR: map not loaded'; return
+            self.f2c_save_status = 'ERROR: map not loaded'
+            return
 
         anchor_x   = 0.0 if self._is_sim else self.latest_odom.pose.pose.position.x
         anchor_y   = 0.0 if self._is_sim else self.latest_odom.pose.pose.position.y  
@@ -1071,6 +1121,20 @@ class NiceGuiNode(Node):
         verts = [{'x': -0.5, 'y': -0.5}, {'x':  0.5, 'y': -0.5},
                  {'x':  0.5, 'y':  0.5}, {'x': -0.5, 'y':  0.5}]
 
+        def _disk_node(name, x, y, role, lat, lon, edges, rid):
+            meta = {'map': map_name, 'node': name, 'pointset': map_name}
+            props = {'xy_goal_tolerance': 0.1, 'yaw_goal_tolerance': 0.05,
+                        'dropped_by': 'webui_f2c', 'timestamp': timestamp,
+                        'gps_lat': round(lat, 7), 'gps_lon': round(lon, 7),
+                        'gps_fix_type': fix_type, 'gps_hdop': None,
+                        'row_id': rid, 'row_role': role}
+            return {'meta': meta, 'node': {
+                'edges': edges, 'name': name, 'nav_frame': nav_frame,
+                'pose': {'orientation': {'w': 1.0, 'x': 0.0, 'y': 0.0, 'z': 0.0},
+                            'position':    {'x': x,   'y': y,   'z': 0.0}},
+                'properties': props, 'verts': verts,
+            }}
+
         for i, swath in enumerate(self._f2c_swaths):
             if len(swath) < 2:
                 continue
@@ -1086,26 +1150,14 @@ class NiceGuiNode(Node):
             in_name  = f'{prefix}_R{rid}_IN'
             out_name = f'{prefix}_R{rid}_OUT'
             if not overwrite and (in_name in new_topo_nodes or out_name in new_topo_nodes):
-                skipped.append(rid); continue
+                skipped.append(rid)
+                continue
 
-            def _disk_node(name, x, y, role, lat, lon, edges):
-                meta = {'map': map_name, 'node': name, 'pointset': map_name}
-                props = {'xy_goal_tolerance': 0.1, 'yaw_goal_tolerance': 0.05,
-                         'dropped_by': 'webui_f2c', 'timestamp': timestamp,
-                         'gps_lat': round(lat, 7), 'gps_lon': round(lon, 7),
-                         'gps_fix_type': fix_type, 'gps_hdop': None,
-                         'row_id': rid, 'row_role': role}
-                return {'meta': meta, 'node': {
-                    'edges': edges, 'name': name, 'nav_frame': nav_frame,
-                    'pose': {'orientation': {'w': 1.0, 'x': 0.0, 'y': 0.0, 'z': 0.0},
-                             'position':    {'x': x,   'y': y,   'z': 0.0}},
-                    'properties': props, 'verts': verts,
-                }}
 
             in_edges = [{'action': _ROW_ACTION,
                          'edge_id': f'{in_name}_{out_name}', 'node': out_name}]
-            new_entries.append(_disk_node(in_name,  ix, iy, 'entry', in_lat,  in_lon,  in_edges))
-            new_entries.append(_disk_node(out_name, ox, oy, 'exit',  out_lat, out_lon, []))
+            new_entries.append(_disk_node(in_name,  ix, iy, 'entry', in_lat,  in_lon,  in_edges, rid))
+            new_entries.append(_disk_node(out_name, ox, oy, 'exit',  out_lat, out_lon, [], rid))
 
             ui_meta_common = {'dropped_by': 'webui_f2c', 'timestamp': timestamp,
                               'gps_fix_type': fix_type, 'gps_hdop': None,
@@ -1241,7 +1293,8 @@ class NiceGuiNode(Node):
 
     def repair_row_connectivity(self, connect_to: Optional[str] = None) -> None:
         if not self._topo_doc:
-            self.f2c_save_status = 'ERROR: map not loaded'; return
+            self.f2c_save_status = 'ERROR: map not loaded'
+            return
 
         rows: dict = {}
         coords: dict = {}   # node_name -> (x, y) for same-end classification
@@ -1350,9 +1403,11 @@ class NiceGuiNode(Node):
 
     def delete_topo_node(self, name: str) -> None:
         if not name or name not in self.topo_nodes:
-            self.delete_status = f'ERROR: {name!r} not in map'; return
+            self.delete_status = f'ERROR: {name!r} not in map'
+            return
         if not self._topo_doc:
-            self.delete_status = 'ERROR: map not loaded'; return
+            self.delete_status = 'ERROR: map not loaded'
+            return
 
         new_nodes = {}
         for nm, nd in self.topo_nodes.items():
@@ -1382,9 +1437,11 @@ class NiceGuiNode(Node):
         targets = {nm for nm, nd in self.topo_nodes.items()
                    if nd.get('meta', {}).get('row_id') == row_id}
         if not targets:
-            self.delete_status = f'ERROR: no nodes for row {row_id}'; return
+            self.delete_status = f'ERROR: no nodes for row {row_id}'
+            return
         if not self._topo_doc:
-            self.delete_status = 'ERROR: map not loaded'; return
+            self.delete_status = 'ERROR: map not loaded'
+            return
 
         new_nodes = {}
         for nm, nd in self.topo_nodes.items():
@@ -1454,30 +1511,34 @@ class NiceGuiNode(Node):
     # ── existing helpers below ───────────────────────────────────────────────
 
     def _patch_node_role(self, node_name: str, role: str) -> None:
-        import yaml as _yaml
         if node_name in self.topo_nodes:
             nd = dict(self.topo_nodes[node_name])
             nd['meta'] = {**nd.get('meta', {}), 'row_role': role}
-            new_nodes = dict(self.topo_nodes); new_nodes[node_name] = nd
+            new_nodes = dict(self.topo_nodes)
+            new_nodes[node_name] = nd
             self.topo_nodes = new_nodes
         for entry in self._topo_doc.get('nodes', []):
             n = entry.get('node', {})
             if n.get('name') == node_name:
                 entry.get('meta', {})['row_role'] = role
-                n.get('properties', {})['row_role'] = role; break
+                n.get('properties', {})['row_role'] = role
+                break
         map_name = self._topo_doc.get('name', 'mixed_test_map')
         map_file = f'/workspace/maps/{map_name}'
         def _write():
             try:
-                if not os.path.exists(map_file): return
-                with open(map_file) as f: doc = _yaml.safe_load(f)
+                if not os.path.exists(map_file):
+                    return
+                with open(map_file, encoding='utf-8') as f:
+                    doc = yaml.safe_load(f)
                 for entry in doc.get('nodes', []):
                     n = entry.get('node', {})
                     if n.get('name') == node_name:
                         entry.get('meta', {})['row_role'] = role
-                        n.get('properties', {})['row_role'] = role; break
-                with open(map_file, 'w') as f:
-                    _yaml.dump(doc, f, default_flow_style=False,
+                        n.get('properties', {})['row_role'] = role
+                        break
+                with open(map_file, 'w', encoding='utf-8') as f:
+                    yaml.dump(doc, f, default_flow_style=False,
                                allow_unicode=True, sort_keys=False)
             except Exception as e:
                 self.get_logger().error(f'_patch_node_role failed: {e}')
@@ -1492,9 +1553,12 @@ class NiceGuiNode(Node):
             tab_mission = ui.tab('Mission', icon='checklist')
             tab_system  = ui.tab('System',  icon='settings')
         with ui.tab_panels(tabs, value=tab_nav).classes('w-full'):
-            with ui.tab_panel(tab_nav):     self._nav_content()
-            with ui.tab_panel(tab_mission): self._mission_content()
-            with ui.tab_panel(tab_system):  self._system_content()
+            with ui.tab_panel(tab_nav):
+                self._nav_content()
+            with ui.tab_panel(tab_mission):
+                self._mission_content()
+            with ui.tab_panel(tab_system):
+                self._system_content()
 
     # ── Nav tab ───────────────────────────────────────────────────────────────
 
@@ -1672,9 +1736,11 @@ class NiceGuiNode(Node):
 
             cur = self.topo_current
             if cur and cur != '—':
-                cur_drop_lbl.set_text(f'→ {cur}'); cur_drop_lbl.style('color:#1a7f37')
+                cur_drop_lbl.set_text(f'→ {cur}')
+                cur_drop_lbl.style('color:#1a7f37')
             else:
-                cur_drop_lbl.set_text('no current node'); cur_drop_lbl.style('color:#8c959f')
+                cur_drop_lbl.set_text('no current node')
+                cur_drop_lbl.style('color:#8c959f')
             row_hint.set_text(_ROW_ACTION if row_id_input.value else _NAV_ACTION)
             row_hint.style('color:#0969da' if row_id_input.value else 'color:#8c959f')
             drop_status_lbl.set_text(self.drop_status)
@@ -1876,12 +1942,16 @@ class NiceGuiNode(Node):
         def do_clear():
             corners_ll.clear()
             for lyr in swath_layers:
-                try: lyr.run_method('remove')
-                except Exception: pass
+                try:
+                    lyr.run_method('remove')
+                except Exception:
+                    pass
             swath_layers.clear()
             if poly_layer[0] is not None:
-                try: poly_layer[0].run_method('remove')
-                except Exception: pass
+                try:
+                    poly_layer[0].run_method('remove')
+                except Exception:
+                    pass
                 poly_layer[0] = None
             # OBSTACLE: also tear down any in-progress obstacle polygon
             draw_handle.clear_in_progress()
@@ -1913,7 +1983,6 @@ class NiceGuiNode(Node):
             pad_m          = float(obstacle_pad.value or 0.0)
 
             try:
-                from nicegui import run as ng_run
                 swaths = await ng_run.io_bound(
                     _run_f2c, list(corners_ll), obstacle_rings,
                     width, angle_deg, pad_m,
@@ -1925,11 +1994,13 @@ class NiceGuiNode(Node):
                 return
 
             for lyr in swath_layers:
-                try: lyr.run_method('remove')
-                except Exception: pass
+                try:
+                    lyr.run_method('remove')
+                except Exception:
+                    pass
             swath_layers.clear()
 
-            for i, pts in enumerate(swaths):
+            for pts in swaths:
                 latlngs = [[lat, lon] for lat, lon in pts]
                 lyr = mission_map.generic_layer(
                     name='polyline',
@@ -2217,7 +2288,8 @@ class NiceGuiNode(Node):
 
                 def _save_mission():
                     if not mission_queue:
-                        self._mission_store._set_status('ERROR: queue is empty')
+                        # This is a protected method, we should probably find a better way of bubbling up the error.
+                        self._mission_store._set_status('ERROR: queue is empty')  # pylint: disable=protected-access
                         return
                     rows_for_store = [
                         next(
@@ -2234,9 +2306,12 @@ class NiceGuiNode(Node):
                     first_act    = mission_queue[0][1]
                     first_params = mission_queue[0][2]
                     rpt = int(save_repeat.value) if save_repeat.value else None
-                    self._mission_store.add(
+                    self._mission_store.add(  # pylint: disable=unexpected-keyword-arg
                         rows=rows_for_store,
                         action=first_act,
+                        # This kwarg doesn't seem to exist, does this code crash?
+                        # Let's leave it in for now, if someone discovers this comment on a crash
+                        # then the linter was right and we should fix the bug.
                         action_params=first_params,
                         name=save_name_input.value or '',
                         repeat_every_hours=rpt,
@@ -2322,10 +2397,8 @@ class NiceGuiNode(Node):
         key = (topic, is_float)
         if key not in self._tool_publishers:
             if is_float:
-                from std_msgs.msg import Float64
                 self._tool_publishers[key] = self.create_publisher(Float64, topic, 1)
             else:
-                from std_msgs.msg import Bool
                 self._tool_publishers[key] = self.create_publisher(Bool, topic, 1)
         return self._tool_publishers[key]
 
@@ -2333,15 +2406,16 @@ class NiceGuiNode(Node):
                            action_params: Optional[dict],
                            enable: bool) -> None:
         """Publish all (topic, value) pairs from action_ros_msgs."""
-        from std_msgs.msg import Bool, Float64
         for topic, value in action_ros_msgs(action_key, action_params, enable):
             try:
                 if isinstance(value, bool):
                     pub = self._get_tool_publisher(topic, is_float=False)
-                    msg = Bool(); msg.data = value
+                    msg = Bool()
+                    msg.data = value
                 else:
                     pub = self._get_tool_publisher(topic, is_float=True)
-                    msg = Float64(); msg.data = float(value)
+                    msg = Float64()
+                    msg.data = float(value)
                 pub.publish(msg)
             except Exception as exc:
                 self.get_logger().warn(
@@ -2391,8 +2465,6 @@ class NiceGuiNode(Node):
         status_lbl.set_text(f'Starting {len(steps)} step(s)…')
         status_lbl.style('color:#57606a')
 
-        import threading as _threading
-
         def _execute():
             success_overall = True
             for step_idx, (rid, entry_node, action, params) in enumerate(steps):
@@ -2431,16 +2503,15 @@ class NiceGuiNode(Node):
             self._mission_running = False
             self._mission_cancel  = False
 
-        _threading.Thread(target=_execute, daemon=True).start()
+        threading.Thread(target=_execute, daemon=True).start()
 
     def _send_goal_sync(self, target: str, timeout_sec: float = 300.0) -> bool:
         """Send a GotoNode goal and block until success/failure/cancel/timeout.
         Returns True on success.  Runs in the executor thread."""
-        import threading as _threading
         if not _ACTION_OK:
             return False
 
-        done_event = _threading.Event()
+        done_event = threading.Event()
         result_holder: list = [None]
 
         if not self._nav_ac.wait_for_server(timeout_sec=10.0):
@@ -2506,8 +2577,6 @@ class NiceGuiNode(Node):
         if not self._topo_doc:
             return 'ERROR: no map loaded'
 
-        import copy, yaml as _yaml
-
         map_name = self._topo_doc.get('name', 'mixed_test_map')
         map_file = f'/workspace/maps/{map_name}'
 
@@ -2520,13 +2589,13 @@ class NiceGuiNode(Node):
         try:
             # Read from disk so we archive the persisted state, not just memory
             if os.path.exists(map_file):
-                with open(map_file) as f:
-                    on_disk = _yaml.safe_load(f)
+                with open(map_file, encoding='utf-8') as f:
+                    on_disk = yaml.safe_load(f)
             else:
                 on_disk = copy.deepcopy(self._topo_doc)
 
-            with open(archive_path, 'w') as f:
-                _yaml.dump(on_disk, f, default_flow_style=False,
+            with open(archive_path, 'w', encoding='utf-8') as f:
+                yaml.dump(on_disk, f, default_flow_style=False,
                            allow_unicode=True, sort_keys=False)
 
             # Build empty map doc preserving header fields.
@@ -2548,8 +2617,8 @@ class NiceGuiNode(Node):
                     self._topo_doc.get('actions', {})),
                 'nodes':          [],
             }
-            with open(map_file, 'w') as f:
-                _yaml.dump(empty_doc, f, default_flow_style=False,
+            with open(map_file, 'w', encoding='utf-8') as f:
+                yaml.dump(empty_doc, f, default_flow_style=False,
                            allow_unicode=True, sort_keys=False)
 
             self._topo_doc  = empty_doc
@@ -2558,8 +2627,7 @@ class NiceGuiNode(Node):
             # Republish so topo nav stack sees the cleared map immediately
             try:
                 msg = __import__('std_msgs.msg', fromlist=['String']).String()
-                import json as _json
-                msg.data = _json.dumps(empty_doc, ensure_ascii=False)
+                msg.data = json.dumps(empty_doc, ensure_ascii=False)
                 self._topo_map_pub.publish(msg)
             except Exception:
                 pass
@@ -2598,7 +2666,8 @@ class NiceGuiNode(Node):
                         dot = ui.html('<span class="dot-off"></span>')
                         ui.label(label).classes('text-sm')
                     def _mk(d=dot, a=attr):
-                        def _u(): d.set_content(f'<span class="dot-{"warn" if getattr(self,a) else "ok"}"></span>')
+                        def _u():
+                            d.set_content(f'<span class="dot-{"warn" if getattr(self,a) else "ok"}"></span>')
                         return _u
                     ui.timer(0.2, _mk())
                 ui.html('<div class="sec-label mt-3">E-stops</div>')
@@ -2607,7 +2676,8 @@ class NiceGuiNode(Node):
                         dot = ui.html('<span class="dot-off"></span>')
                         ui.label(label).classes('text-sm')
                     def _mk2(d=dot, a=attr):
-                        def _u(): d.set_content(f'<span class="dot-{"warn" if getattr(self,a) else "off"}"></span>')
+                        def _u():
+                            d.set_content(f'<span class="dot-{"warn" if getattr(self,a) else "off"}"></span>')
                         return _u
                     ui.timer(0.2, _mk2())
         with ui.card().classes('w-full mt-3'):
@@ -2648,7 +2718,6 @@ class NiceGuiNode(Node):
                 _explorer_proc: list = [None]
                 _explorer_lbl = ui.label('').classes('text-xs font-mono').style('color:#57606a')
                 def _start_explorer():
-                    import subprocess
                     if _explorer_proc[0] is not None and _explorer_proc[0].poll() is None:
                         _explorer_lbl.set_text('already running')
                         return
@@ -2678,7 +2747,6 @@ class NiceGuiNode(Node):
                     'font-family:\'Courier New\',monospace;">'
                     '📄 Documentation</a>'
                 )
-                _explorer_lbl
 
                 ui.separator().classes('w-full my-1')
 
@@ -2686,7 +2754,6 @@ class NiceGuiNode(Node):
                 _grapher_proc: list = [None]
                 _grapher_lbl = ui.label('').classes('text-xs font-mono').style('color:#57606a')
                 def _start_grapher():
-                    import subprocess
                     if _grapher_proc[0] is not None and _grapher_proc[0].poll() is None:
                         _grapher_lbl.set_text('already running')
                         return
@@ -2718,7 +2785,6 @@ class NiceGuiNode(Node):
                     'font-family:\'Courier New\',monospace;">'
                     '📄 Documentation</a>'
                 )
-                _grapher_lbl
 
                 ui.separator().classes('w-full my-1')
 
@@ -2728,10 +2794,6 @@ class NiceGuiNode(Node):
                 _rviz_lbl = ui.label('').classes('text-xs font-mono').style('color:#57606a')
 
                 def _start_rviz():
-                    import subprocess, time
-                    from ament_index_python.packages import (
-                        get_package_share_directory, PackageNotFoundError,
-                    )
                     if _rviz_proc[0] is not None and _rviz_proc[0].poll() is None:
                         _rviz_lbl.set_text('already running')
                         return
@@ -2747,6 +2809,8 @@ class NiceGuiNode(Node):
                         except PackageNotFoundError:
                             rviz_cfg = None
 
+                        # We don't use `with` for these because we save the process arguments and
+                        # manage them manually.
                         # Spawn Xvfb only if :98 isn't already taken (re-launch safe).
                         if not os.path.exists('/tmp/.X98-lock'):
                             _rviz_daemons.append(subprocess.Popen(
@@ -2808,7 +2872,6 @@ class NiceGuiNode(Node):
                     'font-family:\'Courier New\',monospace;">'
                     '↗ RViz (noVNC)</a>'
                 )
-                _rviz_lbl
                 ui.separator().classes('w-full my-1')
 
                 # ── Gazebo Sim ───────────────────────────────────────────
@@ -2835,12 +2898,13 @@ class NiceGuiNode(Node):
                 ]
 
                 def _start_gazebo_native():
-                    import subprocess
                     if _gazebo_proc[0] is not None and _gazebo_proc[0].poll() is None:
                         _gazebo_lbl.set_text('already running')
                         return
                     try:
                         env = {**_SIM_ENV, 'DISPLAY': os.environ.get('DISPLAY', ':0')}
+                        # We don't use `with` for these because we save the process arguments and
+                        # manage them manually.
                         _gazebo_proc[0] = subprocess.Popen(
                             _SIM_CMD,
                             stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
@@ -2853,11 +2917,12 @@ class NiceGuiNode(Node):
                         _gazebo_lbl.style('color:#cf222e')
 
                 def _start_gazebo_browser():
-                    import subprocess, time
                     if _gazebo_proc[0] is not None and _gazebo_proc[0].poll() is None:
                         _gazebo_lbl.set_text('already running')
                         return
                     try:
+                        # We don't use `with` for these because we save the process arguments and
+                        # manage them manually.
                         # Spawn Xvfb on :99 only if not already taken
                         if not os.path.exists('/tmp/.X99-lock'):
                             p = subprocess.Popen(
@@ -2970,7 +3035,6 @@ class NiceGuiNode(Node):
                         'font-family:\'Courier New\',monospace;">'
                         '↗ Gazebo (noVNC)</a>'
                     )
-                _gazebo_lbl
 
         with ui.card().classes('w-full mt-3'):
             ui.label('Map Archive').classes('font-semibold mb-2')
@@ -3003,17 +3067,19 @@ class NiceGuiNode(Node):
 
             ui.button('Archive & Clear Map', on_click=_do_archive).props(
                 'color=negative outline no-caps').classes('px-4')
-            archive_lbl
 
     def toggle_estop(self) -> None:
         self.soft_estop_active = not self.soft_estop_active
-        msg = Bool(); msg.data = self.soft_estop_active
+        msg = Bool()
+        msg.data = self.soft_estop_active
         self.estop_publisher.publish(msg)
 
     def send_speed(self, x: float, y: float) -> None:
         msg = Twist()
-        msg.linear.x = x; msg.angular.z = -y
-        self.linear_velocity = x; self.angular_velocity = y
+        msg.linear.x = x
+        msg.angular.z = -y
+        self.linear_velocity = x
+        self.angular_velocity = y
         self.cmd_vel_publisher.publish(msg)
 
     def store_gps(self, msg: NavSatFix) -> None:
@@ -3042,12 +3108,14 @@ class NiceGuiNode(Node):
         msg.altitude = self._FAKE_GPS_ALT
         self._fake_gps_pub.publish(msg)
 
+    # pylint: disable=multiple-statements
     def store_battery(self, msg: BatteryState) -> None:      self.latest_battery = msg
     def update_bumper_front_top(self, msg: Bool) -> None:    self.bumper_front_top_active = msg.data
     def update_bumper_front_bottom(self, msg: Bool) -> None: self.bumper_front_bottom_active = msg.data
     def update_bumper_back(self, msg: Bool) -> None:         self.bumper_back_active = msg.data
     def update_estop_front(self, msg: Bool) -> None:         self.estop_front_active = msg.data
     def update_estop_back(self, msg: Bool) -> None:          self.estop_back_active = msg.data
+    # pylint: enable=multiple-statements
 
 
 # ── entrypoints ───────────────────────────────────────────────────────────────

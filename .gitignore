@@ -1,6 +1,11 @@
 .venv/
 venv/
 *.env
+bin
+lib
+lib64
+share
+pyvenv.cfg
 
 *.egg-info/
 *.swp

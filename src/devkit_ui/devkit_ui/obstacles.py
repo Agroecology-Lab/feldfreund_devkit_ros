@@ -326,7 +326,7 @@ class ObstacleManager:
         try:
             if not os.path.exists(self._path):
                 return
-            with open(self._path) as fh:
+            with open(self._path, encoding='utf-8') as fh:
                 doc = yaml.safe_load(fh) or {}
             loaded = doc.get('obstacles', []) or []
             with self._lock:
@@ -355,7 +355,7 @@ class ObstacleManager:
             tmp = self._path + '.tmp'
             with self._lock:
                 snapshot = list(self._obstacles)
-            with open(tmp, 'w') as fh:
+            with open(tmp, 'w', encoding='utf-8') as fh:
                 yaml.dump({'obstacles': snapshot}, fh,
                           default_flow_style=False, sort_keys=False,
                           allow_unicode=True)

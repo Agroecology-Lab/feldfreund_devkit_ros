@@ -53,12 +53,12 @@ from launch_ros.actions import Node
 
 def _nav2_sim_nodes(params_file: str) -> list:
     remappings = [('/tf', 'tf'), ('/tf_static', 'tf_static')]
-    common = dict(
-        output='screen',
-        parameters=[{'use_sim_time': True}, params_file],
-        arguments=['--ros-args', '--log-level', 'info'],
-        remappings=remappings,
-    )
+    common = {
+        "output": 'screen',
+        "parameters": [{'use_sim_time': True}, params_file],
+        "arguments": ['--ros-args', '--log-level', 'info'],
+        "remappings": remappings,
+    }
 
     return [
         Node(
