@@ -19,7 +19,7 @@ from typing import Optional
 import yaml
 
 from geometry_msgs.msg import Twist
-from sensor_msgs.msg import NavSatFix, NavSatStatus
+from sensor_msgs.msg import BatteryState, NavSatFix, NavSatStatus
 from nav_msgs.msg import Odometry
 from nicegui import app, ui, ui_run, run as ng_run
 from nicegui.events import ClickEventArguments
@@ -30,7 +30,6 @@ from rclpy.qos import (
     DurabilityPolicy, Duration, HistoryPolicy,
     LivelinessPolicy, QoSProfile, ReliabilityPolicy,
 )
-from sensor_msgs.msg import BatteryState, NavSatFix
 from std_msgs.msg import Bool, Empty, Float64, String
 # The following imports get generated in the Dockerfile, they aren't available to pylint
 # pylint: disable=import-error
@@ -1081,7 +1080,7 @@ class NiceGuiNode(Node):
             return
 
         anchor_x   = 0.0 if self._is_sim else self.latest_odom.pose.pose.position.x
-        anchor_y   = 0.0 if self._is_sim else self.latest_odom.pose.pose.position.y  
+        anchor_y   = 0.0 if self._is_sim else self.latest_odom.pose.pose.position.y
         # Anchor for the lat/lon -> local xy conversion. On real hardware
         # latest_gps IS the survey origin and is correct. In sim, latest_gps is
         # the static datum fix, which is generally NOT where the F2C field was
@@ -2979,7 +2978,6 @@ class NiceGuiNode(Node):
                                'agro_robot_sim/worlds/maize.world')
 
                 def _rebuild_world():
-                    import subprocess
                     if _gazebo_proc[0] is not None and _gazebo_proc[0].poll() is None:
                         _gazebo_lbl.set_text(
                             'stop the sim before rebuilding — Gazebo reads the '
@@ -2999,7 +2997,10 @@ class NiceGuiNode(Node):
                              '--topo', _MAP_FILE,
                              '--out', _WORLD_FILE,
                              '--name', 'maize_field'],
-                            capture_output=True, text=True, timeout=120,
+                            capture_output=True,
+                            text=True,
+                            timeout=120,
+                            check=True,
                         )
                         if r.returncode != 0:
                             err = (r.stderr or r.stdout or 'unknown error').strip()
