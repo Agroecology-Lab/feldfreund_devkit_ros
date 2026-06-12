@@ -307,15 +307,29 @@ class DevkitManager:
             "python3 /workspace/get_topo_maize_world.py "
             "--topo /workspace/maps/maize_map "
             f"--out {topo_world} --name maize_field && "
-            "cp /workspace/src/devkit_launch/resource/fake_nav2_server.py "
-            "/workspace/src/topological_navigation/topological_nav_simulator/topological_nav_simulator/fake_nav2_server.py && "
         ) if is_sim == 'true' else ""
+
+        # In sim mode launch sowbot_sim (real Nav2 + topo nav + UI) instead of
+        # devkit.launch.py.  fake_nav2_server is intentionally not copied — it
+        # must not run alongside Gazebo or it steals /navigate_to_pose goals
+        # before real Nav2 can handle them.
+        if is_sim == 'true':
+            nav_launch_cmd = (
+                "ros2 launch devkit_launch sowbot_sim.launch.py "
+                "world:=maize.world "
+                + " ".join(extra_args)
+            )
+        else:
+            nav_launch_cmd = (
+                f"ros2 launch devkit_launch devkit.launch.py "
+                f"sim:={is_sim} rover_port:={r_port} mcu_port:={mcu_port} "
+                + " ".join(extra_args)
+            )
 
         ros_command = (
             f"{self._ros_source()} && "
-            + world_gen +
-            f"ros2 launch devkit_launch devkit.launch.py sim:={is_sim} rover_port:={r_port} mcu_port:={mcu_port} " +
-            " ".join(extra_args)
+            + world_gen
+            + nav_launch_cmd
         )
 
         if shutil.which('xhost'):
