@@ -28,6 +28,16 @@ Without the bootstraps:
     server never becomes ready.
   - localisation2.py blocks on map → base_link (hardcoded upstream
     default) and the action server never becomes ready.
+
+Startup sequencing (why 15 s timer)
+------------------------------------
+map_manager2  starts at ~t+0 s and publishes the topo map.
+localisation2 starts at ~t+2 s and signals ready after receiving the map
+              and confirming the TF chain (~t+5 s).
+navigation2   must NOT start waiting for localisation until localisation
+              has had time to reach ready state.  With the 5 s timer the
+              two were racing; raising to 15 s gives localisation a
+              comfortable head start so navigation2 finds it immediately.
 """
 
 import importlib.util
@@ -133,12 +143,16 @@ def generate_launch_description():
         parameters=[{'sim': True}],
     )
 
-    # ── Topo nav + Nav2 (delayed to let static TFs settle) ────────────────────
-    # The 5 s timer also gives the user time to start Gazebo immediately
-    # after manage.py boots; if Gazebo starts later, Nav2/topo-nav wait
-    # for real TF data before accepting goals.
+    # ── Topo nav + Nav2 (delayed to let static TFs and topo stack settle) ───────
+    # 15 s gives map_manager2 and localisation2 time to fully initialise
+    # before navigation2 starts waiting for the localisation ready signal.
+    # With 5 s the two were racing: navigation2 timed out before
+    # localisation2 had finished building the KD-tree and confirming the
+    # TF chain, causing the "action server not ready" error.
+    # If Gazebo starts later, Nav2/topo-nav wait for real TF data before
+    # accepting goals — the bootstrap TFs keep them unblocked in the interim.
     topo_stack = TimerAction(
-        period=5.0,
+        period=15.0,
         actions=sowbot_sim._topo_nav_nodes(tmap2_file, devkit_launch_pkg),
     )
 
