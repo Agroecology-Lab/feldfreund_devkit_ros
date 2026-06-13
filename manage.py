@@ -314,9 +314,13 @@ class DevkitManager:
         # must not run alongside Gazebo or it steals /navigate_to_pose goals
         # before real Nav2 can handle them.
         if is_sim == 'true':
+            # sim_nav.launch.py starts topo nav + Nav2 + UI but NOT Gazebo.
+            # Gazebo is started by the user from the UI System tab, which runs
+            # sowbot_sim.launch.py.  Separating them prevents a duplicate Gazebo
+            # instance on container boot and lets the user restart Gazebo without
+            # tearing down the nav stack.
             nav_launch_cmd = (
-                "ros2 launch devkit_launch sowbot_sim.launch.py "
-                "world:=maize.world "
+                "ros2 launch devkit_launch sim_nav.launch.py "
                 + " ".join(extra_args)
             )
         else:
