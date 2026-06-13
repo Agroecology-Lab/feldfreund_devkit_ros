@@ -81,7 +81,7 @@ def generate_launch_description():
         executable='relay',
         name='odom_wheels_relay',
         arguments=['/odom', '/odom/wheels'],
-        parameters=[{'use_sim_time': True}],
+        parameters=[{'use_sim_time': False}],
         output='screen',
     )
 
@@ -91,7 +91,7 @@ def generate_launch_description():
         executable='static_transform_publisher',
         name='map_to_odom_static',
         arguments=['0', '0', '0', '0', '0', '0', 'map', 'odom'],
-        parameters=[{'use_sim_time': True}],
+        parameters=[{'use_sim_time': False}],
         output='screen',
     )
 
@@ -111,7 +111,7 @@ def generate_launch_description():
         executable='static_transform_publisher',
         name='odom_to_base_footprint_static',
         arguments=['0', '0', '0', '0', '0', '0', 'odom', 'base_footprint'],
-        parameters=[{'use_sim_time': True}],
+        parameters=[{'use_sim_time': False}],
         output='screen',
     )
 
@@ -128,7 +128,7 @@ def generate_launch_description():
         executable='static_transform_publisher',
         name='base_footprint_to_base_link_static',
         arguments=['0', '0', '0', '0', '0', '0', 'base_footprint', 'base_link'],
-        parameters=[{'use_sim_time': True}],
+        parameters=[{'use_sim_time': False}],
         output='screen',
     )
 
@@ -162,7 +162,7 @@ def generate_launch_description():
             executable='fake_nav2_server',
             name='fake_nav2_server',
             output='screen',
-            parameters=[{'use_sim_time': True}],
+            parameters=[{'use_sim_time': False}],  # no /clock in sim_nav; wall time keeps TF timestamps valid
         )],
     )
 
@@ -176,7 +176,7 @@ def generate_launch_description():
     # accepting goals — the bootstrap TFs keep them unblocked in the interim.
     topo_stack = TimerAction(
         period=15.0,
-        actions=sowbot_sim._topo_nav_nodes(tmap2_file, devkit_launch_pkg),
+        actions=sowbot_sim._topo_nav_nodes(tmap2_file, devkit_launch_pkg, use_sim_time=False),
     )
 
     return LaunchDescription([
