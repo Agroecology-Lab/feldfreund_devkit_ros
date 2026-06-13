@@ -11,8 +11,8 @@ metric_map: maize_map
 name: maize_map
 pointset: maize_map
 transformation:
-  topo_frame_id: topo_map
-  parent: map
+  topo_frame_id: map
+  parent: odom
   rotation:
     w: 1.0
     x: 0.0
