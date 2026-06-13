@@ -44,11 +44,11 @@ from launch_ros.actions import Node
 # Nav2 nodes — real Nav2 against sim time, no collision_monitor
 # ---------------------------------------------------------------------------
 
-def _nav2_sim_nodes(params_file: str) -> list:
+def _nav2_sim_nodes(params_file: str, use_sim_time: bool = True) -> list:
     remappings = [('/tf', 'tf'), ('/tf_static', 'tf_static')]
     common = {
         "output": 'screen',
-        "parameters": [{'use_sim_time': True}, params_file],
+        "parameters": [{'use_sim_time': use_sim_time}, params_file],
         "arguments": ['--ros-args', '--log-level', 'info'],
         "remappings": remappings,
     }
@@ -60,7 +60,7 @@ def _nav2_sim_nodes(params_file: str) -> list:
             name='controller_server',
             remappings=remappings + [('cmd_vel', 'cmd_vel_nav')],
             output='screen',
-            parameters=[{'use_sim_time': True}, params_file],
+            parameters=[{'use_sim_time': use_sim_time}, params_file],
             arguments=['--ros-args', '--log-level', 'info'],
         ),
         Node(package='nav2_smoother',  executable='smoother_server',   name='smoother_server',   **common),
@@ -72,7 +72,7 @@ def _nav2_sim_nodes(params_file: str) -> list:
             name='behavior_server',
             remappings=remappings + [('cmd_vel', 'cmd_vel_nav')],
             output='screen',
-            parameters=[{'use_sim_time': True}, params_file],
+            parameters=[{'use_sim_time': use_sim_time}, params_file],
             arguments=['--ros-args', '--log-level', 'info'],
         ),
         Node(package='nav2_bt_navigator',      executable='bt_navigator',      name='bt_navigator',      **common),
@@ -86,7 +86,7 @@ def _nav2_sim_nodes(params_file: str) -> list:
                 ('cmd_vel_smoothed', 'cmd_vel'),
             ],
             output='screen',
-            parameters=[{'use_sim_time': True}, params_file],
+            parameters=[{'use_sim_time': use_sim_time}, params_file],
             arguments=['--ros-args', '--log-level', 'info'],
         ),
         # collision_monitor intentionally omitted — see module docstring.
@@ -97,7 +97,7 @@ def _nav2_sim_nodes(params_file: str) -> list:
             name='lifecycle_manager_navigation',
             output='screen',
             parameters=[
-                {'use_sim_time': True},
+                {'use_sim_time': use_sim_time},
                 {'autostart': True},
                 params_file,
             ],
@@ -109,14 +109,14 @@ def _nav2_sim_nodes(params_file: str) -> list:
 # Topo nav nodes
 # ---------------------------------------------------------------------------
 
-def _topo_nav_nodes(tmap2_file: str, devkit_launch_pkg: str) -> list:
+def _topo_nav_nodes(tmap2_file: str, devkit_launch_pkg: str, use_sim_time: bool = True) -> list:
     topo_share = get_package_share_directory('topological_navigation')
     map_path = tmap2_file or os.path.join(
         topo_share, 'config', 'mixed_actions_map.yaml')
 
     nav2_params = os.path.join(devkit_launch_pkg, 'config', 'nav2_params_sim.yaml')
 
-    sim_time = {'use_sim_time': True}
+    sim_time = {'use_sim_time': use_sim_time}
 
     return [
         Node(
@@ -138,7 +138,7 @@ def _topo_nav_nodes(tmap2_file: str, devkit_launch_pkg: str) -> list:
             ),
         ]),
 
-        TimerAction(period=8.0, actions=_nav2_sim_nodes(nav2_params)),
+        TimerAction(period=8.0, actions=_nav2_sim_nodes(nav2_params, use_sim_time=use_sim_time)),
 
         TimerAction(period=4.0, actions=[
             Node(
