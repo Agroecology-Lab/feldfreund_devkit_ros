@@ -2305,12 +2305,9 @@ class NiceGuiNode(Node):
                     first_act    = mission_queue[0][1]
                     first_params = mission_queue[0][2]
                     rpt = int(save_repeat.value) if save_repeat.value else None
-                    self._mission_store.add(  # pylint: disable=unexpected-keyword-arg
+                    self._mission_store.add(
                         rows=rows_for_store,
                         action=first_act,
-                        # This kwarg doesn't seem to exist, does this code crash?
-                        # Let's leave it in for now, if someone discovers this comment on a crash
-                        # then the linter was right and we should fix the bug.
                         action_params=first_params,
                         name=save_name_input.value or '',
                         repeat_every_hours=rpt,
