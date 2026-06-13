@@ -1,27 +1,20 @@
 """
-sowbot.launch.py
-================
-Simulation launch for the Sowbot agricultural robot.
+sowbot_sim.launch.py
+====================
+Gazebo sim layer for the Sowbot — launched from the UI System tab.
 
-Combines:
-  - agro_robot_sim sim layer (Gazebo Harmonic + robot spawn + ros_gz_bridge)
-  - devkit topo nav stack (map_manager2, localisation, navigation2, visualiser)
-  - Real Nav2 backend (no fake_nav2_server, no AMCL, no map_server, no SLAM)
+Starts: Gazebo (gz sim), robot_state_publisher, spawn agro_robot,
+ros_gz_bridge (via YAML config — see agro_robot_sim/config/ros_gz_bridge.yaml).
 
-Topic wiring vs real hardware:
-  - Gazebo publishes /odom (odom→base_footprint TF + nav_msgs/Odometry)
-  - We relay /odom → /odom/wheels so fusioncore-style consumers are happy
-  - Nav2 odom_topic set to /odom (not /fusion/odom — no fusioncore in sim)
-  - /cmd_vel bridged Gazebo↔ROS by ros_gz_bridge in sim.launch.py
-  - velocity_smoother output remapped cmd_vel_smoothed → cmd_vel so it
-    actually reaches the bridge
-  - /clock bridged → use_sim_time: true on all nodes, including the topo
-    nav stack (otherwise TF lookups against sim-time stamps fail)
+Does NOT start: topo nav, Nav2, UI node.  Those run in sim_nav.launch.py
+which manage.py starts at container boot.  Keeping the layers separate means
+the user can restart Gazebo from the UI without tearing down the nav stack.
+
+Nav2 node helpers (_nav2_sim_nodes, _topo_nav_nodes) are defined here so that
+sim_nav.launch.py can import them via importlib without duplicating code.
 
 Robot model:
-  sim.launch.py spawns urdf:=sowbot_01.xacro (Amiga-NG primitive geometry).
-  To revert to the original agro_robot model omit the urdf argument or pass
-  urdf:=agro_robot.urdf.xacro.
+  Spawns urdf:=sowbot_01.xacro (Amiga-NG primitive geometry) by default.
 
 Topo map:
   Set TMAP2_FILE env var to override. Defaults to mixed_actions_map.yaml
@@ -42,7 +35,6 @@ from launch.actions import (
     IncludeLaunchDescription,
     TimerAction,
 )
-from launch.substitutions import PathJoinSubstitution
 from launch.launch_description_sources import PythonLaunchDescriptionSource
 from launch.substitutions import LaunchConfiguration
 from launch_ros.actions import Node
@@ -171,15 +163,11 @@ def _topo_nav_nodes(tmap2_file: str, devkit_launch_pkg: str) -> list:
 
 
 # ---------------------------------------------------------------------------
-# generate_launch_description
+# generate_launch_description — Gazebo sim layer only
 # ---------------------------------------------------------------------------
 
 def generate_launch_description():
-    pkg_agro          = get_package_share_directory('agro_robot_sim')
-    devkit_launch_pkg = get_package_share_directory('devkit_launch')
-    devkit_ui_pkg     = get_package_share_directory('devkit_ui')
-
-    tmap2_file = os.getenv('TMAP2_FILE', '')
+    pkg_agro = get_package_share_directory('agro_robot_sim')
 
     world_arg = DeclareLaunchArgument(
         'world',
@@ -187,10 +175,7 @@ def generate_launch_description():
         description='SDF world file name inside agro_robot_sim/worlds/',
     )
 
-    # ── Gazebo sim layer ──────────────────────────────────────────────────────
-    # Spawns sowbot_01.xacro (Amiga-NG visual model).
-    # sim.launch.py handles: gz sim, robot_state_publisher, spawn_entity,
-    # ros_gz_bridge for /cmd_vel /odom /tf /scan /imu /gps/fix /clock.
+    # sim.launch.py: gz sim + robot_state_publisher + spawn + ros_gz_bridge
     sim_launch = IncludeLaunchDescription(
         PythonLaunchDescriptionSource(
             os.path.join(pkg_agro, 'launch', 'sim.launch.py')
@@ -201,47 +186,7 @@ def generate_launch_description():
         }.items(),
     )
 
-    # ── /odom → /odom/wheels relay ────────────────────────────────────────────
-    odom_relay = Node(
-        package='topic_tools',
-        executable='relay',
-        name='odom_wheels_relay',
-        arguments=['/odom', '/odom/wheels'],
-        parameters=[{'use_sim_time': True}],
-        output='screen',
-    )
-
-    # ── Static map → odom TF ──────────────────────────────────────────────────
-    # Sole publisher of map→odom in sim (no AMCL, no fusioncore, no fake nav2).
-    # TODO: replace with GPS-anchored origin once tmap2 nodes are surveyed.
-    map_to_odom = Node(
-        package='tf2_ros',
-        executable='static_transform_publisher',
-        name='map_to_odom_static',
-        arguments=['0', '0', '0', '0', '0', '0', 'map', 'odom'],
-        parameters=[{'use_sim_time': True}],
-        output='screen',
-    )
-
-    # ── Topo nav + Nav2 (delayed until Gazebo + robot spawn settle) ───────────
-    topo_stack = TimerAction(
-        period=5.0,
-        actions=_topo_nav_nodes(tmap2_file, devkit_launch_pkg),
-    )
-
-    # ── UI node (sim=true: publishes fake GPS fix for topo map saving) ────────
-    ui_launch = IncludeLaunchDescription(
-        PythonLaunchDescriptionSource(
-            os.path.join(devkit_ui_pkg, 'launch', 'ui.launch.py')
-        ),
-        launch_arguments={'sim': 'true'}.items(),
-    )
-
     return LaunchDescription([
         world_arg,
         sim_launch,
-        odom_relay,
-        map_to_odom,
-        ui_launch,
-        topo_stack,
     ])
