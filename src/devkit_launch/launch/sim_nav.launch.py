@@ -16,15 +16,18 @@ Keeping these separate means:
 
 TF tree at boot (before Gazebo starts)
 ---------------------------------------
-  map ──(static)──► odom ──(static)──► base_footprint
+  map ──(static)──► odom ──(static)──► base_footprint ──(static)──► base_link
                                            │
                                      (identity — bootstrap only)
 
 robot_state_publisher in the Gazebo layer publishes the real
 odom → base_link → base_footprint chain on /tf once Gazebo is up.
-Those dynamic transforms supersede this static one automatically.
-Without the bootstrap, Nav2 costmaps block on base_footprint → odom
-forever and the action server never becomes ready.
+Those dynamic transforms supersede these static ones automatically.
+Without the bootstraps:
+  - Nav2 costmaps block on base_footprint → odom forever and the action
+    server never becomes ready.
+  - localisation2.py blocks on map → base_link (hardcoded upstream
+    default) and the action server never becomes ready.
 """
 
 import importlib.util
@@ -102,6 +105,23 @@ def generate_launch_description():
         output='screen',
     )
 
+    # ── Bootstrap base_footprint → base_link ──────────────────────────────────
+    # localisation2.py listens for map → base_link (hardcoded upstream
+    # default).  robot_state_publisher provides this once Gazebo starts;
+    # this identity bootstrap unblocks localisation before Gazebo is up,
+    # same pattern as the odom → base_footprint static above.
+    #
+    # Once Gazebo starts, robot_state_publisher publishes the real dynamic
+    # chain and TF2 supersedes this static one automatically.
+    base_footprint_to_base_link = Node(
+        package='tf2_ros',
+        executable='static_transform_publisher',
+        name='base_footprint_to_base_link_static',
+        arguments=['0', '0', '0', '0', '0', '0', 'base_footprint', 'base_link'],
+        parameters=[{'use_sim_time': True}],
+        output='screen',
+    )
+
     # ── UI node (sim=true: publishes fake GPS fix for topo map saving) ────────
     ui_node = Node(
         package='devkit_ui',
@@ -126,6 +146,7 @@ def generate_launch_description():
         odom_relay,
         map_to_odom,
         odom_to_base_footprint,
+        base_footprint_to_base_link,
         ui_node,
         topo_stack,
     ])
