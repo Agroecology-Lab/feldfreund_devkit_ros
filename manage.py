@@ -310,8 +310,8 @@ class DevkitManager:
         # source of truth, the Gazebo world is derived from it (plants studded
         # in the inter-row gaps of the saved R*_IN/OUT nodes). On first boot
         # there's no authored map yet, so we bootstrap the node positions from
-        # a vmf gt_map.csv via get_maize_topo.py, then immediately rebuild
-        # maize.world FROM that map with get_topo_maize_world.py. The vmf
+        # a vmf gt_map.csv via get_maize_topo.py, then build maize.world FROM
+        # that map with the forest3d pipeline (topo_to_forest3d.py). The vmf
         # generated.world is no longer launched, so we no longer symlink it.
         topo_world = ("/workspace/install/agro_robot_sim/share/"
                       "agro_robot_sim/worlds/maize.world")
@@ -369,7 +369,6 @@ class DevkitManager:
         limbic_flags = [
             '--env', 'TMAP2_FILE=/workspace/maps/maize_map',
             '-v', f'{self.root_dir}/get_maize_topo.py:/workspace/get_maize_topo.py:ro',
-            '-v', f'{self.root_dir}/get_topo_maize_world.py:/workspace/get_topo_maize_world.py:ro',
             '-v', f'{self.root_dir}/topo_to_forest3d.py:/workspace/topo_to_forest3d.py:ro',
         ]
         cyclonedds_uri = self._cyclonedds_uri(cfg, is_sim == 'true')

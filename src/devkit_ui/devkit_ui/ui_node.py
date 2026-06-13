@@ -2993,7 +2993,7 @@ class NiceGuiNode(Node):
                 # reads the world only at launch, so a running sim must be
                 # stopped and relaunched to see a rebuild — we refuse mid-run
                 # rather than silently no-op. The generator script is mounted
-                # at /workspace/get_topo_maize_world.py by manage.py.
+                # at /workspace/topo_to_forest3d.py by manage.py.
                 _MAP_FILE   = '/workspace/maps/maize_map'
                 _WORLD_FILE = ('/workspace/install/agro_robot_sim/share/'
                                'agro_robot_sim/worlds/maize.world')
