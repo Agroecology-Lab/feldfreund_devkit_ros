@@ -85,16 +85,7 @@ def generate_launch_description():
         output='screen',
     )
 
-    # ── Static map → odom TF ──────────────────────────────────────────────────
-    map_to_odom = Node(
-        package='tf2_ros',
-        executable='static_transform_publisher',
-        name='map_to_odom_static',
-        arguments=['0', '0', '0', '0', '0', '0', 'map', 'odom'],
-        parameters=[{'use_sim_time': False}],
-        output='screen',
-    )
-
+    
     # ── Bootstrap odom → base_footprint ───────────────────────────────────────
     # nav2_params_sim.yaml sets robot_base_frame: base_footprint everywhere.
     # That frame is normally published by robot_state_publisher, which lives
