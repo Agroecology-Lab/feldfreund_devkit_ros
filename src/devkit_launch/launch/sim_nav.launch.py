@@ -143,6 +143,29 @@ def generate_launch_description():
         parameters=[{'sim': True}],
     )
 
+    # ── fake_nav2_server (pre-Gazebo TF source) ──────────────────────────────
+    # localisation2 uses a TF listener callback that fires on each new
+    # transform.  The static bootstrap TFs above publish once at startup and
+    # then go silent, so the callback never fires and /current_node is never
+    # published.  fake_nav2_server's VirtualRobot publishes map→odom→base_link
+    # at 30 Hz, giving localisation2 the live TF stream it needs.
+    #
+    # This node is started HERE (sim_nav.launch.py) and NOT inside
+    # _topo_nav_nodes(), so it runs only before Gazebo is up.  Once the user
+    # starts Gazebo from the UI, robot_state_publisher takes over the TF chain
+    # and fake_nav2_server's action servers must not compete with real Nav2 —
+    # the user kills this node (or it is superseded) at that point.
+    fake_nav2 = TimerAction(
+        period=2.0,
+        actions=[Node(
+            package='topological_nav_simulator',
+            executable='fake_nav2_server',
+            name='fake_nav2_server',
+            output='screen',
+            parameters=[{'use_sim_time': True}],
+        )],
+    )
+
     # ── Topo nav + Nav2 (delayed to let static TFs and topo stack settle) ───────
     # 15 s gives map_manager2 and localisation2 time to fully initialise
     # before navigation2 starts waiting for the localisation ready signal.
@@ -162,5 +185,6 @@ def generate_launch_description():
         odom_to_base_footprint,
         base_footprint_to_base_link,
         ui_node,
+        fake_nav2,
         topo_stack,
     ])
