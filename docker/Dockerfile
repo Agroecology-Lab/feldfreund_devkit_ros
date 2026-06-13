@@ -232,6 +232,7 @@ WORKDIR /workspace
 COPY ./src/devkit_driver    ./src/devkit_driver
 COPY ./src/devkit_launch    ./src/devkit_launch
 COPY ./src/devkit_ui        ./src/devkit_ui
+COPY ./src/agro_robot_sim   ./src/agro_robot_sim
 
 
 # ============================================================
@@ -258,6 +259,10 @@ RUN clone() { \
     clone -b main      https://github.com/Supull/ros2grapher.git src/ros2grapher & pids="$pids $!"; \
     rc=0; for p in $pids; do wait "$p" || rc=1; done; \
     test "$rc" = 0 && test -f src/vision_opencv/cv_bridge/package.xml
+
+# agro_robot_sim now lives in this repo (src/agro_robot_sim, copied in Stage 7).
+# Drop the copy that ships inside caatingarobotics so colcon doesn't see two.
+RUN rm -rf src/caatingarobotics/src/agro_robot_sim
 
 RUN sed -i 's/default_value="Test Rover"/default_value=""/' \
       src/ublox_dgnss/ublox_dgnss/launch/ublox_mb+r_rover.launch.py

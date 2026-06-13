@@ -1,0 +1,213 @@
+<?xml version="1.0"?>
+<!--
+  minha_fazenda.sdf  —  Gazebo Harmonic (SDF 1.9)
+  Migrated from minha_fazenda.world (Gazebo Classic SDF 1.7).
+
+  Changes:
+    - SDF version 1.7 -> 1.9
+    - Ground plane and Sun defined inline (Classic model repo not available in Harmonic)
+    - Physics element updated to Harmonic format
+    - <state> block removed (runtime-only, regenerated each run)
+    - World plugins added: Physics, UserCommands, SceneBroadcaster
+    - All crop-row box obstacles preserved from original coordinates
+-->
+<sdf version='1.9'>
+  <world name='minha_fazenda'>
+
+    <!-- ── Required world plugins (Harmonic) ─────────────────────────────── -->
+    <plugin filename="gz-sim-physics-system"
+            name="gz::sim::systems::Physics"/>
+
+    <plugin filename="gz-sim-user-commands-system"
+            name="gz::sim::systems::UserCommands"/>
+
+    <!-- gz-sim-sensors-system -->
+    <plugin filename="gz-sim-sensors-system"
+            name="gz::sim::systems::Sensors">
+      <render_engine>ogre2</render_engine>
+    </plugin>
+
+    <!-- gz-sim-rendering-system -->
+    <plugin filename="gz-sim-rendering-system"
+            name="gz::sim::systems::Rendering"/>
+
+    <!-- gz-sim-scene-broadcaster-system -->
+    <plugin filename="gz-sim-scene-broadcaster-system"
+            name="gz::sim::systems::SceneBroadcaster"/>
+
+    <!-- ── Lighting ──────────────────────────────────────────────────────── -->
+    <light name='sun' type='directional'>
+      <cast_shadows>true</cast_shadows>
+      <pose>0 0 10 0 0 0</pose>
+      <diffuse>0.8 0.8 0.8 1</diffuse>
+      <specular>0.2 0.2 0.2 1</specular>
+      <attenuation>
+        <range>1000</range>
+        <constant>0.9</constant>
+        <linear>0.01</linear>
+        <quadratic>0.001</quadratic>
+      </attenuation>
+      <direction>-0.5 0.1 -0.9</direction>
+    </light>
+
+    <!-- ── Ground plane (inlined — Classic model repo not used in Harmonic) ─ -->
+    <model name='ground_plane'>
+      <static>true</static>
+      <link name='link'>
+        <collision name='collision'>
+          <geometry>
+            <plane>
+              <normal>0 0 1</normal>
+              <size>200 200</size>
+            </plane>
+          </geometry>
+          <surface>
+            <friction>
+              <ode>
+                <mu>100</mu>
+                <mu2>50</mu2>
+              </ode>
+            </friction>
+          </surface>
+        </collision>
+        <visual name='visual'>
+          <cast_shadows>false</cast_shadows>
+          <geometry>
+            <plane>
+              <normal>0 0 1</normal>
+              <size>200 200</size>
+            </plane>
+          </geometry>
+          <material>
+            <ambient>0.3 0.5 0.2 1</ambient>
+            <diffuse>0.3 0.5 0.2 1</diffuse>
+          </material>
+        </visual>
+      </link>
+    </model>
+
+    <!-- ── Physics ───────────────────────────────────────────────────────── -->
+    <gravity>0 0 -9.8</gravity>
+    <magnetic_field>6e-06 2.3e-05 -4.2e-05</magnetic_field>
+    <atmosphere type='adiabatic'/>
+    <physics type='ode'>
+      <max_step_size>0.001</max_step_size>
+      <real_time_factor>1</real_time_factor>
+      <real_time_update_rate>1000</real_time_update_rate>
+    </physics>
+
+    <!-- ── Spherical coordinates for GPS simulation ──────────────────────── -->
+    <!-- Caatinga region reference point — matches rastreabilidade_ue.py -->
+    <spherical_coordinates>
+      <surface_model>EARTH_WGS84</surface_model>
+      <latitude_deg>-5.1873</latitude_deg>
+      <longitude_deg>-39.2936</longitude_deg>
+      <elevation>0</elevation>
+      <heading_deg>0</heading_deg>
+    </spherical_coordinates>
+
+    <!-- ════════════════════════════════════════════════════════════════════
+         CROP ROW MARKERS
+         Thin vertical boxes representing crop row stems.
+         Coordinates preserved from original minha_fazenda.world.
+         Row 1 (y ≈ 0):   x = 2.0, 3.9, 6.1, 8.0, 9.95, 12.05, 14.19
+         Row 2 (y ≈ 2.9): x = 1.9, 3.9, 5.96, 8.0, 9.99, 12.05
+         Row 3 (y ≈ 5.1): x = 2.09, 4.08, 6.03, 8.04, 9.99, 12.04, 14.04
+         ════════════════════════════════════════════════════════════════════ -->
+
+    <!-- Row 1 — y ≈ 0 -->
+    <model name='row1_post_0'><static>true</static><pose>2.028 -0.340 1.095 0 0 -0.0032</pose>
+      <link name='link'><collision name='c'><geometry><box><size>0.119 0.117 2.189</size></box></geometry></collision>
+      <visual name='v'><geometry><box><size>0.119 0.117 2.189</size></box></geometry><material><ambient>0.4 0.6 0.2 1</ambient></material></visual></link></model>
+
+    <model name='row1_post_1'><static>true</static><pose>3.912 -0.438 1.095 0 0 -0.0035</pose>
+      <link name='link'><collision name='c'><geometry><box><size>0.119 0.117 2.189</size></box></geometry></collision>
+      <visual name='v'><geometry><box><size>0.119 0.117 2.189</size></box></geometry><material><ambient>0.4 0.6 0.2 1</ambient></material></visual></link></model>
+
+    <model name='row1_post_2'><static>true</static><pose>6.060 -0.577 1.095 0 0 -0.0014</pose>
+      <link name='link'><collision name='c'><geometry><box><size>0.119 0.117 2.189</size></box></geometry></collision>
+      <visual name='v'><geometry><box><size>0.119 0.117 2.189</size></box></geometry><material><ambient>0.4 0.6 0.2 1</ambient></material></visual></link></model>
+
+    <model name='row1_post_3'><static>true</static><pose>8.005 -0.771 1.095 0 0 -0.0019</pose>
+      <link name='link'><collision name='c'><geometry><box><size>0.119 0.117 2.189</size></box></geometry></collision>
+      <visual name='v'><geometry><box><size>0.119 0.117 2.189</size></box></geometry><material><ambient>0.4 0.6 0.2 1</ambient></material></visual></link></model>
+
+    <model name='row1_post_4'><static>true</static><pose>9.950 -0.888 1.095 0 0 -0.0026</pose>
+      <link name='link'><collision name='c'><geometry><box><size>0.119 0.117 2.189</size></box></geometry></collision>
+      <visual name='v'><geometry><box><size>0.119 0.117 2.189</size></box></geometry><material><ambient>0.4 0.6 0.2 1</ambient></material></visual></link></model>
+
+    <model name='row1_post_5'><static>true</static><pose>12.051 -0.970 1.095 0 0 -0.0035</pose>
+      <link name='link'><collision name='c'><geometry><box><size>0.119 0.117 2.189</size></box></geometry></collision>
+      <visual name='v'><geometry><box><size>0.119 0.117 2.189</size></box></geometry><material><ambient>0.4 0.6 0.2 1</ambient></material></visual></link></model>
+
+    <model name='row1_post_6'><static>true</static><pose>14.192 -1.132 1.095 0 0 -0.0020</pose>
+      <link name='link'><collision name='c'><geometry><box><size>0.119 0.117 2.189</size></box></geometry></collision>
+      <visual name='v'><geometry><box><size>0.119 0.117 2.189</size></box></geometry><material><ambient>0.4 0.6 0.2 1</ambient></material></visual></link></model>
+
+    <!-- Row 2 — y ≈ 2.9 -->
+    <model name='row2_post_0'><static>true</static><pose>1.909 2.922 1.095 0 0 -0.0024</pose>
+      <link name='link'><collision name='c'><geometry><box><size>0.119 0.117 2.189</size></box></geometry></collision>
+      <visual name='v'><geometry><box><size>0.119 0.117 2.189</size></box></geometry><material><ambient>0.4 0.6 0.2 1</ambient></material></visual></link></model>
+
+    <model name='row2_post_1'><static>true</static><pose>3.922 2.932 1.095 0 0 -0.0045</pose>
+      <link name='link'><collision name='c'><geometry><box><size>0.119 0.117 2.189</size></box></geometry></collision>
+      <visual name='v'><geometry><box><size>0.119 0.117 2.189</size></box></geometry><material><ambient>0.4 0.6 0.2 1</ambient></material></visual></link></model>
+
+    <model name='row2_post_2'><static>true</static><pose>5.962 2.973 1.095 0 0 -0.0031</pose>
+      <link name='link'><collision name='c'><geometry><box><size>0.119 0.117 2.189</size></box></geometry></collision>
+      <visual name='v'><geometry><box><size>0.119 0.117 2.189</size></box></geometry><material><ambient>0.4 0.6 0.2 1</ambient></material></visual></link></model>
+
+    <model name='row2_post_3'><static>true</static><pose>8.020 2.987 1.095 0 0 -0.0035</pose>
+      <link name='link'><collision name='c'><geometry><box><size>0.119 0.117 2.189</size></box></geometry></collision>
+      <visual name='v'><geometry><box><size>0.119 0.117 2.189</size></box></geometry><material><ambient>0.4 0.6 0.2 1</ambient></material></visual></link></model>
+
+    <model name='row2_post_4'><static>true</static><pose>9.999 2.974 1.095 0 0 -0.0026</pose>
+      <link name='link'><collision name='c'><geometry><box><size>0.119 0.117 2.189</size></box></geometry></collision>
+      <visual name='v'><geometry><box><size>0.119 0.117 2.189</size></box></geometry><material><ambient>0.4 0.6 0.2 1</ambient></material></visual></link></model>
+
+    <model name='row2_post_5'><static>true</static><pose>12.049 2.757 1.095 0 0 -0.0023</pose>
+      <link name='link'><collision name='c'><geometry><box><size>0.119 0.117 2.189</size></box></geometry></collision>
+      <visual name='v'><geometry><box><size>0.119 0.117 2.189</size></box></geometry><material><ambient>0.4 0.6 0.2 1</ambient></material></visual></link></model>
+
+    <!-- Row 3 — y ≈ 5.1 -->
+    <model name='row3_post_0'><static>true</static><pose>2.089 6.051 1.095 0 0 -0.0025</pose>
+      <link name='link'><collision name='c'><geometry><box><size>0.119 0.117 2.189</size></box></geometry></collision>
+      <visual name='v'><geometry><box><size>0.119 0.117 2.189</size></box></geometry><material><ambient>0.4 0.6 0.2 1</ambient></material></visual></link></model>
+
+    <model name='row3_post_1'><static>true</static><pose>4.084 6.210 1.095 0 0 -0.0030</pose>
+      <link name='link'><collision name='c'><geometry><box><size>0.119 0.117 2.189</size></box></geometry></collision>
+      <visual name='v'><geometry><box><size>0.119 0.117 2.189</size></box></geometry><material><ambient>0.4 0.6 0.2 1</ambient></material></visual></link></model>
+
+    <model name='row3_post_2'><static>true</static><pose>6.030 6.257 1.095 0 0 -0.0024</pose>
+      <link name='link'><collision name='c'><geometry><box><size>0.119 0.117 2.189</size></box></geometry></collision>
+      <visual name='v'><geometry><box><size>0.119 0.117 2.189</size></box></geometry><material><ambient>0.4 0.6 0.2 1</ambient></material></visual></link></model>
+
+    <model name='row3_post_3'><static>true</static><pose>8.036 6.075 1.095 0 0 -0.0031</pose>
+      <link name='link'><collision name='c'><geometry><box><size>0.119 0.117 2.189</size></box></geometry></collision>
+      <visual name='v'><geometry><box><size>0.119 0.117 2.189</size></box></geometry><material><ambient>0.4 0.6 0.2 1</ambient></material></visual></link></model>
+
+    <model name='row3_post_4'><static>true</static><pose>9.992 5.779 1.095 0 0 -0.0040</pose>
+      <link name='link'><collision name='c'><geometry><box><size>0.119 0.117 2.189</size></box></geometry></collision>
+      <visual name='v'><geometry><box><size>0.119 0.117 2.189</size></box></geometry><material><ambient>0.4 0.6 0.2 1</ambient></material></visual></link></model>
+
+    <model name='row3_post_5'><static>true</static><pose>12.042 5.602 1.095 0 0 -0.0019</pose>
+      <link name='link'><collision name='c'><geometry><box><size>0.119 0.117 2.189</size></box></geometry></collision>
+      <visual name='v'><geometry><box><size>0.119 0.117 2.189</size></box></geometry><material><ambient>0.4 0.6 0.2 1</ambient></material></visual></link></model>
+
+    <model name='row3_post_6'><static>true</static><pose>14.044 2.549 1.095 0 0 -0.0017</pose>
+      <link name='link'><collision name='c'><geometry><box><size>0.119 0.117 2.189</size></box></geometry></collision>
+      <visual name='v'><geometry><box><size>0.119 0.117 2.189</size></box></geometry><material><ambient>0.4 0.6 0.2 1</ambient></material></visual></link></model>
+
+    <model name='row3_post_7'><static>true</static><pose>14.030 5.588 1.095 0 0 -0.0034</pose>
+      <link name='link'><collision name='c'><geometry><box><size>0.119 0.117 2.189</size></box></geometry></collision>
+      <visual name='v'><geometry><box><size>0.119 0.117 2.189</size></box></geometry><material><ambient>0.4 0.6 0.2 1</ambient></material></visual></link></model>
+
+    <!-- ── GUI camera hint ───────────────────────────────────────────────── -->
+    <gui fullscreen='false'>
+      <camera name='user_camera'>
+        <pose>9.620 22.205 9.735 0 0.608 -0.939</pose>
+      </camera>
+    </gui>
+
+  </world>
+</sdf>

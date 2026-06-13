@@ -1,0 +1,369 @@
+<?xml version="1.0"?>
+<robot xmlns:xacro="http://www.ros.org/wiki/xacro" name="agro_robot">
+
+  <xacro:property name="wheel_radius" value="0.215"/>
+  <xacro:property name="wheel_width"  value="0.22"/>  
+  <xacro:property name="track_width"  value="1.85"/>
+  <xacro:property name="wheelbase"    value="1.10"/>
+  
+  <xacro:property name="chassis_len"  value="1.52"/>
+  <xacro:property name="chassis_wid"  value="1.74"/>
+  <xacro:property name="chassis_h"    value="0.49"/> 
+  <xacro:property name="ground_clearance" value="0.16"/>
+
+  <xacro:property name="rail_height" value="0.33"/>
+  <xacro:property name="rail_width"  value="0.16"/>
+  <xacro:property name="gap_width"   value="1.27"/>
+  <xacro:property name="rail_offset" value="${(gap_width/2) + (rail_width/2)}"/>
+
+  <xacro:property name="solar_elevation" value="1.0"/>
+  <xacro:property name="solar_len" value="1.60"/>
+  <xacro:property name="solar_wid" value="1.80"/>
+
+  <material name="orange"> <color rgba="1.0 0.5 0.0 1"/> </material>
+  <material name="black">  <color rgba="0.1 0.1 0.1 1"/> </material>
+  <material name="solar_blue"> <color rgba="0.0 0.1 0.5 1"/> </material>
+
+  <link name="base_footprint"/>
+
+  <link name="base_link">
+    <visual>
+      <origin xyz="0 0 0" rpy="0 0 0"/>
+      <geometry> <box size="0.01 0.01 0.01"/> </geometry>
+      <material name="black"/>
+    </visual>
+  </link>
+
+  <joint name="base_footprint_joint" type="fixed">
+    <parent link="base_footprint"/>
+    <child link="base_link"/>
+    <origin xyz="0 0 ${wheel_radius}" rpy="0 0 0"/>
+  </joint>
+
+  <joint name="chassis_joint" type="fixed">
+    <parent link="base_link"/>
+    <child link="chassis_link"/>
+    <origin xyz="0 0 ${ground_clearance}" rpy="0 0 0"/>
+  </joint>
+
+  <link name="chassis_link">
+    <inertial>
+      <mass value="1.0"/>
+      <inertia ixx="0.01" ixy="0" ixz="0" iyy="0.01" iyz="0" izz="0.01"/>
+    </inertial>
+  </link>
+
+  <link name="left_rail">
+    <visual>
+      <geometry> <box size="${chassis_len} ${rail_width} ${rail_height}"/> </geometry>
+      <material name="orange"/>
+    </visual>
+    <collision>
+      <geometry> <box size="${chassis_len} ${rail_width} ${rail_height}"/> </geometry>
+    </collision>
+    <inertial>
+      <mass value="50.0"/>
+      <inertia ixx="5.0" ixy="0" ixz="0" iyy="5.0" iyz="0" izz="5.0"/>
+    </inertial>
+  </link>
+
+  <joint name="left_rail_joint" type="fixed">
+    <parent link="chassis_link"/>
+    <child link="left_rail"/>
+    <origin xyz="0 ${rail_offset} ${rail_height/2}" rpy="0 0 0"/>
+  </joint>
+
+  <link name="right_rail">
+    <visual>
+      <geometry> <box size="${chassis_len} ${rail_width} ${rail_height}"/> </geometry>
+      <material name="orange"/>
+    </visual>
+    <collision>
+      <geometry> <box size="${chassis_len} ${rail_width} ${rail_height}"/> </geometry>
+    </collision>
+    <inertial>
+      <mass value="50.0"/>
+      <inertia ixx="5.0" ixy="0" ixz="0" iyy="5.0" iyz="0" izz="5.0"/>
+    </inertial>
+  </link>
+
+  <joint name="right_rail_joint" type="fixed">
+    <parent link="chassis_link"/>
+    <child link="right_rail"/>
+    <origin xyz="0 -${rail_offset} ${rail_height/2}" rpy="0 0 0"/>
+  </joint>
+
+  <link name="front_rail">
+    <visual>
+      <geometry> <box size="${rail_width} ${gap_width} ${rail_height}"/> </geometry>
+      <material name="orange"/>
+    </visual>
+    <collision>
+      <geometry> <box size="${rail_width} ${gap_width} ${rail_height}"/> </geometry>
+    </collision>
+    <inertial>
+      <mass value="20.0"/>
+      <inertia ixx="2.0" ixy="0" ixz="0" iyy="2.0" iyz="0" izz="2.0"/>
+    </inertial>
+  </link>
+
+  <joint name="front_rail_joint" type="fixed">
+    <parent link="chassis_link"/>
+    <child link="front_rail"/>
+    <origin xyz="${(chassis_len/2) - (rail_width/2) - 0.33} 0 ${rail_height/2}" rpy="0 0 0"/>
+  </joint>
+
+  <link name="rear_rail">
+    <visual>
+      <geometry> <box size="${rail_width} ${gap_width} ${rail_height}"/> </geometry>
+      <material name="orange"/>
+    </visual>
+    <collision>
+      <geometry> <box size="${rail_width} ${gap_width} ${rail_height}"/> </geometry>
+    </collision>
+    <inertial>
+      <mass value="20.0"/>
+      <inertia ixx="2.0" ixy="0" ixz="0" iyy="2.0" iyz="0" izz="2.0"/>
+    </inertial>
+  </link>
+
+  <joint name="rear_rail_joint" type="fixed">
+    <parent link="chassis_link"/>
+    <child link="rear_rail"/>
+    <origin xyz="-${(chassis_len/2) - (rail_width/2)} 0 ${rail_height/2}" rpy="0 0 0"/>
+  </joint>
+
+  <link name="rear_cabin">
+    <visual>
+      <geometry> <box size="0.72 0.25 0.32"/> </geometry>
+      <material name="black"/>
+    </visual>
+    <collision>
+      <geometry> <box size="0.72 0.25 0.32"/> </geometry>
+    </collision>
+    <inertial>
+      <mass value="30.0"/>
+      <inertia ixx="2.0" ixy="0" ixz="0" iyy="2.0" iyz="0" izz="2.0"/>
+    </inertial>
+  </link>
+
+  <joint name="cabin_joint" type="fixed">
+    <parent link="chassis_link"/>
+    <child link="rear_cabin"/>
+    <origin xyz="-0.8 0 ${0.32/2}" rpy="0 0 ${pi/2}"/>
+  </joint>
+
+  <xacro:macro name="solar_support" params="prefix parent x y">
+    <link name="${prefix}_support">
+      <visual>
+        <geometry> <cylinder radius="0.02" length="${solar_elevation}"/> </geometry>
+        <material name="black"/>
+      </visual>
+      <collision>
+        <geometry> <cylinder radius="0.02" length="${solar_elevation}"/> </geometry>
+      </collision>
+      <inertial>
+        <mass value="1.0"/>
+        <inertia ixx="0.01" ixy="0" ixz="0" iyy="0.01" iyz="0" izz="0.01"/>
+      </inertial>
+    </link>
+    <joint name="${prefix}_support_joint" type="fixed">
+      <parent link="${parent}"/>
+      <child link="${prefix}_support"/>
+      <origin xyz="${x} 0 ${solar_elevation/2 + rail_height/2}" rpy="0 0 0"/>
+    </joint>
+  </xacro:macro>
+
+  <xacro:solar_support prefix="fl" parent="left_rail"  x="${chassis_len/2 - 0.1}" y="0"/>
+  <xacro:solar_support prefix="bl" parent="left_rail"  x="-${chassis_len/2 - 0.1}" y="0"/>
+  <xacro:solar_support prefix="fr" parent="right_rail" x="${chassis_len/2 - 0.1}" y="0"/>
+  <xacro:solar_support prefix="br" parent="right_rail" x="-${chassis_len/2 - 0.1}" y="0"/>
+
+  <link name="solar_panel">
+    <visual>
+      <geometry> <box size="${solar_len} ${solar_wid} 0.05"/> </geometry>
+      <material name="solar_blue"/>
+    </visual>
+    <collision>
+      <geometry> <box size="${solar_len} ${solar_wid} 0.05"/> </geometry>
+    </collision>
+    <inertial>
+      <mass value="20.0"/>
+      <inertia ixx="2.0" ixy="0" ixz="0" iyy="2.0" iyz="0" izz="2.0"/>
+    </inertial>
+  </link>
+
+  <joint name="solar_joint" type="fixed">
+    <parent link="chassis_link"/>
+    <child link="solar_panel"/>
+    <origin xyz="0 0 ${rail_height + solar_elevation}" rpy="0 0 0"/>
+  </joint>
+  
+  <xacro:macro name="wheel" params="prefix x y">
+    <link name="${prefix}_wheel">
+      <visual>
+        <origin xyz="0 0 0" rpy="${pi/2} 0 0"/>
+        <geometry> <cylinder radius="${wheel_radius}" length="${wheel_width}"/> </geometry>
+        <material name="black"/>
+      </visual>
+      <collision>
+        <origin xyz="0 0 0" rpy="${pi/2} 0 0"/>
+        <geometry> <cylinder radius="${wheel_radius}" length="${wheel_width}"/> </geometry>
+      </collision>
+      <inertial>
+        <mass value="10.0"/>
+        <inertia ixx="0.5" ixy="0" ixz="0" iyy="0.5" iyz="0" izz="0.5"/>
+      </inertial>
+    </link>
+
+    <!-- wheel friction for gz harmonic -->
+    <gazebo reference="${prefix}_wheel">
+      <mu>1.5</mu>
+      <mu2>1.5</mu2>
+      <fdir1>1 0 0</fdir1>
+      <slip1>0.0</slip1>
+      <slip2>0.0</slip2>
+    </gazebo>
+
+    <joint name="${prefix}_wheel_joint" type="continuous">
+      <parent link="base_link"/>
+      <child link="${prefix}_wheel"/>
+      <origin xyz="${x} ${y} 0" rpy="0 0 0"/>
+      <axis xyz="0 1 0"/>
+    </joint>
+  </xacro:macro>
+
+  <xacro:wheel prefix="front_left"  x="${wheelbase/2}"  y="${track_width/2}"/>
+  <xacro:wheel prefix="front_right" x="${wheelbase/2}"  y="-${track_width/2}"/>
+  <xacro:wheel prefix="back_left"   x="-${wheelbase/2}" y="${track_width/2}"/>
+  <xacro:wheel prefix="back_right"  x="-${wheelbase/2}" y="-${track_width/2}"/>
+
+  <link name="lidar_link">
+    <visual>
+      <geometry> <cylinder radius="0.05" length="0.05"/> </geometry>
+      <material name="black"/>
+    </visual>
+  </link>
+
+  <joint name="lidar_joint" type="fixed">
+    <parent link="solar_panel"/>
+    <child link="lidar_link"/>
+    <origin xyz="${solar_len/2 - 0.1} 0 -0.05" rpy="0 0 0"/>
+  </joint>
+
+  <link name="gps_link">
+    <visual>
+      <geometry> <box size="0.05 0.05 0.05"/> </geometry>
+      <material name="black"/>
+    </visual>
+    <inertial>
+      <mass value="0.1"/>
+      <inertia ixx="0.001" ixy="0" ixz="0" iyy="0.001" iyz="0" izz="0.001"/>
+    </inertial>
+  </link>
+
+  <joint name="gps_joint" type="fixed">
+    <parent link="chassis_link"/>
+    <child link="gps_link"/>
+    <origin xyz="0 0 0.5" rpy="0 0 0"/>
+  </joint>
+
+  <!-- replaced libgazebo_ros_joint_state_publisher with (harmonic) gz-sim-joint-state-publisher-system plugin.
+       topic is bridged to /joint_states via ros_gz_bridge in the launch file. -->
+  <gazebo>
+    <plugin filename="gz-sim-joint-state-publisher-system"
+            name="gz::sim::systems::JointStatePublisher">
+      <joint_name>front_left_wheel_joint</joint_name>
+      <joint_name>front_right_wheel_joint</joint_name>
+      <joint_name>back_left_wheel_joint</joint_name>
+      <joint_name>back_right_wheel_joint</joint_name>
+      <update_rate>30</update_rate>
+    </plugin>
+  </gazebo>
+
+  <!--  replaced libgazebo_ros_diff_drive 
+        with the harmonic gz-sim-diff-drive-system plugin -->
+  <gazebo>
+    <plugin filename="gz-sim-diff-drive-system"
+            name="gz::sim::systems::DiffDrive">
+      <left_joint>front_left_wheel_joint</left_joint>
+      <left_joint>back_left_wheel_joint</left_joint>
+      <right_joint>front_right_wheel_joint</right_joint>
+      <right_joint>back_right_wheel_joint</right_joint>
+      <wheel_separation>${track_width}</wheel_separation>
+      <wheel_radius>${wheel_radius}</wheel_radius>
+      <max_linear_acceleration>2.0</max_linear_acceleration>
+      <topic>cmd_vel</topic>
+      <odom_topic>odom</odom_topic>
+      <tf_topic>/tf</tf_topic>
+      <frame_id>odom</frame_id>
+      <child_frame_id>base_footprint</child_frame_id>
+      <odom_publish_frequency>50</odom_publish_frequency>
+    </plugin>
+  </gazebo>
+  
+  <!--  replaced libgazebo_ros_ray_sensor
+        with the harmonic gpu_lidar sensor  -->
+  <gazebo reference="lidar_link">
+    <sensor name="lidar" type="gpu_lidar">
+      <pose>0 0 0 0 0 0</pose>
+      <update_rate>10</update_rate>
+      <visualize>false</visualize>
+      <lidar>
+        <scan>
+          <horizontal>
+            <samples>360</samples>
+            <min_angle>-3.14</min_angle>
+            <max_angle>3.14</max_angle>
+          </horizontal>
+        </scan>
+        <range>
+          <min>0.4</min>
+          <max>20.0</max>
+        </range>
+      </lidar>
+      <topic>/scan</topic>
+      <frame_id>lidar_link</frame_id>
+    </sensor>
+  </gazebo>
+
+  <!--  replaced libgazebo_ros_gps_sensor
+        with the harmonic navsat sensor -->
+  <gazebo reference="gps_link">
+    <sensor name="gps_sensor" type="navsat">
+      <always_on>true</always_on>
+      <update_rate>10.0</update_rate>
+      <topic>/gps/fix</topic>
+      <frame_id>gps_link</frame_id>
+    </sensor>
+  </gazebo>
+
+  <link name="imu_link">
+    <visual>
+      <geometry> <box size="0.02 0.02 0.02"/> </geometry>
+      <material name="black"/>
+    </visual>
+  </link>
+
+  <joint name="imu_joint" type="fixed">
+    <parent link="chassis_link"/>
+    <child link="imu_link"/>
+    <origin xyz="0 0 0.4" rpy="0 0 0"/>
+  </joint>
+
+  <!--  replaced libgazebo_ros_imu_sensor
+        with the harmonic imu sensor  -->
+  <gazebo reference="imu_link">
+    <sensor name="imu_sensor" type="imu">
+      <always_on>true</always_on>
+      <update_rate>100</update_rate>
+      <topic>/imu</topic>
+      <frame_id>imu_link</frame_id>
+      <imu>
+        <angular_velocity/>
+        <linear_acceleration/>
+      </imu>
+    </sensor>
+  </gazebo>
+  
+</robot>
