@@ -32,7 +32,7 @@ Each mission carries one optional integer field, repeat_every_hours:
     N     → recurring: re-arms N hours after the last successful run.
 
 today_queue() is the only scheduler primitive: it returns
-(mission_id, row_id, action) tuples for every active mission that is
+(mission_id, row_id, action, action_params) tuples for every active mission that is
 *due right now*. A mission is due if it has never run, if its last run
 failed (retry asap — operator-gated, no automatic loop because the
 executor is operator-triggered), or if its repeat interval has elapsed.
@@ -236,11 +236,13 @@ def _coerce_record(raw: object, path: str) -> Optional[dict]:
               f'{reh!r} reset to None', flush=True)
         reh = None
 
+    raw_params = raw.get('action_params')
     return {
         'id':                 mid,
         'name':               str(raw.get('name') or mid),
         'rows':               [str(r) for r in rows],
         'action':             str(raw.get('action') or 'drive'),
+        'action_params':      raw_params if isinstance(raw_params, dict) else {},
         'repeat_every_hours': reh,
         'active':             bool(raw.get('active', True)),
         'created_at':         str(raw.get('created_at') or _now_utc_str()),
@@ -293,6 +295,7 @@ class MissionStore:
         name:                str           (operator label; defaults to id)
         rows:                list[str]     (topo entry-node names)
         action:              str           (key in ACTIONS)
+        action_params:       dict          (per-action parameter overrides)
         repeat_every_hours:  int | None    (None == one-shot)
         active:              bool
         created_at:          str           (ISO 8601 UTC)
@@ -301,7 +304,7 @@ class MissionStore:
     """
 
     _MUTABLE_FIELDS = frozenset(
-        {'name', 'rows', 'action', 'repeat_every_hours', 'active'})
+        {'name', 'rows', 'action', 'action_params', 'repeat_every_hours', 'active'})
 
     def __init__(self, path: str = MISSIONS_FILE) -> None:
         self._path     = path
@@ -334,6 +337,7 @@ class MissionStore:
     def add(self, *,
             rows: list,
             action: str,
+            action_params: Optional[dict] = None,
             name: str = '',
             repeat_every_hours: Optional[int] = None,
             active: bool = True) -> Optional[str]:
@@ -362,6 +366,7 @@ class MissionStore:
                 'name':               clean or mid,
                 'rows':               list(rows),
                 'action':             action,
+                'action_params':      action_params or {},
                 'repeat_every_hours': (None if repeat_every_hours is None
                                        else int(repeat_every_hours)),
                 'active':             bool(active),
@@ -511,12 +516,12 @@ class MissionStore:
 
     # ── derived views (lock-free snapshots) ──────────────────────────────
 
-    def today_queue(self) -> list[tuple[str, str, str]]:
-        """Active+due missions expanded into (mission_id, row_id, action)
-        tuples in declaration order. Lock-free; the executor walks this
-        list and dispatches each tuple in sequence."""
+    def today_queue(self) -> list[tuple[str, str, str, dict]]:
+        """Active+due missions expanded into (mission_id, row_id, action,
+        action_params) tuples in declaration order. Lock-free; the executor
+        walks this list and dispatches each tuple in sequence."""
         now = _now_utc()
-        out: list[tuple[str, str, str]] = []
+        out: list[tuple[str, str, str, dict]] = []
         for m in self._missions:
             if not m.get('active'):
                 continue
@@ -525,8 +530,9 @@ class MissionStore:
             action = m.get('action')
             if action not in ACTIONS:
                 continue  # corrupt record — surfaced in UI via _coerce_record
+            params = m.get('action_params') or {}
             for r in m.get('rows', ()):
-                out.append((m['id'], r, action))
+                out.append((m['id'], r, action, params))
         return out
 
     def next_due_in_hours(self, mid: str) -> Optional[float]:
