@@ -581,9 +581,22 @@ class NiceGuiNode(Node):
             depth=10,
             reliability=ReliabilityPolicy.RELIABLE,
         )
-        self.create_subscription(Odometry, '/fusion/odom',
-                                 lambda m: setattr(self, 'latest_odom', m), _ODOM_QOS)
+        self._fusion_odom_seen: bool = False
+
+        def _store_fusion_odom(m: Odometry) -> None:
+            self._fusion_odom_seen = True
+            self.latest_odom = m
+
+        self.create_subscription(Odometry, '/fusion/odom', _store_fusion_odom, _ODOM_QOS)
         self.create_subscription(Odometry, '/odom',
+                                 self._odom_fallback, _ODOM_QOS)
+
+        # In sim mode, /fusion/odom is never published (no EKF) and /odom only
+        # arrives once the Gazebo bridge is up.  fake_nav2_server publishes
+        # /odometry/global at 30 Hz from boot, giving the UI a live pose for
+        # drop_topo_node before Gazebo is launched.  On real hardware this topic
+        # is absent so the subscription is a silent no-op.
+        self.create_subscription(Odometry, '/odometry/global',
                                  self._odom_fallback, _ODOM_QOS)
 
         self.create_subscription(String, '/current_node',
@@ -668,8 +681,14 @@ class NiceGuiNode(Node):
     # ── odom fallback ─────────────────────────────────────────────────────────
 
     def _odom_fallback(self, msg: Odometry) -> None:
-        """Use /odom (wheel odometry) only while /fusion/odom has not yet arrived."""
-        if self.latest_odom is None:
+        """Use /odom (wheel odometry) whenever /fusion/odom has not yet arrived.
+
+        The original guard (if self.latest_odom is None) froze the value after
+        the first message, giving a stale pose for every subsequent drop/save.
+        We instead update continuously as long as /fusion/odom hasn't been seen —
+        tracked by whether the subscriber lambda has ever fired (self._fusion_odom_seen).
+        """
+        if not self._fusion_odom_seen:
             self.latest_odom = msg
 
     # ── map callback ──────────────────────────────────────────────────────────
@@ -1056,7 +1075,10 @@ class NiceGuiNode(Node):
         if not self._f2c_swaths:
             self.f2c_save_status = 'ERROR: no rows planned — click Plan Rows first'
             return
-        if self.latest_odom is None:
+        # In sim mode anchor_x/y are always 0.0 (see below), so latest_odom is
+        # not actually used — skip the guard to avoid a false "no odometry" error
+        # before Gazebo is launched.
+        if self.latest_odom is None and not self._is_sim:
             self.f2c_save_status = 'ERROR: no odometry'
             return
         if self.latest_gps is None:
