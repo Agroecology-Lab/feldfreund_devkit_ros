@@ -199,6 +199,18 @@ RUN mkdir -p /root/models && \
     wget -q -O /root/models/yolox_nano.pth \
       https://github.com/Megvii-BaseDetection/YOLOX/releases/download/0.1.1rc0/yolox_nano.pth
 
+# 5.4 Forest3D — realistic field generation
+RUN for i in 1 2 3 4 5; do \
+      GIT_TERMINAL_PROMPT=0 git clone --depth 1 -b feature/terrain-types-refactor \
+        https://github.com/unitsSpaceLab/Forest3D.git src/forest3d && break || \
+      (echo "Forest3D attempt $i failed, retrying in 15s..." && sleep 15); \
+    done && \
+    pip install --break-system-packages --no-cache-dir \
+      src/forest3d && \
+    rm -rf src/forest3d/.git
+
+COPY docker/forest3d-models /workspace/models
+
 # ============================================================
 # Stage 6: Shell Environment
 # ============================================================

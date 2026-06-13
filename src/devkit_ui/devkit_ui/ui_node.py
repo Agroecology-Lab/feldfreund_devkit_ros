@@ -4,14 +4,18 @@ ui_node.py — Sowbot web cockpit on :80
 """
 
 import copy
+import io
 import json
 import math
 import os
 import re
+import shutil
+import signal
 import subprocess
 import sys
 import threading
 import time
+import zipfile
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Optional
@@ -2879,7 +2883,11 @@ class NiceGuiNode(Node):
                     **os.environ,
                     'TMAP2_FILE': '/workspace/maps/maize_map',
                     'GZ_SIM_RESOURCE_PATH': (
-                        '/workspace/install/virtual_maize_field'
+                        # Forest3D-generated models (model://ground,
+                        # model://crop/plant) live here — must be first or
+                        # gz sim aborts world load with "Unable to find uri".
+                        '/workspace/models'
+                        ':/workspace/install/virtual_maize_field'
                         '/share/virtual_maize_field/models'
                     ),
                     'CYCLONEDDS_URI': (
@@ -2900,11 +2908,14 @@ class NiceGuiNode(Node):
                     try:
                         env = {**_SIM_ENV, 'DISPLAY': os.environ.get('DISPLAY', ':0')}
                         # We don't use `with` for these because we save the process arguments and
-                        # manage them manually.
+                        # manage them manually. Log to a file (not DEVNULL) so a
+                        # crashed launch is diagnosable — tail /tmp/gazebo_sim.log.
+                        _gz_log = open('/tmp/gazebo_sim.log', 'w')
                         _gazebo_proc[0] = subprocess.Popen(
                             _SIM_CMD,
-                            stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
+                            stdout=_gz_log, stderr=subprocess.STDOUT,
                             env=env,
+                            start_new_session=True,
                         )
                         _gazebo_lbl.set_text(f'native window — pid {_gazebo_proc[0].pid}')
                         _gazebo_lbl.style('color:#1a7f37')
@@ -2940,10 +2951,14 @@ class NiceGuiNode(Node):
                         ))
                         time.sleep(0.5)
                         env = {**_SIM_ENV, 'DISPLAY': ':99'}
+                        # Log to a file (not DEVNULL) so a crashed launch is
+                        # diagnosable — tail /tmp/gazebo_sim.log.
+                        _gz_log = open('/tmp/gazebo_sim.log', 'w')
                         _gazebo_proc[0] = subprocess.Popen(
                             _SIM_CMD,
-                            stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
+                            stdout=_gz_log, stderr=subprocess.STDOUT,
                             env=env,
+                            start_new_session=True,
                         )
                         _gazebo_lbl.set_text(f'browser mode — pid {_gazebo_proc[0].pid}')
                         _gazebo_lbl.style('color:#1a7f37')
@@ -2953,11 +2968,20 @@ class NiceGuiNode(Node):
 
                 def _stop_gazebo():
                     if _gazebo_proc[0] is not None:
-                        _gazebo_proc[0].terminate()
+                        try:
+                            pgid = os.getpgid(_gazebo_proc[0].pid)
+                            os.killpg(pgid, signal.SIGTERM)
+                            _gazebo_proc[0].wait(timeout=5)
+                        except subprocess.TimeoutExpired:
+                            os.killpg(pgid, signal.SIGKILL)
+                            _gazebo_proc[0].wait(timeout=2)
+                        except Exception:
+                            pass
                         _gazebo_proc[0] = None
                     for p in _gazebo_daemons:
                         try:
                             p.terminate()
+                            p.wait(timeout=3)
                         except Exception:
                             pass
                     _gazebo_daemons.clear()
@@ -2990,24 +3014,20 @@ class NiceGuiNode(Node):
                         _gazebo_lbl.set_text('rebuilding world from map…')
                         _gazebo_lbl.style('color:#57606a')
                         r = subprocess.run(
-                            ['python3', '/workspace/get_topo_maize_world.py',
+                            ['python3', '/workspace/topo_to_forest3d.py',
                              '--topo', _MAP_FILE,
-                             '--out', _WORLD_FILE,
-                             '--name', 'maize_field'],
-                            capture_output=True,
-                            text=True,
-                            timeout=120,
-                            check=True,
+                             '--out', '/workspace/forest3d.yaml',
+                             '--generate',
+                             '--world-out', _WORLD_FILE,
+                             '--models-path', '/workspace/models'],
+                            capture_output=True, text=True, timeout=120,
                         )
                         if r.returncode != 0:
                             err = (r.stderr or r.stdout or 'unknown error').strip()
                             _gazebo_lbl.set_text(f'rebuild failed: {err[-200:]}')
                             _gazebo_lbl.style('color:#cf222e')
                             return
-                        # Script prints "Wrote N plants -> ..." on success.
-                        summary = next(
-                            (ln for ln in r.stdout.splitlines()
-                             if ln.startswith('Wrote ')), 'world rebuilt')
+                        summary = 'world rebuilt'
                         _gazebo_lbl.set_text(f'{summary} — relaunch to view')
                         _gazebo_lbl.style('color:#1a7f37')
                     except subprocess.TimeoutExpired:
@@ -3033,6 +3053,92 @@ class NiceGuiNode(Node):
                         'font-family:\'Courier New\',monospace;">'
                         '↗ Gazebo (noVNC)</a>'
                     )
+
+                # ── Soil texture import ──────────────────────────────────
+                # Import a soil asset folder (zipped): its image maps are
+                # harvested into /workspace/uploads (persisted across image
+                # rebuilds) and staged into the ground model on the next world
+                # rebuild, where Forest3D turns them into a PBR material.
+                _SOIL_TEX_DIR = Path('/workspace/uploads/soil_custom/textures')
+                _soil_lbl = ui.label('').classes('text-xs font-mono').style('color:#57606a')
+
+                def _classify_map(name):
+                    # Mirror Forest3D's filename-keyword classification so the
+                    # label previews what the PBR material will use.
+                    nl = name.lower()
+                    if any(k in nl for k in ('diff', 'albedo', 'base', 'color')):
+                        return 'albedo'
+                    if any(k in nl for k in ('normal', 'nor', 'nrm')):
+                        return 'normal'
+                    if 'rough' in nl:
+                        return 'roughness'
+                    return 'other'
+
+                def _harvest_soil_zip(data):
+                    # Sync worker (runs off the event loop via io_bound): extract
+                    # gz-loadable image maps from the zip bytes into _SOIL_TEX_DIR.
+                    # Returns the staged basenames; raises BadZipFile / ValueError.
+                    zf = zipfile.ZipFile(io.BytesIO(data))
+                    # Forest3D skips .exr, so only harvest gz-loadable images.
+                    members = [m for m in zf.namelist()
+                               if not m.endswith('/')
+                               and Path(m).suffix.lower() in ('.jpg', '.jpeg', '.png')]
+                    if not members:
+                        raise ValueError(
+                            'no .jpg/.png maps found in the zip '
+                            '(textures may be .exr — convert first)')
+                    # Replace any previous import so exactly one soil set is
+                    # active; flatten folder structure to basenames.
+                    if _SOIL_TEX_DIR.exists():
+                        shutil.rmtree(_SOIL_TEX_DIR)
+                    _SOIL_TEX_DIR.mkdir(parents=True, exist_ok=True)
+                    names = []
+                    for m in members:
+                        out = _SOIL_TEX_DIR / Path(m).name
+                        with zf.open(m) as src, open(out, 'wb') as fh:
+                            shutil.copyfileobj(src, fh)
+                        names.append(out.name)
+                    return names
+
+                async def _import_soil_zip(e):
+                    # NiceGUI changed the upload event shape across versions:
+                    # newer exposes e.file (FileUpload, async read()); older
+                    # exposed e.content (a sync file-like object).
+                    try:
+                        if hasattr(e, 'file'):
+                            data = await e.file.read()
+                        else:
+                            data = e.content.read()
+                    except Exception as exc:
+                        _soil_lbl.set_text(f'import failed: {exc}')
+                        _soil_lbl.style('color:#cf222e')
+                        return
+                    try:
+                        names = await ng_run.io_bound(_harvest_soil_zip, data)
+                    except zipfile.BadZipFile:
+                        _soil_lbl.set_text('not a valid .zip file')
+                        _soil_lbl.style('color:#cf222e')
+                        return
+                    except ValueError as exc:
+                        _soil_lbl.set_text(str(exc))
+                        _soil_lbl.style('color:#cf222e')
+                        return
+                    except Exception as exc:
+                        _soil_lbl.set_text(f'import failed: {exc}')
+                        _soil_lbl.style('color:#cf222e')
+                        return
+                    summary = ', '.join(f'{_classify_map(n)}={n}' for n in names)
+                    _soil_lbl.set_text(
+                        f'imported {len(names)} map(s) — {summary}. '
+                        'Rebuild World to apply.')
+                    _soil_lbl.style('color:#1a7f37')
+
+                with ui.row().classes('items-center gap-2 flex-wrap'):
+                    ui.upload(
+                        label='Import soil asset (.zip)',
+                        auto_upload=True,
+                        on_upload=_import_soil_zip,
+                    ).props('accept=.zip').classes('max-w-md')
 
         with ui.card().classes('w-full mt-3'):
             ui.label('Map Archive').classes('font-semibold mb-2')
