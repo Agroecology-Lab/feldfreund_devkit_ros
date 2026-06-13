@@ -214,7 +214,7 @@ python3 agbot-diagnostic.py full
 | **caatingarobotics** *(agro_robot_sim, caatinga_nav, caatinga_vision)* | github.com/samuk | Apache-2.0 | ✅ | *None (Fork Infrastructure)* | Your fork (row_follow is the BSD-2 exception, above) |
 | **topological_navigation** | LCAS (`aoc_refactor`) | Apache-2.0 (©LCAS) | ✅ | [Fentanes et al., 2015](https://www.researchgate.net/publication/282752920_Now_or_later_Predicting_and_maximising_success_of_navigation_actions_from_long-term_experience) | High-level planner; derived from the EU STRANDS long-term autonomy project framework |
 | **fusioncore** | manankharwar | Apache-2.0 | ✅ | [Kharwar, 2026](https://arxiv.org/abs/2605.25239) | GNSS fusion; patched in-build; retain NOTICE if present |
-| **Forest3D** | unitsSpaceLab | MIT (©UNITS Space Lab) | ✅ | *None (Simulation Package)* | Sim-only — 3D forestry simulation environment replacing the virtual maize field |
+| **Forest3D** | unitsSpaceLab | MIT (©UNITS Space Lab) | ✅ | [Forest3D: Cottiga, S., Bourr, K., & Seriani, S. (2026). "Automated Generation of Terramechanics-Aware Simulation Environments."](https://kbourr.com/#publications)| Sim-only — 3D forestry /agriculture simulation environment |
 | **ublox_dgnss** | aussierobots | Apache-2.0 | ✅ | *None (Hardware Driver)* | GNSS driver |
 | **sentor** | LCAS (fork of francescodelduchetto/sentor) | MIT | ✅ | *None (Monitoring Tool)* | Topic- and node-monitoring health node |
 | **ros2graph_explorer** | nilseuropa | BSD-3-Clause | ✅ | *None (Debug Tool)* | Dev/debug graph inspector |
