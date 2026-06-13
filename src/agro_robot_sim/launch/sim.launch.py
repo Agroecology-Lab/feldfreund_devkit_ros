@@ -83,7 +83,7 @@ def generate_launch_description():
                 output="screen",
                 arguments=[
                     "-name",  "agro_robot",
-                    "-topic", "/robot_description",
+                    "-file", xacro_file,
                     "-x", LaunchConfiguration("x"),
                     "-y", LaunchConfiguration("y"),
                     "-z", LaunchConfiguration("z"),
