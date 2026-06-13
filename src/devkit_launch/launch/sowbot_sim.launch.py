@@ -63,9 +63,9 @@ def _nav2_sim_nodes(params_file: str, use_sim_time: bool = True) -> list:
             parameters=[{'use_sim_time': use_sim_time}, params_file],
             arguments=['--ros-args', '--log-level', 'info'],
         ),
-        Node(package='nav2_smoother',  executable='smoother_server',   name='smoother_server',   **common),
-        Node(package='nav2_planner',   executable='planner_server',    name='planner_server',    **common),
-        Node(package='nav2_route',     executable='route_server',      name='route_server',      **common),
+        Node(package='nav2_smoother',          executable='smoother_server',   name='smoother_server',    **common),
+        Node(package='nav2_planner',           executable='planner_server',    name='planner_server',     **common),
+        Node(package='nav2_route',             executable='route_server',      name='route_server',       **common),
         Node(
             package='nav2_behaviors',
             executable='behavior_server',
@@ -75,7 +75,7 @@ def _nav2_sim_nodes(params_file: str, use_sim_time: bool = True) -> list:
             parameters=[{'use_sim_time': use_sim_time}, params_file],
             arguments=['--ros-args', '--log-level', 'info'],
         ),
-        Node(package='nav2_bt_navigator',      executable='bt_navigator',      name='bt_navigator',      **common),
+        Node(package='nav2_bt_navigator',      executable='bt_navigator',      name='bt_navigator',       **common),
         Node(package='nav2_waypoint_follower', executable='waypoint_follower', name='waypoint_follower', **common),
         Node(
             package='nav2_velocity_smoother',
@@ -111,11 +111,9 @@ def _nav2_sim_nodes(params_file: str, use_sim_time: bool = True) -> list:
 
 def _topo_nav_nodes(tmap2_file: str, devkit_launch_pkg: str, use_sim_time: bool = True) -> list:
     topo_share = get_package_share_directory('topological_navigation')
-    map_path = tmap2_file or os.path.join(
-        topo_share, 'config', 'mixed_actions_map.yaml')
+    map_path = tmap2_file or os.path.join(topo_share, 'config', 'mixed_actions_map.yaml')
 
     nav2_params = os.path.join(devkit_launch_pkg, 'config', 'nav2_params_sim.yaml')
-
     sim_time = {'use_sim_time': use_sim_time}
 
     return [
@@ -125,7 +123,9 @@ def _topo_nav_nodes(tmap2_file: str, devkit_launch_pkg: str, use_sim_time: bool 
             name='topological_map_manager_2',
             output='screen',
             arguments=[map_path],
-            parameters=[sim_time],
+            # 'broadcast_tf': False explicitly suppresses the 'odom -> map' 
+            # TF loop conflict with fake_nav2_server.
+            parameters=[sim_time, {'broadcast_tf': False}],
         ),
 
         TimerAction(period=2.0, actions=[
