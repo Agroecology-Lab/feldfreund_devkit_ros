@@ -172,7 +172,6 @@ def generate_launch_description():
 
     return LaunchDescription([
         odom_relay,
-        map_to_odom,
         odom_to_base_footprint,
         base_footprint_to_base_link,
         ui_node,
