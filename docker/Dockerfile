@@ -185,12 +185,12 @@ RUN --mount=type=cache,target=/root/.cache/pip \
       -r /tmp/requirements.txt
 
 # 5.2 CPU-only PyTorch + YOLOX
-RUN pip install --break-system-packages --no-cache-dir \
-      "transforms3d>=0.4.2" && \
-    pip install --break-system-packages --no-cache-dir \
+RUN --mount=type=cache,target=/root/.cache/pip \
+    pip install --break-system-packages "transforms3d>=0.4.2" && \
+    pip install --break-system-packages \
       torch torchvision --index-url https://download.pytorch.org/whl/cpu && \
     pip install --break-system-packages --no-deps yolox==0.3.0 && \
-    pip install --break-system-packages --no-cache-dir \
+    pip install --break-system-packages \
       thop tqdm loguru ninja tabulate \
       nicegui pyserial lizard pymongo networkx
 
@@ -198,6 +198,18 @@ RUN pip install --break-system-packages --no-cache-dir \
 RUN mkdir -p /root/models && \
     wget -q -O /root/models/yolox_nano.pth \
       https://github.com/Megvii-BaseDetection/YOLOX/releases/download/0.1.1rc0/yolox_nano.pth
+
+# 5.4 Forest3D — realistic field generation
+RUN for i in 1 2 3 4 5; do \
+      GIT_TERMINAL_PROMPT=0 git clone --depth 1 -b feature/terrain-types-refactor \
+        https://github.com/unitsSpaceLab/Forest3D.git src/forest3d && break || \
+      (echo "Forest3D attempt $i failed, retrying in 15s..." && sleep 15); \
+    done && \
+    pip install --break-system-packages --no-cache-dir \
+      src/forest3d && \
+    rm -rf src/forest3d/.git
+
+COPY docker/forest3d-models /workspace/models
 
 # ============================================================
 # Stage 6: Shell Environment
@@ -220,87 +232,48 @@ WORKDIR /workspace
 COPY ./src/devkit_driver    ./src/devkit_driver
 COPY ./src/devkit_launch    ./src/devkit_launch
 COPY ./src/devkit_ui        ./src/devkit_ui
+COPY ./src/agro_robot_sim   ./src/agro_robot_sim
 
 
 # ============================================================
 # Stage 8: Workspace — Git Clones (each repo has its own
 #           retry loop so one failure does not skip the rest)
 # ============================================================
-RUN for i in 1 2 3 4 5; do \
-      GIT_TERMINAL_PROMPT=0 git clone --depth 1 -b main \
-        https://github.com/aussierobots/ublox_dgnss src/ublox_dgnss && break || \
-      (echo "ublox_dgnss attempt $i failed, retrying in 15s..." && sleep 15); \
-    done
+# All repos clone in parallel; each retries 5x. Any failed clone fails the
+# build (a missing repo breaks rosdep/colcon downstream anyway).
+RUN clone() { \
+      for i in 1 2 3 4 5; do \
+        GIT_TERMINAL_PROMPT=0 git clone --depth 1 "$@" && return 0; \
+        echo "clone $* attempt $i failed, retrying in 15s..."; sleep 15; \
+      done; echo "FATAL: clone failed: $*"; return 1; \
+    }; \
+    pids=""; \
+    clone -b main      https://github.com/aussierobots/ublox_dgnss src/ublox_dgnss & pids="$pids $!"; \
+    clone -b 4.1.0     https://github.com/ros-perception/vision_opencv.git src/vision_opencv & pids="$pids $!"; \
+    clone -b aoc_refactor https://github.com/LCAS/topological_navigation src/topological_navigation & pids="$pids $!"; \
+    clone -b main      https://github.com/samuk/caatingarobotics src/caatingarobotics & pids="$pids $!"; \
+    clone              https://github.com/manankharwar/fusioncore src/fusioncore & pids="$pids $!"; \
+    clone -b ros2-gz   https://github.com/FieldRobotEvent/virtual_maize_field src/virtual_maize_field & pids="$pids $!"; \
+    clone -b master    https://github.com/LCAS/sentor src/sentor & pids="$pids $!"; \
+    clone -b main      https://github.com/nilseuropa/ros2graph_explorer src/ros2graph_explorer & pids="$pids $!"; \
+    clone -b main      https://github.com/Supull/ros2grapher.git src/ros2grapher & pids="$pids $!"; \
+    rc=0; for p in $pids; do wait "$p" || rc=1; done; \
+    test "$rc" = 0 && test -f src/vision_opencv/cv_bridge/package.xml
+
+# agro_robot_sim now lives in this repo (src/agro_robot_sim, copied in Stage 7).
+# Drop the copy that ships inside caatingarobotics so colcon doesn't see two.
+RUN rm -rf src/caatingarobotics/src/agro_robot_sim
 
 RUN sed -i 's/default_value="Test Rover"/default_value=""/' \
       src/ublox_dgnss/ublox_dgnss/launch/ublox_mb+r_rover.launch.py
 
-# vision_opencv = cv_bridge + image_geometry, rebuilt from source in Stage 10
-# against NumPy 2. This is the package that fixes the crop_row_node ABI crash.
-# Upstream has NO `jazzy` branch (default is `rolling`); the Jazzy release is
-# tag 4.1.0 (matches the 4.1.0-1noble apt cv_bridge we remove). Pin the tag and
-# hard-fail if the clone doesn't land, so a failed fetch can never silently
-# drop the package again.
-RUN for i in 1 2 3 4 5; do \
-      GIT_TERMINAL_PROMPT=0 git clone --depth 1 -b 4.1.0 \
-        https://github.com/ros-perception/vision_opencv.git src/vision_opencv && break || \
-      (echo "vision_opencv attempt $i failed, retrying in 15s..." && sleep 15); \
-    done && \
-    test -f src/vision_opencv/cv_bridge/package.xml || \
-      (echo "FATAL: vision_opencv clone failed" && exit 1)
-
-RUN for i in 1 2 3 4 5; do \
-      GIT_TERMINAL_PROMPT=0 git clone --depth 1 -b aoc_refactor \
-        https://github.com/LCAS/topological_navigation src/topological_navigation && break || \
-      (echo "topological_navigation attempt $i failed, retrying in 15s..." && sleep 15); \
-    done
-
-RUN for i in 1 2 3 4 5; do \
-      GIT_TERMINAL_PROMPT=0 git clone --depth 1 -b main \
-        https://github.com/samuk/caatingarobotics src/caatingarobotics && break || \
-      (echo "caatingarobotics attempt $i failed, retrying in 15s..." && sleep 15); \
-    done
-
-RUN for i in 1 2 3 4 5; do \
-      GIT_TERMINAL_PROMPT=0 git clone --depth 1 \
-        https://github.com/manankharwar/fusioncore src/fusioncore && break || \
-      (echo "fusioncore attempt $i failed, retrying in 15s..." && sleep 15); \
-    done
-
-RUN for i in 1 2 3 4 5; do \
-      GIT_TERMINAL_PROMPT=0 git clone --depth 1 -b ros2-gz \
-        https://github.com/FieldRobotEvent/virtual_maize_field src/virtual_maize_field && break || \
-      (echo "virtual_maize_field attempt $i failed, retrying in 15s..." && sleep 15); \
-    done
-
-# Patch fusioncore: use BEST_EFFORT QoS for /gnss/fix subscriptions.
-# ublox_dgnss publishes BEST_EFFORT (sensor convention); fusioncore's default
-# `10` shorthand is RELIABLE, which silently never connects → no GPS to fuse.
-# Matches both gnss_sub_ and gnss2_sub_ (dual-antenna).
-# If upstream changes the subscription form, the final grep will halt the build.
+# Patch fusioncore: BEST_EFFORT QoS for /gnss/fix (ublox publishes BEST_EFFORT;
+# fusioncore's `10` shorthand is RELIABLE → never connects). grep halts the
+# build if upstream changes the subscription form.
 RUN awk '/create_subscription<sensor_msgs::msg::NavSatFix>/ { in_sub=1 } in_sub && /, 10,/ { sub(/, 10,/, ", rclcpp::SensorDataQoS(),"); in_sub=0 } { print }' \
       src/fusioncore/fusioncore_ros/src/fusion_node.cpp > /tmp/_fc.cpp && \
     mv /tmp/_fc.cpp src/fusioncore/fusioncore_ros/src/fusion_node.cpp && \
     grep -q "rclcpp::SensorDataQoS()" src/fusioncore/fusioncore_ros/src/fusion_node.cpp
-
-RUN for i in 1 2 3 4 5; do \
-      GIT_TERMINAL_PROMPT=0 git clone --depth 1 -b master \
-        https://github.com/LCAS/sentor src/sentor && break || \
-      (echo "sentor attempt $i failed, retrying in 15s..." && sleep 15); \
-    done
-
-RUN for i in 1 2 3 4 5; do \
-      GIT_TERMINAL_PROMPT=0 git clone --depth 1 -b main \
-        https://github.com/nilseuropa/ros2graph_explorer src/ros2graph_explorer && break || \
-      (echo "ros2graph_explorer attempt $i failed, retrying in 15s..." && sleep 15); \
-    done
-
-
-RUN for i in 1 2 3 4 5; do \
-      GIT_TERMINAL_PROMPT=0 git clone --depth 1 -b main \
-        https://github.com/Supull/ros2grapher.git src/ros2grapher && break || \
-      (echo "ros2grapher attempt $i failed, retrying in 15s..." && sleep 15); \
-    done
 
 
 # ============================================================
@@ -407,7 +380,8 @@ RUN apt-get update && \
            /opt/ros/jazzy/lib/libimage_geometry.so 2>/dev/null || true && \
     pip install --break-system-packages --no-cache-dir transforms3d && \
     . /opt/ros/jazzy/setup.sh && \
-    colcon build --symlink-install \
+    MAKEFLAGS="-j$(nproc)" colcon build --symlink-install \
+      --parallel-workers "$(nproc)" \
       --cmake-args -DCMAKE_BUILD_TYPE=Release && \
     apt-get clean && rm -rf /var/lib/apt/lists/*
 

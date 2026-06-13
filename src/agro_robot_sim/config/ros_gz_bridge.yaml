@@ -1,0 +1,49 @@
+# ros_gz_bridge configuration for agro_robot_sim (Gazebo Harmonic / ROS 2 Jazzy)
+#
+# parameter_bridge argument strings do NOT support gz topic remapping via the
+# "gz.msgs.Type:/model/name/topic" colon-suffix notation — that syntax is parsed
+# as part of the type name and produces "No template specialization for the pair".
+# Use this YAML config instead; load it with:
+#   ros2 run ros_gz_bridge parameter_bridge --ros-args -p config_file:=<path>
+
+- ros_topic_name: /cmd_vel
+  gz_topic_name: /model/agro_robot/cmd_vel
+  ros_type_name: geometry_msgs/msg/Twist
+  gz_type_name: gz.msgs.Twist
+  direction: ROS_TO_GZ
+
+- ros_topic_name: /odom
+  gz_topic_name: /model/agro_robot/odometry
+  ros_type_name: nav_msgs/msg/Odometry
+  gz_type_name: gz.msgs.Odometry
+  direction: GZ_TO_ROS
+
+- ros_topic_name: /tf
+  gz_topic_name: /model/agro_robot/tf
+  ros_type_name: tf2_msgs/msg/TFMessage
+  gz_type_name: gz.msgs.Pose_V
+  direction: GZ_TO_ROS
+
+- ros_topic_name: /scan
+  gz_topic_name: /model/agro_robot/scan
+  ros_type_name: sensor_msgs/msg/LaserScan
+  gz_type_name: gz.msgs.LaserScan
+  direction: GZ_TO_ROS
+
+- ros_topic_name: /imu
+  gz_topic_name: /model/agro_robot/imu
+  ros_type_name: sensor_msgs/msg/Imu
+  gz_type_name: gz.msgs.IMU
+  direction: GZ_TO_ROS
+
+- ros_topic_name: /gps/fix
+  gz_topic_name: /model/agro_robot/gps
+  ros_type_name: sensor_msgs/msg/NavSatFix
+  gz_type_name: gz.msgs.NavSat
+  direction: GZ_TO_ROS
+
+- ros_topic_name: /clock
+  gz_topic_name: /clock
+  ros_type_name: rosgraph_msgs/msg/Clock
+  gz_type_name: gz.msgs.Clock
+  direction: GZ_TO_ROS

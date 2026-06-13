@@ -47,7 +47,8 @@ class DevkitManager:
         if sim:
             build_cmd += ['--build-arg', 'INSTALL_SIM=true']
 
-        if subprocess.run(build_cmd).returncode != 0:
+        env = {**os.environ, 'DOCKER_BUILDKIT': '1'}
+        if subprocess.run(build_cmd, env=env).returncode != 0:
             self._log("Build failed.", "ERROR")
             sys.exit(1)
 
@@ -179,6 +180,22 @@ class DevkitManager:
                   "CycloneDDS falling back to loopback (local-only DDS).", "WARN")
         return self._loopback_dds_uri()
 
+    def _gpu_render_flags(self) -> List[str]:
+        # NVIDIA: --gpus. Intel/AMD: /dev/dri (mounted via /dev). Else llvmpipe.
+        if shutil.which('nvidia-smi') and subprocess.run(
+                ['nvidia-smi'], capture_output=True).returncode == 0:
+            self._log("NVIDIA GPU — hardware rendering.", "INFO")
+            return ['--gpus', 'all',
+                    '--env', 'NVIDIA_VISIBLE_DEVICES=all',
+                    '--env', 'NVIDIA_DRIVER_CAPABILITIES=all',
+                    '--env', '__GLX_VENDOR_LIBRARY_NAME=nvidia']
+        if list(Path('/dev/dri').glob('renderD*')):
+            self._log("Intel/AMD GPU (/dev/dri) — hardware rendering.", "INFO")
+            return []
+        self._log("No GPU — software rendering (llvmpipe).", "WARN")
+        return ['--env', 'GALLIUM_DRIVER=llvmpipe',
+                '--env', 'MESA_LOADER_DRIVER_OVERRIDE=llvmpipe']
+
     def _base_docker_cmd(self, env_file: Path, cyclonedds_uri: str,
                          extra_flags: List[str] = None) -> List[str]:
         """Common docker run flags shared by all launch modes.
@@ -193,14 +210,17 @@ class DevkitManager:
             '--env', 'PYTHONPATH=/root/.lizard:/workspace/install/lib/python3.12/site-packages',
             '--env', f'DISPLAY={os.environ.get("DISPLAY", ":0")}',
             '--env', 'QT_X11_NO_MITSHM=1',
-            '--env', 'GALLIUM_DRIVER=llvmpipe',
-            '--env', 'MESA_LOADER_DRIVER_OVERRIDE=llvmpipe',
+            *self._gpu_render_flags(),
             '--env', f'CYCLONEDDS_URI={cyclonedds_uri}',
-            '--env', 'GZ_SIM_RESOURCE_PATH=/workspace/install/virtual_maize_field/share/virtual_maize_field/models',
+            '--env', 'GZ_SIM_RESOURCE_PATH=/workspace/models:/workspace/install/virtual_maize_field/share/virtual_maize_field/models',
             '-v', '/tmp/.X11-unix:/tmp/.X11-unix:rw',
             '--env-file', str(env_file) if env_file.exists() else '/dev/null',
             '-v', '/dev:/dev',
             '-v', f'{self.root_dir}/maps:/workspace/maps',
+            # Imported soil assets (textures) persist on the host so they
+            # survive image rebuilds. topo_to_forest3d stages them into
+            # models/ground/texture at world-rebuild time.
+            '-v', f'{self.root_dir}/uploads:/workspace/uploads',
         ]
         if extra_flags:
             cmd += extra_flags
@@ -261,7 +281,8 @@ class DevkitManager:
         # field with a real-GPS-anchored base_link 27 km off the costmap and
         # no fake_nav2_server (so no virtual robot rendered). FORCE_SIM keeps
         # the sim backend regardless of attached hardware.
-        force_sim = '--sim' in extra_args or cfg.get('FORCE_SIM') == '1' \
+        force_sim = any(a.startswith('--sim') for a in extra_args) \
+            or cfg.get('FORCE_SIM') == '1' \
             or os.environ.get('FORCE_SIM') == '1'
         is_sim = 'true' if (force_sim or (r_port == 'virtual' and mcu_port == 'virtual')) else 'false'
 
@@ -273,7 +294,8 @@ class DevkitManager:
         datum_alt = cfg.get('FIELD_DATUM_ALT', '0.0')
 
         # --sim is our own flag; don't forward it to ros2 launch.
-        extra_args = [a for a in extra_args if a != '--sim']
+        # Use startswith so variants like --sim, --sim., --sim=true all match.
+        extra_args = [a for a in extra_args if not a.startswith('--sim')]
 
         if is_sim == 'false':
             self._usb_reset_f9p(cfg.get('GPS_USB_PATH_ROVER', 'virtual'))
@@ -288,8 +310,8 @@ class DevkitManager:
         # source of truth, the Gazebo world is derived from it (plants studded
         # in the inter-row gaps of the saved R*_IN/OUT nodes). On first boot
         # there's no authored map yet, so we bootstrap the node positions from
-        # a vmf gt_map.csv via get_maize_topo.py, then immediately rebuild
-        # maize.world FROM that map with get_topo_maize_world.py. The vmf
+        # a vmf gt_map.csv via get_maize_topo.py, then build maize.world FROM
+        # that map with the forest3d pipeline (topo_to_forest3d.py). The vmf
         # generated.world is no longer launched, so we no longer symlink it.
         topo_world = ("/workspace/install/agro_robot_sim/share/"
                       "agro_robot_sim/worlds/maize.world")
@@ -304,9 +326,12 @@ class DevkitManager:
             # Derive the Gazebo world from whatever map now exists. rm -f first
             # in case a stale symlink from an older build still occupies the path.
             f"rm -f {topo_world} && "
-            "python3 /workspace/get_topo_maize_world.py "
+            "python3 /workspace/topo_to_forest3d.py "
             "--topo /workspace/maps/maize_map "
-            f"--out {topo_world} --name maize_field && "
+            f"--out /workspace/forest3d.yaml "
+            "--generate "
+            f"--world-out {topo_world} "
+            "--models-path /workspace/models && "
         ) if is_sim == 'true' else ""
 
         # In sim mode launch sowbot_sim (real Nav2 + topo nav + UI) instead of
@@ -344,7 +369,7 @@ class DevkitManager:
         limbic_flags = [
             '--env', 'TMAP2_FILE=/workspace/maps/maize_map',
             '-v', f'{self.root_dir}/get_maize_topo.py:/workspace/get_maize_topo.py:ro',
-            '-v', f'{self.root_dir}/get_topo_maize_world.py:/workspace/get_topo_maize_world.py:ro',
+            '-v', f'{self.root_dir}/topo_to_forest3d.py:/workspace/topo_to_forest3d.py:ro',
         ]
         cyclonedds_uri = self._cyclonedds_uri(cfg, is_sim == 'true')
         docker_cmd = self._base_docker_cmd(env_file, cyclonedds_uri, limbic_flags) + [ros_command]

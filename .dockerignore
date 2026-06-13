@@ -1,0 +1,10 @@
+.git
+install/
+build/
+log/
+uploads/
+maps/
+**/__pycache__
+*.swp
+.venv/
+venv/
