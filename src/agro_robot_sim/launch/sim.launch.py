@@ -45,6 +45,12 @@ def generate_launch_description():
     )
 
     # 2. robot_state_publisher
+    # use_sim_time: False — the nav stack (sim_nav.launch.py) runs entirely on
+    # wall-clock time.  If RSP uses sim-time it stamps /tf at t=0 until Gazebo
+    # starts publishing /clock; TF2 treats those as ancient and the nav stack
+    # (wall-time) discards them.  Even after /clock flows, RSP sim-time ≠
+    # nav-stack wall-time → lookup mismatches.  Wall-clock here keeps both
+    # sides in the same time domain.
     xacro_file = PathJoinSubstitution([pkg_share, "urdf", LaunchConfiguration("urdf")])
     robot_state_publisher = Node(
         package="robot_state_publisher",
@@ -56,14 +62,19 @@ def generate_launch_description():
                 "robot_description": ParameterValue(
                     Command(["xacro ", xacro_file]), value_type=str
                 ),
-                "use_sim_time": True,
+                "use_sim_time": False,
             }
         ],
     )
 
     # 3. spawn robot
+    # 8 s delay: gz-sim loading minha_fazenda.sdf (terrain mesh + 6 crop rows +
+    # world plugins) takes 5–15 s on a typical laptop.  At 3 s the world is not
+    # yet ready; `gz sim create` returns silently with no entity and there is
+    # nothing for the bridge to subscribe to.  8 s gives gz-sim a comfortable
+    # margin on most hardware — increase further on very slow machines.
     spawn_entity = TimerAction(
-        period=3.0,
+        period=8.0,
         actions=[
             Node(
                 package="ros_gz_sim",
@@ -88,9 +99,15 @@ def generate_launch_description():
     # ("gz.msgs.Twist:/model/agro_robot/cmd_vel") — that string is parsed as the
     # type name and produces "No template specialization for the pair".
     # Use the config_file parameter with a YAML mapping instead.
+    #
+    # 10 s delay: the bridge must not start until the model exists in Gazebo,
+    # otherwise the /model/agro_robot/tf gz topic is absent and the bridge
+    # logs "topic not found" and never subscribes.  2 s after the spawn timer
+    # gives `gz sim create` time to complete and the model to initialise its
+    # plugins before the bridge tries to connect.
     bridge_config = os.path.join(pkg_share, "config", "ros_gz_bridge.yaml")
     ros_gz_bridge = TimerAction(
-        period=4.0,
+        period=10.0,
         actions=[
             Node(
                 package="ros_gz_bridge",
