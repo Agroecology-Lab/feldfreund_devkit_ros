@@ -136,6 +136,18 @@ def _topo_nav_nodes(tmap2_file: str, devkit_launch_pkg: str) -> list:
                 output='screen',
                 parameters=[sim_time],
             ),
+            # fake_nav2_server publishes a continuously-updated dynamic TF
+            # (map -> odom -> base_link) at 30 Hz via VirtualRobot.  Without
+            # it, localisation2 sees the static bootstrap TF but its callback
+            # never fires again, so /current_node is never published and
+            # navigation2 stays in WAITING_FOR_LOCALISATION forever.
+            Node(
+                package='topological_nav_simulator',
+                executable='fake_nav2_server',
+                name='fake_nav2_server',
+                output='screen',
+                parameters=[sim_time],
+            ),
         ]),
 
         TimerAction(period=8.0, actions=_nav2_sim_nodes(nav2_params)),
