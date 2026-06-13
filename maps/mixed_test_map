@@ -32,7 +32,7 @@ name: test_map
 pointset: test_map
 transformation:
   topo_frame_id: map
-  parent: map
+  parent: odom
   rotation:
     w: 1.0
     x: 0.0
