@@ -47,7 +47,8 @@ class DevkitManager:
         if sim:
             build_cmd += ['--build-arg', 'INSTALL_SIM=true']
 
-        if subprocess.run(build_cmd).returncode != 0:
+        env = {**os.environ, 'DOCKER_BUILDKIT': '1'}
+        if subprocess.run(build_cmd, env=env).returncode != 0:
             self._log("Build failed.", "ERROR")
             sys.exit(1)
 
