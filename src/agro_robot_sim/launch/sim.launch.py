@@ -17,11 +17,11 @@ def generate_launch_description():
     pkg_share = get_package_share_directory(pkg_name)
 
     # ── Launch arguments ──────────────────────────────────────────────────────
-    x_arg     = DeclareLaunchArgument("x",     default_value="0.0")
-    y_arg     = DeclareLaunchArgument("y",     default_value="0.0")
-    z_arg     = DeclareLaunchArgument("z",     default_value="0.3")
+    x_arg     = DeclareLaunchArgument("x", default_value="0.0")
+    y_arg     = DeclareLaunchArgument("y", default_value="0.0")
+    z_arg     = DeclareLaunchArgument("z", default_value="0.3")
     world_arg = DeclareLaunchArgument(
-        "world", default_value="minha_fazenda.sdf",
+        "world", default_value="maize.world",
         description="SDF world file name inside agro_robot_sim/worlds/",
     )
     urdf_arg  = DeclareLaunchArgument(
@@ -29,20 +29,22 @@ def generate_launch_description():
         description="URDF/xacro filename inside agro_robot_sim/urdf/",
     )
 
-    # Inherit DISPLAY and XAUTHORITY from the shell so gz sim can open a window.
-    # Without this, ExecuteProcess drops these variables and gz runs headless.
-    display_env = {
-        "DISPLAY":    os.environ.get("DISPLAY",    ":0"),
+    # ── Environment ───────────────────────────────────────────────────────────
+    # Extend GZ_SIM_RESOURCE_PATH so maize.world can find model://ground and
+    # model://crop/plant, and pass DISPLAY so the gz GUI renders properly.
+    gz_env = {
+        "DISPLAY": os.environ.get("DISPLAY", ":0"),
         "XAUTHORITY": os.environ.get("XAUTHORITY", ""),
+        "GZ_SIM_RESOURCE_PATH": "/workspace/models:" + os.environ.get("GZ_SIM_RESOURCE_PATH", ""),
     }
 
-    # ── 1. Gazebo — direct call with display env ──────────────────────────────
+    # ── 1. Gazebo ─────────────────────────────────────────────────────────────
     world_file = PathJoinSubstitution([pkg_share, "worlds", LaunchConfiguration("world")])
     gz_sim = ExecuteProcess(
         cmd=[FindExecutable(name="gz"), "sim", "-r", world_file],
         name="gz_sim",
         output="screen",
-        additional_env=display_env,
+        additional_env=gz_env,
     )
 
     # ── 2. robot_state_publisher ──────────────────────────────────────────────
