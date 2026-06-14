@@ -4,53 +4,43 @@ from launch import LaunchDescription
 from launch_ros.parameter_descriptions import ParameterValue
 from launch.substitutions import LaunchConfiguration, Command
 from ament_index_python.packages import get_package_share_directory
-from launch.launch_description_sources import PythonLaunchDescriptionSource
 from launch.actions import (
-    DeclareLaunchArgument, ExecuteProcess, IncludeLaunchDescription,
+    DeclareLaunchArgument, ExecuteProcess,
     RegisterEventHandler, TimerAction,
 )
 from launch.event_handlers import OnProcessExit
-from launch.substitutions import PathJoinSubstitution, TextSubstitution, FindExecutable
+from launch.substitutions import PathJoinSubstitution, FindExecutable
 
 
 def generate_launch_description():
-    pkg_name     = "agro_robot_sim"
-    pkg_share    = get_package_share_directory(pkg_name)
-    gz_pkg_share = get_package_share_directory("ros_gz_sim")
+    pkg_name  = "agro_robot_sim"
+    pkg_share = get_package_share_directory(pkg_name)
 
     # ── Launch arguments ──────────────────────────────────────────────────────
-    x_arg = DeclareLaunchArgument("x", default_value="0.0")
-    y_arg = DeclareLaunchArgument("y", default_value="0.0")
-    z_arg = DeclareLaunchArgument("z", default_value="0.3")
-
+    x_arg     = DeclareLaunchArgument("x",     default_value="0.0")
+    y_arg     = DeclareLaunchArgument("y",     default_value="0.0")
+    z_arg     = DeclareLaunchArgument("z",     default_value="0.3")
     world_arg = DeclareLaunchArgument(
-        "world",
-        default_value="minha_fazenda.sdf",
+        "world", default_value="minha_fazenda.sdf",
         description="SDF world file name inside agro_robot_sim/worlds/",
     )
-
-    urdf_arg = DeclareLaunchArgument(
-        "urdf",
-        default_value="sowbot_01.xacro",
+    urdf_arg  = DeclareLaunchArgument(
+        "urdf", default_value="sowbot_01.xacro",
         description="URDF/xacro filename inside agro_robot_sim/urdf/",
     )
 
-    # ── 1. Gazebo ─────────────────────────────────────────────────────────────
+    # ── 1. Gazebo — called directly, NOT through ros_gz_sim wrapper ───────────
+    # The ros_gz_sim IncludeLaunchDescription wrapper splits server and GUI into
+    # separate processes which breaks rendering. Calling gz sim directly matches
+    # the working three-terminal method.
     world_file = PathJoinSubstitution([pkg_share, "worlds", LaunchConfiguration("world")])
-    gz_sim = IncludeLaunchDescription(
-        PythonLaunchDescriptionSource(
-            os.path.join(gz_pkg_share, "launch", "gz_sim.launch.py")
-        ),
-        launch_arguments={
-            "gz_args": [TextSubstitution(text="-r "), world_file],
-            "on_exit_shutdown": "True",
-        }.items(),
+    gz_sim = ExecuteProcess(
+        cmd=[FindExecutable(name="gz"), "sim", "-r", world_file],
+        name="gz_sim",
+        output="screen",
     )
 
     # ── 2. robot_state_publisher ──────────────────────────────────────────────
-    # Command(["xacro ", xacro_file]) runs xacro at launch time and passes the
-    # result as a proper ROS parameter — avoids all shell quoting issues that
-    # break passing 23 kB of XML as a command-line argument.
     xacro_file = PathJoinSubstitution([pkg_share, "urdf", LaunchConfiguration("urdf")])
     robot_state_publisher = Node(
         package="robot_state_publisher",
@@ -66,13 +56,7 @@ def generate_launch_description():
     )
 
     # ── 3. Spawn robot ────────────────────────────────────────────────────────
-    # WHY -string and not -topic /robot_description:
-    #   robot_state_publisher strips <gazebo> plugin blocks before publishing.
-    #   Spawning from that topic gives a robot with no diff-drive / IMU / NavSat.
-    #
-    # WHY poll instead of TimerAction:
-    #   World load time varies (5–15 s on slow hosts). Polling gz service -l is
-    #   event-driven and fires exactly when the world services exist.
+    xacro_file = PathJoinSubstitution([pkg_share, "urdf", LaunchConfiguration("urdf")])
     spawn_entity = ExecuteProcess(
         cmd=[
             FindExecutable(name="bash"), "-c",
@@ -93,7 +77,7 @@ def generate_launch_description():
         output="screen",
     )
 
-    # ── 4. ros_gz_bridge (starts 2 s after spawn exits) ──────────────────────
+    # ── 4. Bridge (2 s after spawn exits) ────────────────────────────────────
     bridge_config = os.path.join(pkg_share, "config", "ros_gz_bridge.yaml")
     ros_gz_bridge = RegisterEventHandler(
         OnProcessExit(
