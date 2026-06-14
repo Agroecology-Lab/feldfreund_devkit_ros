@@ -5,8 +5,10 @@ from launch_ros.parameter_descriptions import ParameterValue
 from launch.substitutions import LaunchConfiguration, Command
 from ament_index_python.packages import get_package_share_directory
 from launch.launch_description_sources import PythonLaunchDescriptionSource
-from launch.actions import DeclareLaunchArgument, IncludeLaunchDescription, TimerAction
-from launch.substitutions import PathJoinSubstitution, TextSubstitution
+from launch.actions import (
+    DeclareLaunchArgument, ExecuteProcess, IncludeLaunchDescription, TimerAction
+)
+from launch.substitutions import PathJoinSubstitution, TextSubstitution, FindExecutable
 
 
 def generate_launch_description():
@@ -45,12 +47,7 @@ def generate_launch_description():
     )
 
     # 2. robot_state_publisher
-    # use_sim_time: False — the nav stack (sim_nav.launch.py) runs entirely on
-    # wall-clock time.  If RSP uses sim-time it stamps /tf at t=0 until Gazebo
-    # starts publishing /clock; TF2 treats those as ancient and the nav stack
-    # (wall-time) discards them.  Even after /clock flows, RSP sim-time ≠
-    # nav-stack wall-time → lookup mismatches.  Wall-clock here keeps both
-    # sides in the same time domain.
+    # use_sim_time: False — see original comment.
     xacro_file = PathJoinSubstitution([pkg_share, "urdf", LaunchConfiguration("urdf")])
     robot_state_publisher = Node(
         package="robot_state_publisher",
@@ -68,44 +65,46 @@ def generate_launch_description():
     )
 
     # 3. spawn robot
-    # 8 s delay: gz-sim loading maize.world takes 5–15 s on a typical laptop.
-    # We use -topic /robot_description (published by robot_state_publisher above)
-    # rather than -file xacro_file because gz sim create passes the file path
-    # directly to the URDF parser, which does not invoke xacro — variables like
-    # ${frame_len} are left unresolved and the parse fails.  robot_state_publisher
-    # runs xacro internally and publishes the resolved URDF on /robot_description.
+    # 8 s delay: gz-sim loading maize.world takes 5-15 s on a typical laptop.
+    #
+    # WHY NOT -file xacro_file:
+    #   gz sim create passes the file path to the URDF parser directly, which
+    #   does not invoke xacro.  Variables like ${frame_len} are left unresolved
+    #   and parsing fails with "Unable to parse component".
+    #
+    # WHY NOT -topic /robot_description:
+    #   robot_state_publisher strips <gazebo> plugin blocks when publishing
+    #   /robot_description (not valid URDF).  The spawned robot has no
+    #   diff-drive, IMU, or NavSat plugins so /odom and /tf are never published.
+    #
+    # SOLUTION: run xacro as a pre-processing step and pipe the resolved URDF
+    #   (including <gazebo> blocks) to gz sim create via stdin / -string.
+    #   xacro preserves <gazebo> blocks; gz sim create -string sends the content
+    #   to the URDF->SDF converter which handles them correctly.
     spawn_entity = TimerAction(
         period=8.0,
         actions=[
-            Node(
-                package="ros_gz_sim",
-                executable="create",
-                name="spawn_robot",
-                output="screen",
-                arguments=[
-                    "-name",  "agro_robot",
-                    "-topic", "/robot_description",
-                    "-x", LaunchConfiguration("x"),
-                    "-y", LaunchConfiguration("y"),
-                    "-z", LaunchConfiguration("z"),
+            ExecuteProcess(
+                cmd=[
+                    FindExecutable(name='bash'), '-c',
+                    [
+                        'URDF=$(xacro ', xacro_file, ') && '
+                        'ros2 run ros_gz_sim create'
+                        ' -name agro_robot'
+                        ' -string "$URDF"'
+                        ' -x ', LaunchConfiguration('x'),
+                        ' -y ', LaunchConfiguration('y'),
+                        ' -z ', LaunchConfiguration('z'),
+                    ],
                 ],
+                name='spawn_robot',
+                output='screen',
             )
         ],
     )
 
     # 4. topic bridge
-    # The xacro declares bare plugin topics (cmd_vel, odom, tf, …) which Gazebo
-    # scopes to /model/agro_robot/<topic> at runtime.  parameter_bridge argument
-    # strings do NOT support gz topic remapping via the colon-suffix notation
-    # ("gz.msgs.Twist:/model/agro_robot/cmd_vel") — that string is parsed as the
-    # type name and produces "No template specialization for the pair".
-    # Use the config_file parameter with a YAML mapping instead.
-    #
-    # 10 s delay: the bridge must not start until the model exists in Gazebo,
-    # otherwise the /model/agro_robot/tf gz topic is absent and the bridge
-    # logs "topic not found" and never subscribes.  2 s after the spawn timer
-    # gives `gz sim create` time to complete and the model to initialise its
-    # plugins before the bridge tries to connect.
+    # 10 s delay: bridge must not start until the model exists in Gazebo.
     bridge_config = os.path.join(pkg_share, "config", "ros_gz_bridge.yaml")
     ros_gz_bridge = TimerAction(
         period=10.0,
