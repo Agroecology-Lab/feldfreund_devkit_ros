@@ -33,6 +33,7 @@ from launch import LaunchDescription
 from launch.actions import (
     DeclareLaunchArgument,
     IncludeLaunchDescription,
+    SetEnvironmentVariable,
     TimerAction,
 )
 from launch.launch_description_sources import PythonLaunchDescriptionSource
@@ -175,6 +176,23 @@ def generate_launch_description():
         description='SDF world file name inside agro_robot_sim/worlds/',
     )
 
+    x_arg = DeclareLaunchArgument('x', default_value='0.0')
+    y_arg = DeclareLaunchArgument('y', default_value='0.0')
+    z_arg = DeclareLaunchArgument('z', default_value='0.3')
+
+    # Ensure Forest3D-generated models (model://ground, model://crop/plant)
+    # are always findable by gz sim regardless of the calling environment.
+    # The UI's _SIM_ENV sets this too, but setting it here covers direct
+    # `ros2 launch` invocations and any future callers.
+    existing = os.environ.get('GZ_SIM_RESOURCE_PATH', '')
+    gz_resource_path = SetEnvironmentVariable(
+        'GZ_SIM_RESOURCE_PATH',
+        '/workspace/models'
+        ':/workspace/install/virtual_maize_field'
+        '/share/virtual_maize_field/models'
+        + (':' + existing if existing else ''),
+    )
+
     # sim.launch.py: gz sim + robot_state_publisher + spawn + ros_gz_bridge
     sim_launch = IncludeLaunchDescription(
         PythonLaunchDescriptionSource(
@@ -183,10 +201,17 @@ def generate_launch_description():
         launch_arguments={
             'world': LaunchConfiguration('world'),
             'urdf':  'sowbot_01.xacro',
+            'x':     LaunchConfiguration('x'),
+            'y':     LaunchConfiguration('y'),
+            'z':     LaunchConfiguration('z'),
         }.items(),
     )
 
     return LaunchDescription([
+        gz_resource_path,
         world_arg,
+        x_arg,
+        y_arg,
+        z_arg,
         sim_launch,
     ])
