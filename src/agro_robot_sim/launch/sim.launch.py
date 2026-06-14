@@ -18,7 +18,7 @@ def generate_launch_description():
     pkg_share    = get_package_share_directory(pkg_name)
     gz_pkg_share = get_package_share_directory("ros_gz_sim")
 
-    # 0. launch arguments
+    # ── Launch arguments ──────────────────────────────────────────────────────
     x_arg = DeclareLaunchArgument("x", default_value="0.0")
     y_arg = DeclareLaunchArgument("y", default_value="0.0")
     z_arg = DeclareLaunchArgument("z", default_value="0.3")
@@ -35,9 +35,8 @@ def generate_launch_description():
         description="URDF/xacro filename inside agro_robot_sim/urdf/",
     )
 
-    # 1. open gazebo
-    world = LaunchConfiguration("world")
-    world_file = PathJoinSubstitution([pkg_share, "worlds", world])
+    # ── 1. Gazebo ─────────────────────────────────────────────────────────────
+    world_file = PathJoinSubstitution([pkg_share, "worlds", LaunchConfiguration("world")])
     gz_sim = IncludeLaunchDescription(
         PythonLaunchDescriptionSource(
             os.path.join(gz_pkg_share, "launch", "gz_sim.launch.py")
@@ -48,71 +47,53 @@ def generate_launch_description():
         }.items(),
     )
 
-    # 2. robot_state_publisher
-    # use_sim_time: False — see original comment.
+    # ── 2. robot_state_publisher ──────────────────────────────────────────────
+    # Command(["xacro ", xacro_file]) runs xacro at launch time and passes the
+    # result as a proper ROS parameter — avoids all shell quoting issues that
+    # break passing 23 kB of XML as a command-line argument.
     xacro_file = PathJoinSubstitution([pkg_share, "urdf", LaunchConfiguration("urdf")])
     robot_state_publisher = Node(
         package="robot_state_publisher",
         executable="robot_state_publisher",
         name="robot_state_publisher",
         output="screen",
-        parameters=[
-            {
-                "robot_description": ParameterValue(
-                    Command(["xacro ", xacro_file]), value_type=str
-                ),
-                "use_sim_time": False,
-            }
-        ],
+        parameters=[{
+            "robot_description": ParameterValue(
+                Command(["xacro ", xacro_file]), value_type=str
+            ),
+            "use_sim_time": False,
+        }],
     )
 
-    # 3. spawn robot
+    # ── 3. Spawn robot ────────────────────────────────────────────────────────
+    # WHY -string and not -topic /robot_description:
+    #   robot_state_publisher strips <gazebo> plugin blocks before publishing.
+    #   Spawning from that topic gives a robot with no diff-drive / IMU / NavSat.
     #
-    # WHY NOT -file xacro_file:
-    #   gz sim create passes the file path to the URDF parser directly, which
-    #   does not invoke xacro.  Variables like ${frame_len} are left unresolved
-    #   and parsing fails with "Unable to parse component".
-    #
-    # WHY NOT -topic /robot_description:
-    #   robot_state_publisher strips <gazebo> plugin blocks when publishing
-    #   /robot_description (not valid URDF).  The spawned robot has no
-    #   diff-drive, IMU, or NavSat plugins so /odom and /tf are never published.
-    #
-    # SOLUTION: run xacro as a pre-processing step and pipe the resolved URDF
-    #   (including <gazebo> blocks) to gz sim create via stdin / -string.
-    #   xacro preserves <gazebo> blocks; gz sim create -string sends the content
-    #   to the URDF->SDF converter which handles them correctly.
-    #
-    # WHY POLL instead of TimerAction(period=8.0):
-    #   maize.world takes 5-15 s to load depending on the host.  A fixed timer
-    #   fires gz sim create before the /world/* services exist, which causes a
-    #   silent no-op spawn.  Polling 'gz service -l' is event-driven and works
-    #   regardless of host speed.
+    # WHY poll instead of TimerAction:
+    #   World load time varies (5–15 s on slow hosts). Polling gz service -l is
+    #   event-driven and fires exactly when the world services exist.
     spawn_entity = ExecuteProcess(
         cmd=[
-            FindExecutable(name='bash'), '-c',
+            FindExecutable(name="bash"), "-c",
             [
-                'echo "[spawn_robot] waiting for gz sim to be ready..."; '
+                'echo "[spawn] waiting for gz sim..."; '
                 'until gz service -l 2>/dev/null | grep -q "/world/"; do sleep 2; done; '
-                'echo "[spawn_robot] gz ready — spawning agro_robot"; '
+                'echo "[spawn] gz ready — spawning agro_robot"; '
                 'URDF=$(xacro ', xacro_file, ') && '
                 'ros2 run ros_gz_sim create'
                 ' -name agro_robot'
                 ' -string "$URDF"'
-                ' -x ', LaunchConfiguration('x'),
-                ' -y ', LaunchConfiguration('y'),
-                ' -z ', LaunchConfiguration('z'),
+                ' -x ', LaunchConfiguration("x"),
+                ' -y ', LaunchConfiguration("y"),
+                ' -z ', LaunchConfiguration("z"),
             ],
         ],
-        name='spawn_robot',
-        output='screen',
+        name="spawn_robot",
+        output="screen",
     )
 
-    # 4. topic bridge
-    # Start 2 s after spawn_entity exits (event-driven, not a fixed timer).
-    # The bridge subscribes to /model/agro_robot/... topics; those Gazebo topics
-    # only exist once the model is in the world, so we must not start until
-    # spawn_entity has completed successfully.
+    # ── 4. ros_gz_bridge (starts 2 s after spawn exits) ──────────────────────
     bridge_config = os.path.join(pkg_share, "config", "ros_gz_bridge.yaml")
     ros_gz_bridge = RegisterEventHandler(
         OnProcessExit(
@@ -138,11 +119,8 @@ def generate_launch_description():
     )
 
     return LaunchDescription([
-        x_arg,
-        y_arg,
-        z_arg,
-        world_arg,
-        urdf_arg,
+        x_arg, y_arg, z_arg,
+        world_arg, urdf_arg,
         gz_sim,
         robot_state_publisher,
         spawn_entity,
