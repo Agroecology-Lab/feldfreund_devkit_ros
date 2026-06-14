@@ -9,12 +9,19 @@ from launch.actions import (
     RegisterEventHandler, TimerAction,
 )
 from launch.event_handlers import OnProcessExit
-from launch.substitutions import PathJoinSubstitution, FindExecutable
+from launch.substitutions import PathJoinSubstitution
+
+GZ_BIN = "/opt/ros/jazzy/opt/gz_tools_vendor/bin/gz"
 
 
 def generate_launch_description():
     pkg_name  = "agro_robot_sim"
     pkg_share = get_package_share_directory(pkg_name)
+
+    # Resolve paths eagerly at generate time — avoids substitution timing bugs
+    # that cause gz to receive a blank world path or xacro to receive no input.
+    models_dir  = os.path.join(os.path.dirname(pkg_share), "..", "..", "..", "models")
+    models_dir  = os.path.realpath(models_dir)
 
     # ── Launch arguments ──────────────────────────────────────────────────────
     x_arg     = DeclareLaunchArgument("x", default_value="0.0")
@@ -24,30 +31,31 @@ def generate_launch_description():
         "world", default_value="maize.world",
         description="SDF world file name inside agro_robot_sim/worlds/",
     )
-    urdf_arg  = DeclareLaunchArgument(
+    urdf_arg = DeclareLaunchArgument(
         "urdf", default_value="sowbot_01.xacro",
         description="URDF/xacro filename inside agro_robot_sim/urdf/",
     )
 
     # ── Environment ───────────────────────────────────────────────────────────
-    # Extend GZ_SIM_RESOURCE_PATH so maize.world can find model://ground and
-    # model://crop/plant, and pass DISPLAY so the gz GUI renders properly.
     gz_env = {
         "DISPLAY": os.environ.get("DISPLAY", ":0"),
         "XAUTHORITY": os.environ.get("XAUTHORITY", ""),
-        "GZ_SIM_RESOURCE_PATH": "/workspace/models:" + os.environ.get("GZ_SIM_RESOURCE_PATH", ""),
+        "GZ_SIM_RESOURCE_PATH": models_dir + ":" + os.environ.get("GZ_SIM_RESOURCE_PATH", ""),
     }
 
     # ── 1. Gazebo ─────────────────────────────────────────────────────────────
+    # Use an eager world path string + LaunchConfiguration for the filename so
+    # the world arg override still works, but the directory is resolved now.
     world_file = PathJoinSubstitution([pkg_share, "worlds", LaunchConfiguration("world")])
     gz_sim = ExecuteProcess(
-        cmd=[FindExecutable(name="gz"), "sim", "-r", world_file],
+        cmd=[GZ_BIN, "sim", "-r", world_file],
         name="gz_sim",
         output="screen",
         additional_env=gz_env,
     )
 
     # ── 2. robot_state_publisher ──────────────────────────────────────────────
+    # Command([]) resolves PathJoinSubstitution correctly at node startup.
     xacro_file = PathJoinSubstitution([pkg_share, "urdf", LaunchConfiguration("urdf")])
     robot_state_publisher = Node(
         package="robot_state_publisher",
@@ -63,21 +71,22 @@ def generate_launch_description():
     )
 
     # ── 3. Spawn robot ────────────────────────────────────────────────────────
+    # xacro_file_eager is resolved at generate time so the bash -c string
+    # always receives a real path, not an unresolved substitution token.
+    xacro_file_eager = os.path.join(pkg_share, "urdf", "sowbot_01.xacro")
     spawn_entity = ExecuteProcess(
         cmd=[
-            FindExecutable(name="bash"), "-c",
-            [
+            "/bin/bash", "-c",
+            (
                 'echo "[spawn] waiting for gz sim..."; '
                 'until gz service -l 2>/dev/null | grep -q "/world/"; do sleep 2; done; '
                 'echo "[spawn] gz ready — spawning agro_robot"; '
-                'URDF=$(xacro ', xacro_file, ') && '
+                f'URDF=$(xacro {xacro_file_eager}) && '
                 'ros2 run ros_gz_sim create'
                 ' -name agro_robot'
                 ' -string "$URDF"'
-                ' -x ', LaunchConfiguration("x"),
-                ' -y ', LaunchConfiguration("y"),
-                ' -z ', LaunchConfiguration("z"),
-            ],
+                ' -x 0.0 -y 0.0 -z 0.3'
+            ),
         ],
         name="spawn_robot",
         output="screen",
