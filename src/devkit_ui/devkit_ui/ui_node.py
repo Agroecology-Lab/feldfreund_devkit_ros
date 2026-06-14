@@ -2898,6 +2898,7 @@ class NiceGuiNode(Node):
 
                 # ── Gazebo Sim ───────────────────────────────────────────
                 _gazebo_proc: list = [None]
+                _spawn_proc: list = [None]
                 _gazebo_daemons: list = []   # Xvfb, x11vnc, websockify for browser mode
                 _gazebo_lbl = ui.label('').classes('text-xs font-mono').style('color:#57606a')
 
@@ -3061,7 +3062,49 @@ class NiceGuiNode(Node):
                         _gazebo_lbl.set_text(f'ERROR: {exc}')
                         _gazebo_lbl.style('color:#cf222e')
 
+                def _launch_world():
+                    if _gazebo_proc[0] is not None and _gazebo_proc[0].poll() is None:
+                        _gazebo_lbl.set_text('already running')
+                        return
+                    try:
+                        env = {**os.environ, 'DISPLAY': os.environ.get('DISPLAY', ':0'),
+                               'GZ_SIM_RESOURCE_PATH': '/workspace/models' + (':' + os.environ['GZ_SIM_RESOURCE_PATH'] if os.environ.get('GZ_SIM_RESOURCE_PATH') else '')}
+                        pkg = subprocess.check_output(['ros2', 'pkg', 'prefix', 'agro_robot_sim'], text=True).strip()
+                        _gazebo_proc[0] = subprocess.Popen(
+                            ['gz', 'sim', '-r', f'{pkg}/share/agro_robot_sim/worlds/maize.world'],
+                            stdout=open('/tmp/gazebo_world.log', 'w'), stderr=subprocess.STDOUT,
+                            env=env, start_new_session=True)
+                        _gazebo_lbl.set_text(f'world launched — pid {_gazebo_proc[0].pid}')
+                        _gazebo_lbl.style('color:#1a7f37')
+                    except Exception as exc:
+                        _gazebo_lbl.set_text(f'ERROR: {exc}')
+                        _gazebo_lbl.style('color:#cf222e')
+
+                def _spawn_robot():
+                    if _spawn_proc[0] is not None and _spawn_proc[0].poll() is None:
+                        _spawn_lbl.set_text('already running')
+                        return
+                    try:
+                        pkg = subprocess.check_output(['ros2', 'pkg', 'prefix', 'agro_robot_sim'], text=True).strip()
+                        xacro_file    = f'{pkg}/share/agro_robot_sim/urdf/sowbot_01.xacro'
+                        bridge_config = f'{pkg}/share/agro_robot_sim/config/ros_gz_bridge.yaml'
+                        cmd = (f'xacro {xacro_file} > /tmp/agro_robot_resolved.urdf && '
+                               f'ros2 run ros_gz_sim create -name agro_robot '
+                               f'-string "$(cat /tmp/agro_robot_resolved.urdf)" -x 0.0 -y 0.0 -z 0.3 && '
+                               f'sleep 2 && ros2 run ros_gz_bridge parameter_bridge --ros-args '
+                               f'-p use_sim_time:=true -p config_file:={bridge_config}')
+                        _spawn_proc[0] = subprocess.Popen(['/bin/bash', '-c', cmd],
+                            stdout=open('/tmp/gazebo_spawn.log', 'w'), stderr=subprocess.STDOUT,
+                            start_new_session=True)
+                        _spawn_lbl.set_text(f'spawning — pid {_spawn_proc[0].pid}')
+                        _spawn_lbl.style('color:#1a7f37')
+                    except Exception as exc:
+                        _spawn_lbl.set_text(f'ERROR: {exc}')
+                        _spawn_lbl.style('color:#cf222e')
+
                 with ui.row().classes('items-center gap-2 flex-wrap'):
+                    ui.button('Launch World', on_click=_launch_world).props('color=positive no-caps').classes('px-4')
+                    ui.button('Spawn Robot', on_click=_spawn_robot).props('color=primary no-caps').classes('px-4')
                     ui.button('Rebuild World from Map', on_click=_rebuild_world).props(
                         'outline no-caps').classes('px-4')
                     ui.button('Launch Sim (native)', on_click=_start_gazebo_native).props(
@@ -3077,6 +3120,7 @@ class NiceGuiNode(Node):
                         'font-family:\'Courier New\',monospace;">'
                         '↗ Gazebo (noVNC)</a>'
                     )
+                _spawn_lbl = ui.label('').classes('text-xs font-mono').style('color:#57606a')
 
                 # ── Soil texture import ──────────────────────────────────
                 # Import a soil asset folder (zipped): its image maps are
