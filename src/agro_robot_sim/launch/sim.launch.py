@@ -6,8 +6,10 @@ from launch.substitutions import LaunchConfiguration, Command
 from ament_index_python.packages import get_package_share_directory
 from launch.launch_description_sources import PythonLaunchDescriptionSource
 from launch.actions import (
-    DeclareLaunchArgument, ExecuteProcess, IncludeLaunchDescription, TimerAction
+    DeclareLaunchArgument, ExecuteProcess, IncludeLaunchDescription,
+    RegisterEventHandler, TimerAction,
 )
+from launch.event_handlers import OnProcessExit
 from launch.substitutions import PathJoinSubstitution, TextSubstitution, FindExecutable
 
 
@@ -65,7 +67,6 @@ def generate_launch_description():
     )
 
     # 3. spawn robot
-    # 8 s delay: gz-sim loading maize.world takes 5-15 s on a typical laptop.
     #
     # WHY NOT -file xacro_file:
     #   gz sim create passes the file path to the URDF parser directly, which
@@ -81,45 +82,59 @@ def generate_launch_description():
     #   (including <gazebo> blocks) to gz sim create via stdin / -string.
     #   xacro preserves <gazebo> blocks; gz sim create -string sends the content
     #   to the URDF->SDF converter which handles them correctly.
-    spawn_entity = TimerAction(
-        period=8.0,
-        actions=[
-            ExecuteProcess(
-                cmd=[
-                    FindExecutable(name='bash'), '-c',
-                    [
-                        'URDF=$(xacro ', xacro_file, ') && '
-                        'ros2 run ros_gz_sim create'
-                        ' -name agro_robot'
-                        ' -string "$URDF"'
-                        ' -x ', LaunchConfiguration('x'),
-                        ' -y ', LaunchConfiguration('y'),
-                        ' -z ', LaunchConfiguration('z'),
-                    ],
-                ],
-                name='spawn_robot',
-                output='screen',
-            )
+    #
+    # WHY POLL instead of TimerAction(period=8.0):
+    #   maize.world takes 5-15 s to load depending on the host.  A fixed timer
+    #   fires gz sim create before the /world/* services exist, which causes a
+    #   silent no-op spawn.  Polling 'gz service -l' is event-driven and works
+    #   regardless of host speed.
+    spawn_entity = ExecuteProcess(
+        cmd=[
+            FindExecutable(name='bash'), '-c',
+            [
+                'echo "[spawn_robot] waiting for gz sim to be ready..."; '
+                'until gz service -l 2>/dev/null | grep -q "/world/"; do sleep 2; done; '
+                'echo "[spawn_robot] gz ready — spawning agro_robot"; '
+                'URDF=$(xacro ', xacro_file, ') && '
+                'ros2 run ros_gz_sim create'
+                ' -name agro_robot'
+                ' -string "$URDF"'
+                ' -x ', LaunchConfiguration('x'),
+                ' -y ', LaunchConfiguration('y'),
+                ' -z ', LaunchConfiguration('z'),
+            ],
         ],
+        name='spawn_robot',
+        output='screen',
     )
 
     # 4. topic bridge
-    # 10 s delay: bridge must not start until the model exists in Gazebo.
+    # Start 2 s after spawn_entity exits (event-driven, not a fixed timer).
+    # The bridge subscribes to /model/agro_robot/... topics; those Gazebo topics
+    # only exist once the model is in the world, so we must not start until
+    # spawn_entity has completed successfully.
     bridge_config = os.path.join(pkg_share, "config", "ros_gz_bridge.yaml")
-    ros_gz_bridge = TimerAction(
-        period=10.0,
-        actions=[
-            Node(
-                package="ros_gz_bridge",
-                executable="parameter_bridge",
-                name="ros_gz_bridge",
-                output="screen",
-                parameters=[
-                    {"use_sim_time": True},
-                    {"config_file": bridge_config},
-                ],
-            )
-        ],
+    ros_gz_bridge = RegisterEventHandler(
+        OnProcessExit(
+            target_action=spawn_entity,
+            on_exit=[
+                TimerAction(
+                    period=2.0,
+                    actions=[
+                        Node(
+                            package="ros_gz_bridge",
+                            executable="parameter_bridge",
+                            name="ros_gz_bridge",
+                            output="screen",
+                            parameters=[
+                                {"use_sim_time": True},
+                                {"config_file": bridge_config},
+                            ],
+                        )
+                    ],
+                )
+            ],
+        )
     )
 
     return LaunchDescription([
