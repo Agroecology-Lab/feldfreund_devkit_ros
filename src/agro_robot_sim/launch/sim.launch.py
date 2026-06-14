@@ -29,15 +29,20 @@ def generate_launch_description():
         description="URDF/xacro filename inside agro_robot_sim/urdf/",
     )
 
-    # ── 1. Gazebo — called directly, NOT through ros_gz_sim wrapper ───────────
-    # The ros_gz_sim IncludeLaunchDescription wrapper splits server and GUI into
-    # separate processes which breaks rendering. Calling gz sim directly matches
-    # the working three-terminal method.
+    # Inherit DISPLAY and XAUTHORITY from the shell so gz sim can open a window.
+    # Without this, ExecuteProcess drops these variables and gz runs headless.
+    display_env = {
+        "DISPLAY":    os.environ.get("DISPLAY",    ":0"),
+        "XAUTHORITY": os.environ.get("XAUTHORITY", ""),
+    }
+
+    # ── 1. Gazebo — direct call with display env ──────────────────────────────
     world_file = PathJoinSubstitution([pkg_share, "worlds", LaunchConfiguration("world")])
     gz_sim = ExecuteProcess(
         cmd=[FindExecutable(name="gz"), "sim", "-r", world_file],
         name="gz_sim",
         output="screen",
+        additional_env=display_env,
     )
 
     # ── 2. robot_state_publisher ──────────────────────────────────────────────
@@ -56,7 +61,6 @@ def generate_launch_description():
     )
 
     # ── 3. Spawn robot ────────────────────────────────────────────────────────
-    xacro_file = PathJoinSubstitution([pkg_share, "urdf", LaunchConfiguration("urdf")])
     spawn_entity = ExecuteProcess(
         cmd=[
             FindExecutable(name="bash"), "-c",
