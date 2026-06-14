@@ -764,15 +764,15 @@ class NiceGuiNode(Node):
         if name in self.topo_nodes:
             self.drop_status = f'ERROR: {name} already exists'
             return
-        if self.latest_odom is None:
+        if self.latest_odom is None and not self._is_sim:
             self.drop_status = 'ERROR: no odometry'
             return
         if not self._topo_doc:
             self.drop_status = 'ERROR: map not loaded'
             return
 
-        x = round(self.latest_odom.pose.pose.position.x, 3)
-        y = round(self.latest_odom.pose.pose.position.y, 3)
+        x = round(self.latest_odom.pose.pose.position.x, 3) if self.latest_odom else 0.0
+        y = round(self.latest_odom.pose.pose.position.y, 3) if self.latest_odom else 0.0
         connect_to = (self.topo_current
                       if self.topo_current not in ('—', 'none', 'None', '', None) else None)
         if connect_to and connect_to not in self.topo_nodes:
@@ -2911,6 +2911,8 @@ class NiceGuiNode(Node):
                         '/workspace/models'
                         ':/workspace/install/virtual_maize_field'
                         '/share/virtual_maize_field/models'
+                        + (':' + os.environ['GZ_SIM_RESOURCE_PATH']
+                           if os.environ.get('GZ_SIM_RESOURCE_PATH') else '')
                     ),
                     'CYCLONEDDS_URI': (
                         '<CycloneDDS><Domain><Discovery>'
