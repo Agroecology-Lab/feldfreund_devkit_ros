@@ -7,6 +7,8 @@ Development is led by the <a href="https://agroecologylab.org.uk" target="_blank
 
 Reference open hardware stack(s) under development at [Sowbot.co.uk](https://sowbot.co.uk) in addition to orginal [Zauberzeug Field Friend](https://github.com/zauberzeug/)
 
+[Quick start](https://github.com/Agroecology-Lab/feldfreund_devkit_ros#quick-start)
+
 ## Sowbot Roadmap
 
 Branch: `caatinga-dev` | ROS 2 Jazzy | Upstream: [zauberzeug/feldfreund\_devkit\_ros](https://github.com/zauberzeug/feldfreund_devkit_ros)  
