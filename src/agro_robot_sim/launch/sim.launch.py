@@ -68,11 +68,12 @@ def generate_launch_description():
     )
 
     # 3. spawn robot
-    # 8 s delay: gz-sim loading minha_fazenda.sdf (terrain mesh + 6 crop rows +
-    # world plugins) takes 5–15 s on a typical laptop.  At 3 s the world is not
-    # yet ready; `gz sim create` returns silently with no entity and there is
-    # nothing for the bridge to subscribe to.  8 s gives gz-sim a comfortable
-    # margin on most hardware — increase further on very slow machines.
+    # 8 s delay: gz-sim loading maize.world takes 5–15 s on a typical laptop.
+    # We use -topic /robot_description (published by robot_state_publisher above)
+    # rather than -file xacro_file because gz sim create passes the file path
+    # directly to the URDF parser, which does not invoke xacro — variables like
+    # ${frame_len} are left unresolved and the parse fails.  robot_state_publisher
+    # runs xacro internally and publishes the resolved URDF on /robot_description.
     spawn_entity = TimerAction(
         period=8.0,
         actions=[
@@ -83,7 +84,7 @@ def generate_launch_description():
                 output="screen",
                 arguments=[
                     "-name",  "agro_robot",
-                    "-file", xacro_file,
+                    "-topic", "/robot_description",
                     "-x", LaunchConfiguration("x"),
                     "-y", LaunchConfiguration("y"),
                     "-z", LaunchConfiguration("z"),
