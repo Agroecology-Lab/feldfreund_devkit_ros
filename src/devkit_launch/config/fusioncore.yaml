@@ -108,6 +108,7 @@ fusioncore:
     imu.gyro_noise:   0.005
     imu.accel_noise:  0.1
     imu.frame_id:     imu_link
+    imu.has_magnetometer: true
 
     # ── UKF process noise ─────────────────────────────────────────────────────
     # Defaults are reasonable for a slow field robot. Tune if yaw drifts
