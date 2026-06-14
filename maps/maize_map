@@ -12,7 +12,8 @@ name: maize_map
 pointset: maize_map
 transformation:
   topo_frame_id: map
-  parent: odom
+  child: topo_map
+  parent: map
   rotation:
     w: 1.0
     x: 0.0
@@ -646,4 +647,3 @@ nodes:
       y: 0.5
     - x: -0.5
       y: 0.5
-
