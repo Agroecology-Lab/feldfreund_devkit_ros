@@ -116,15 +116,19 @@ def generate_launch_description():
     )
 
     # ── map_manager2 ──────────────────────────────────────────────────────────
-    # broadcast_tf=False suppresses the spurious map->map self-transform that
-    # causes "TF_SELF_TRANSFORM: Ignoring transform" warnings.
+    # broadcast_tf=True (default): map_manager2 publishes the map->odom static
+    # TF, which puts the 'map' frame into the TF tree.  Without it,
+    # localisation2 cannot resolve map->base_link and loops forever with
+    # "map passed to lookupTransform does not exist".
+    # The TF_SELF_TRANSFORM warning about map->map comes from an upstream bug
+    # in map_manager2 and is harmless — ignore it.
     map_manager = Node(
         package='topological_navigation',
         executable='map_manager2.py',
         name='topological_map_manager_2',
         output='screen',
         arguments=[map_path],
-        parameters=[sim_time, {'broadcast_tf': False}],
+        parameters=[sim_time],
     )
 
     # ── localisation2 (t+2s) ──────────────────────────────────────────────────
