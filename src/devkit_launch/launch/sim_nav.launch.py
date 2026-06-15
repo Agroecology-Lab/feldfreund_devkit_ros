@@ -92,13 +92,12 @@ def generate_launch_description():
     tmap2_file = os.getenv('TMAP2_FILE', '')
 
     # ── /odom → /odom/wheels relay ────────────────────────────────────────────
-    # use_sim_time=False: no /clock before Gazebo starts; wall time is correct.
     odom_relay = Node(
         package='topic_tools',
         executable='relay',
         name='odom_wheels_relay',
         arguments=['/odom', '/odom/wheels'],
-        parameters=[{'use_sim_time': False}],  # FIX: was True; no /clock at boot
+        parameters=[{'use_sim_time': True}],
         output='screen',
     )
 
@@ -180,16 +179,12 @@ def generate_launch_description():
     # localisation2 had finished building the KD-tree and confirming the
     # TF chain, causing the "action server not ready" error.
     #
-    # use_sim_time=False: there is no /clock before Gazebo starts.  Passing
-    # True here caused Nav2 to stamp all TF lookups with sim-time=0 while
-    # the actual TF frames carry wall-clock timestamps, producing the
-    # "Extrapolation Error … Requested time X but earliest data is at Y"
-    # flood seen in the logs.  Wall time is correct for the pre-Gazebo phase
-    # and remains valid after Gazebo starts because the bridge publishes TF
-    # and odom with the real wall clock until use_sim_time is changed.
+    # use_sim_time=True: fake_nav2_server publishes /clock (wall time) at
+    # 100 Hz before Gazebo starts, keeping TF timestamps valid.  Once Gazebo
+    # starts, ros_gz_bridge's RELIABLE /clock takes over automatically.
     topo_stack = TimerAction(
         period=15.0,
-        actions=sowbot_sim._topo_nav_nodes(tmap2_file, devkit_launch_pkg, use_sim_time=False),  # FIX: was True
+        actions=sowbot_sim._topo_nav_nodes(tmap2_file, devkit_launch_pkg, use_sim_time=True),
     )
 
     return LaunchDescription([
