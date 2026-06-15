@@ -37,6 +37,8 @@ from nav2_msgs.action import (
     NavigateToPose,
 )
 
+from rosgraph_msgs.msg import Clock
+
 from topological_nav_simulator.virtual_robot import (
     VirtualRobot,
     _euler_from_quaternion,
@@ -146,6 +148,18 @@ class FakeNav2Server(Node):
         timer_period = 1.0 / self._rate
         self._pub_timer = self.create_timer(timer_period, self._publish_tick)
 
+        # --- /clock publisher (wall time, 100 Hz) ---
+        # Nav2 and topo-nav start with use_sim_time=True.  Without a /clock
+        # source before Gazebo comes up, every TF lookup fails with
+        # "Extrapolation Error: Requested time X but earliest data is at Y"
+        # because ROS stamps TF frames with wall time while Nav2 requests
+        # them at sim-time=0.  Publishing wall time here keeps the clocks
+        # aligned.  When the ros_gz_bridge starts, its RELIABLE /clock
+        # (Gazebo sim time) overwrites this one and Nav2 transitions
+        # automatically — no restart needed.
+        self._clock_pub = self.create_publisher(Clock, '/clock', 10)
+        self._clock_timer = self.create_timer(0.01, self._publish_clock)  # 100 Hz
+
         self.get_logger().info(
             '=== Fake Nav2 Server Started ===\n'
             f'  Speed: {self._speed} m/s  |  Angular: {self._ang_speed} rad/s\n'
@@ -160,10 +174,24 @@ class FakeNav2Server(Node):
             f'    /odometry/global\n'
             f'    /virtual_robot/markers\n'
             f'    /virtual_robot/pose\n'
-            f'    TF: {map_frame} -> {odom_frame} -> {base_frame}'
+            f'    TF: {map_frame} -> {odom_frame} -> {base_frame}\n'
+            f'    /clock (wall time, 100 Hz — until Gazebo bridge takes over)'
         )
 
     # ── Callbacks ────────────────────────────────────────────────────────
+
+    def _publish_clock(self):
+        """Publish wall time on /clock so Nav2 (use_sim_time=True) stays valid.
+
+        Once ros_gz_bridge comes up with RELIABLE QoS on /clock, its
+        Gazebo sim-time messages take precedence and this publisher becomes
+        a no-op (DDS last-write-wins; the bridge's RELIABLE beats our
+        RELIABLE_VOLATILE).  Nav2 sees a continuous clock with no gap.
+        """
+        now = self.get_clock().now()
+        msg = Clock()
+        msg.clock = now.to_msg()
+        self._clock_pub.publish(msg)
 
     def _goal_callback(self, goal_request):
         """Accept all incoming goals."""
