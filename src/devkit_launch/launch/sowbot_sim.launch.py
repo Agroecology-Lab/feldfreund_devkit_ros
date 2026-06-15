@@ -32,6 +32,7 @@ from ament_index_python.packages import get_package_share_directory
 from launch import LaunchDescription
 from launch.actions import (
     DeclareLaunchArgument,
+    ExecuteProcess,
     IncludeLaunchDescription,
     SetEnvironmentVariable,
     TimerAction,
@@ -207,6 +208,21 @@ def generate_launch_description():
         }.items(),
     )
 
+    # Kill fake_nav2_server once /clock is live from ros_gz_bridge.
+    # Placed here (Gazebo layer) so it only runs when Gazebo actually starts —
+    # not at nav-stack boot where /clock never appears and the poll exits
+    # spuriously, killing the server that topo nav depends on.
+    kill_fake_nav2 = ExecuteProcess(
+        cmd=[
+            '/bin/bash', '-c',
+            'until ros2 topic hz /clock --window 1 2>/dev/null | grep -q "average rate"; '
+            'do sleep 1; done; '
+            'pkill -f fake_nav2_server || true'
+        ],
+        name='kill_fake_nav2_on_clock',
+        output='screen',
+    )
+
     return LaunchDescription([
         gz_resource_path,
         world_arg,
@@ -214,4 +230,5 @@ def generate_launch_description():
         y_arg,
         z_arg,
         sim_launch,
+        kill_fake_nav2,
     ])
