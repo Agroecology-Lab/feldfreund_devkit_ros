@@ -116,10 +116,11 @@
         <inertia ixx="0.8" ixy="0" ixz="0" iyy="2.0" iyz="0" izz="2.0"/>
       </inertial>
     </link>
-    <joint name="${prefix}_track_joint" type="fixed">
+    <joint name="${prefix}_track_joint" type="continuous">
       <parent link="base_link"/>
       <child  link="${prefix}_track_link"/>
       <origin xyz="0 ${y} 0" rpy="0 0 0"/>
+      <axis xyz="0 ${axis_y} 0"/>
     </joint>
 
     <!-- Drive roller (front) — full track height; forms the rounded front end -->
@@ -469,8 +470,8 @@
   <gazebo>
     <plugin filename="gz-sim-diff-drive-system"
             name="gz::sim::systems::DiffDrive">
-      <left_joint>left_drive_joint</left_joint>
-      <right_joint>right_drive_joint</right_joint>
+      <left_joint>left_track_joint</left_joint>
+      <right_joint>right_track_joint</right_joint>
 
       <wheel_separation>${track_sep}</wheel_separation>
       <wheel_radius>${drive_radius}</wheel_radius>
@@ -495,6 +496,8 @@
     <plugin filename="gz-sim-joint-state-publisher-system"
             name="gz::sim::systems::JointStatePublisher">
       <topic>joint_states</topic>
+      <joint_name>left_track_joint</joint_name>
+      <joint_name>right_track_joint</joint_name>
       <joint_name>left_drive_joint</joint_name>
       <joint_name>right_drive_joint</joint_name>
       <joint_name>left_idler_joint</joint_name>
