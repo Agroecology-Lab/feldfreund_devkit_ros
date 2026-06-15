@@ -139,7 +139,7 @@ def _topo_nav_nodes(tmap2_file: str, devkit_launch_pkg: str, use_sim_time: bool 
             name='topological_map_manager_2',
             output='screen',
             arguments=[map_path],
-            parameters=[sim_time, {'broadcast_tf': False}],
+            parameters=[sim_time],
         ),
 
         TimerAction(period=2.0, actions=[
