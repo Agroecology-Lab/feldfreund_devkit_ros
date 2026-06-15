@@ -115,20 +115,31 @@ def generate_launch_description():
         parameters=[{'sim': True}],
     )
 
+    # ── Bootstrap map -> odom (static, wall-time) ────────────────────────────
+    # map_manager2's broadcast_tf publishes map->map (a useless self-transform).
+    # We publish map->odom ourselves so localisation2 can resolve map->base_link
+    # via the full static chain: map->odom->base_footprint->base_link.
+    # Once Gazebo starts, the bridge publishes real odom TF with sim-time stamps
+    # which supersede this static transform automatically.
+    map_to_odom = Node(
+        package='tf2_ros',
+        executable='static_transform_publisher',
+        name='map_to_odom_static',
+        arguments=['0', '0', '0', '0', '0', '0', 'map', 'odom'],
+        parameters=[sim_time],
+        output='screen',
+    )
+
     # ── map_manager2 ──────────────────────────────────────────────────────────
-    # broadcast_tf=True (default): map_manager2 publishes the map->odom static
-    # TF, which puts the 'map' frame into the TF tree.  Without it,
-    # localisation2 cannot resolve map->base_link and loops forever with
-    # "map passed to lookupTransform does not exist".
-    # The TF_SELF_TRANSFORM warning about map->map comes from an upstream bug
-    # in map_manager2 and is harmless — ignore it.
+    # broadcast_tf=False: suppresses map_manager2's spurious map->map
+    # self-transform; we publish map->odom ourselves above.
     map_manager = Node(
         package='topological_navigation',
         executable='map_manager2.py',
         name='topological_map_manager_2',
         output='screen',
         arguments=[map_path],
-        parameters=[sim_time],
+        parameters=[sim_time, {'broadcast_tf': False}],
     )
 
     # ── localisation2 (t+2s) ──────────────────────────────────────────────────
@@ -169,6 +180,7 @@ def generate_launch_description():
 
     return LaunchDescription([
         odom_relay,
+        map_to_odom,
         odom_to_base_footprint,
         base_footprint_to_base_link,
         ui_node,
