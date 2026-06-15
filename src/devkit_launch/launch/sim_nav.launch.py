@@ -38,6 +38,22 @@ navigation2   must NOT start waiting for localisation until localisation
               has had time to reach ready state.  With the 5 s timer the
               two were racing; raising to 15 s gives localisation a
               comfortable head start so navigation2 finds it immediately.
+
+use_sim_time notes
+------------------
+Before Gazebo starts there is no /clock topic.  Passing use_sim_time=True
+to Nav2 or topo-nav at this stage causes every TF lookup to fail with
+"Extrapolation Error … Requested time X but earliest data is at time Y"
+because nav2 stamps requests with sim-time=0 while TF frames carry
+wall-clock timestamps.
+
+The topo stack is therefore started with use_sim_time=False here.
+sowbot_sim.launch.py's kill_fake_nav2 process watches for /clock becoming
+RELIABLE (which only happens once ros_gz_bridge is fully up), and at that
+point pkills fake_nav2_server.  If you need Nav2 to switch to sim time
+after Gazebo starts you will need to restart the Nav2 nodes (or implement
+a lifecycle transition); for now wall-time keeps TF timestamps valid both
+before and after Gazebo comes up.
 """
 
 import importlib.util
@@ -76,12 +92,13 @@ def generate_launch_description():
     tmap2_file = os.getenv('TMAP2_FILE', '')
 
     # ── /odom → /odom/wheels relay ────────────────────────────────────────────
+    # use_sim_time=False: no /clock before Gazebo starts; wall time is correct.
     odom_relay = Node(
         package='topic_tools',
         executable='relay',
         name='odom_wheels_relay',
         arguments=['/odom', '/odom/wheels'],
-        parameters=[{'use_sim_time': True}],
+        parameters=[{'use_sim_time': False}],  # FIX: was True; no /clock at boot
         output='screen',
     )
 
@@ -144,7 +161,7 @@ def generate_launch_description():
     # _topo_nav_nodes(), so it runs only before Gazebo is up.  Once the user
     # starts Gazebo from the UI, robot_state_publisher takes over the TF chain
     # and fake_nav2_server's action servers must not compete with real Nav2 —
-    # the user kills this node (or it is superseded) at that point.
+    # sowbot_sim.launch.py's kill_fake_nav2 process kills it when /clock appears.
     fake_nav2 = TimerAction(
         period=2.0,
         actions=[Node(
@@ -162,13 +179,17 @@ def generate_launch_description():
     # With 5 s the two were racing: navigation2 timed out before
     # localisation2 had finished building the KD-tree and confirming the
     # TF chain, causing the "action server not ready" error.
-    # If Gazebo starts later, Nav2/topo-nav wait for real TF data before
-    # accepting goals — the bootstrap TFs keep them unblocked in the interim.
-    # use_sim_time=True: once Gazebo starts, /clock drives all timestamps so
-    # localisation2 and Nav2 stay in sync with the bridge's odom/TF output.
+    #
+    # use_sim_time=False: there is no /clock before Gazebo starts.  Passing
+    # True here caused Nav2 to stamp all TF lookups with sim-time=0 while
+    # the actual TF frames carry wall-clock timestamps, producing the
+    # "Extrapolation Error … Requested time X but earliest data is at Y"
+    # flood seen in the logs.  Wall time is correct for the pre-Gazebo phase
+    # and remains valid after Gazebo starts because the bridge publishes TF
+    # and odom with the real wall clock until use_sim_time is changed.
     topo_stack = TimerAction(
         period=15.0,
-        actions=sowbot_sim._topo_nav_nodes(tmap2_file, devkit_launch_pkg, use_sim_time=True),
+        actions=sowbot_sim._topo_nav_nodes(tmap2_file, devkit_launch_pkg, use_sim_time=False),  # FIX: was True
     )
 
     return LaunchDescription([
