@@ -12,14 +12,18 @@
   gz_type_name: gz.msgs.Twist
   direction: ROS_TO_GZ
 
+# FIX: DiffDrive plugin publishes to "<odom_topic>" scoped under the model,
+# which resolves to /model/agro_robot/odom — NOT /model/agro_robot/odometry.
 - ros_topic_name: /odom
-  gz_topic_name: /model/agro_robot/odometry
+  gz_topic_name: /model/agro_robot/odom
   ros_type_name: nav_msgs/msg/Odometry
   gz_type_name: gz.msgs.Odometry
   direction: GZ_TO_ROS
 
+# FIX: DiffDrive plugin has <tf_topic>/tf</tf_topic> which is an absolute path,
+# so it publishes to the global /tf topic — NOT /model/agro_robot/tf.
 - ros_topic_name: /tf
-  gz_topic_name: /model/agro_robot/tf
+  gz_topic_name: /tf
   ros_type_name: tf2_msgs/msg/TFMessage
   gz_type_name: gz.msgs.Pose_V
   direction: GZ_TO_ROS
