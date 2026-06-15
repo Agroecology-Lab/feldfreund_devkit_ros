@@ -3,62 +3,52 @@ sim_nav.launch.py
 =================
 Nav-only launch for sim mode — started by manage.py on container boot.
 
-Provides the full navigation stack (topo nav + Nav2 + UI) but does NOT
-start Gazebo or spawn the robot.  Gazebo is started separately by the
-user from the UI System tab, which runs sowbot_sim.launch.py and brings
-up the sim layer (gz sim, robot_state_publisher, spawn, ros_gz_bridge).
+Starts: topo nav stack (map_manager2, localisation2, navigation2,
+        topological_map_visualiser) + UI node + bootstrap TFs.
 
-Keeping these separate means:
-  - manage.py starts the nav stack once at boot, fast.
-  - The user controls when Gazebo opens (and can restart it without
-    tearing down the whole nav stack).
-  - No duplicate Gazebo instances when the UI button is pressed.
+Does NOT start: Gazebo, Nav2, fake_nav2_server.
+
+Nav2 now starts inside sowbot_sim.launch.py (the Gazebo layer), so it
+only ever initialises after /clock is already being published by the
+ros_gz_bridge.  This eliminates the entire class of
+"Extrapolation Error: Requested time X but earliest data is at Y"
+failures that occurred when Nav2 started with use_sim_time=True before
+Gazebo was up.
+
+fake_nav2_server is removed.  It was providing:
+  1. Continuous TF stream for localisation2  — replaced by the static
+     bootstrap TFs below, which is sufficient (localisation2 seeds from
+     the static chain and then tracks the real robot_state_publisher TF
+     once Gazebo starts).
+  2. /navigate_to_pose before Gazebo  — not needed; topo nav waits for
+     localisation before accepting goals, and Nav2 now starts with Gazebo.
+  3. /clock  — not needed; topo nav runs with use_sim_time=False so it
+     does not need a /clock source.
 
 TF tree at boot (before Gazebo starts)
 ---------------------------------------
-  map ──(static)──► odom ──(static)──► base_footprint ──(static)──► base_link
-                                           │
-                                     (identity — bootstrap only)
+  map --[static, wall-time]--> odom --[static]--> base_footprint
+                                                        |
+                                                   [static]
+                                                        |
+                                                   base_link
 
-robot_state_publisher in the Gazebo layer publishes the real
-odom → base_link → base_footprint chain on /tf once Gazebo is up.
-Those dynamic transforms supersede these static ones automatically.
-Without the bootstraps:
-  - Nav2 costmaps block on base_footprint → odom forever and the action
-    server never becomes ready.
-  - localisation2.py blocks on map → base_link (hardcoded upstream
-    default) and the action server never becomes ready.
+Once Gazebo starts, robot_state_publisher publishes the real dynamic
+odom->base_footprint->base_link chain; TF2 uses the most recent
+transform so the dynamic one supersedes the static bootstraps
+automatically.
 
-Startup sequencing (why 15 s timer)
-------------------------------------
-map_manager2  starts at ~t+0 s and publishes the topo map.
-localisation2 starts at ~t+2 s and signals ready after receiving the map
-              and confirming the TF chain (~t+5 s).
-navigation2   must NOT start waiting for localisation until localisation
-              has had time to reach ready state.  With the 5 s timer the
-              two were racing; raising to 15 s gives localisation a
-              comfortable head start so navigation2 finds it immediately.
-
-use_sim_time notes
+Startup sequencing
 ------------------
-Before Gazebo starts there is no /clock topic.  Passing use_sim_time=True
-to Nav2 or topo-nav at this stage causes every TF lookup to fail with
-"Extrapolation Error … Requested time X but earliest data is at time Y"
-because nav2 stamps requests with sim-time=0 while TF frames carry
-wall-clock timestamps.
-
-The topo stack is therefore started with use_sim_time=False here.
-sowbot_sim.launch.py's kill_fake_nav2 process watches for /clock becoming
-RELIABLE (which only happens once ros_gz_bridge is fully up), and at that
-point pkills fake_nav2_server.  If you need Nav2 to switch to sim time
-after Gazebo starts you will need to restart the Nav2 nodes (or implement
-a lifecycle transition); for now wall-time keeps TF timestamps valid both
-before and after Gazebo comes up.
+t+0s   map_manager2 starts, publishes topo map
+t+2s   localisation2 starts, waits for map, then listens for TF
+t+4s   navigation2 starts, waits for localisation
+t+5s   topological_map_visualiser starts
+UI     user presses Start Sim -> sowbot_sim.launch.py starts Gazebo +
+       ros_gz_bridge + Nav2 (all with use_sim_time=True, /clock already live)
 """
 
-import importlib.util
 import os
-import pathlib
 
 from ament_index_python.packages import get_package_share_directory
 from launch import LaunchDescription
@@ -66,79 +56,55 @@ from launch.actions import TimerAction
 from launch_ros.actions import Node
 
 
-def _load_sowbot_sim():
-    """Load sowbot_sim.launch.py from the devkit_launch install path.
-
-    Both packages are now peers in the same colcon workspace, but the
-    importlib pattern is retained so the Nav2 / topo-nav node lists stay
-    in one place (sowbot_sim.launch.py) without duplicating them here.
-    """
-    pkg  = get_package_share_directory('devkit_launch')
-    path = pathlib.Path(pkg) / 'launch' / 'sowbot_sim.launch.py'
-    assert path.exists(), (
-        f"sowbot_sim.launch.py not found at {path} — "
-        "build devkit_launch first and source the workspace"
-    )
-    spec = importlib.util.spec_from_file_location('sowbot_sim', path)
-    mod  = importlib.util.module_from_spec(spec)
-    spec.loader.exec_module(mod)
-    return mod
-
-
 def generate_launch_description():
-    devkit_launch_pkg = get_package_share_directory('devkit_launch')
-    sowbot_sim        = _load_sowbot_sim()
+    topo_share = get_package_share_directory('topological_navigation')
 
     tmap2_file = os.getenv('TMAP2_FILE', '')
+    map_path   = tmap2_file or os.path.join(
+        topo_share, 'config', 'mixed_actions_map.yaml'
+    )
 
-    # ── /odom → /odom/wheels relay ────────────────────────────────────────────
+    # use_sim_time=False throughout: no Gazebo, no /clock at this stage.
+    # Topo nav only needs wall-time TF to localise; it does not plan paths.
+    sim_time = {'use_sim_time': False}
+
+    # ── /odom -> /odom/wheels relay ───────────────────────────────────────────
+    # Bridges /odom onto /odom/wheels for edge-action consumers that expect
+    # the wheel-odometry topic name.
     odom_relay = Node(
         package='topic_tools',
         executable='relay',
         name='odom_wheels_relay',
         arguments=['/odom', '/odom/wheels'],
-        parameters=[{'use_sim_time': True}],
+        parameters=[sim_time],
         output='screen',
     )
 
-    # ── Bootstrap odom → base_footprint ───────────────────────────────────────
-    # nav2_params_sim.yaml sets robot_base_frame: base_footprint everywhere.
-    # That frame is normally published by robot_state_publisher, which lives
-    # in the Gazebo layer (sowbot_sim.launch.py).  Without Gazebo running,
-    # Nav2 costmaps spin forever waiting for the transform and the action
-    # server never becomes ready.
-    #
-    # This static identity TF unblocks Nav2 at boot.  Once Gazebo starts,
-    # robot_state_publisher publishes the real chain on /tf (dynamic);
-    # TF2 uses the most recent transform so the dynamic one takes over
-    # without any intervention here.
+    # ── Bootstrap odom -> base_footprint (static, wall-time) ──────────────────
+    # robot_state_publisher (Gazebo layer) normally provides this.  Without
+    # it, localisation2's TF listener can never resolve map->base_link and
+    # blocks forever.  Once Gazebo starts, the dynamic TF supersedes this
+    # static one automatically.
     odom_to_base_footprint = Node(
         package='tf2_ros',
         executable='static_transform_publisher',
         name='odom_to_base_footprint_static',
         arguments=['0', '0', '0', '0', '0', '0', 'odom', 'base_footprint'],
-        parameters=[{'use_sim_time': False}],
+        parameters=[sim_time],
         output='screen',
     )
 
-    # ── Bootstrap base_footprint → base_link ──────────────────────────────────
-    # localisation2.py listens for map → base_link (hardcoded upstream
-    # default).  robot_state_publisher provides this once Gazebo starts;
-    # this identity bootstrap unblocks localisation before Gazebo is up,
-    # same pattern as the odom → base_footprint static above.
-    #
-    # Once Gazebo starts, robot_state_publisher publishes the real dynamic
-    # chain and TF2 supersedes this static one automatically.
+    # ── Bootstrap base_footprint -> base_link (static, wall-time) ────────────
     base_footprint_to_base_link = Node(
         package='tf2_ros',
         executable='static_transform_publisher',
         name='base_footprint_to_base_link_static',
         arguments=['0', '0', '0', '0', '0', '0', 'base_footprint', 'base_link'],
-        parameters=[{'use_sim_time': False}],
+        parameters=[sim_time],
         output='screen',
     )
 
-    # ── UI node (sim=true: publishes fake GPS fix for topo map saving) ────────
+    # ── UI node ───────────────────────────────────────────────────────────────
     ui_node = Node(
         package='devkit_ui',
         executable='ui_node',
@@ -149,49 +115,61 @@ def generate_launch_description():
         parameters=[{'sim': True}],
     )
 
-    # ── fake_nav2_server (pre-Gazebo TF source) ──────────────────────────────
-    # localisation2 uses a TF listener callback that fires on each new
-    # transform.  The static bootstrap TFs above publish once at startup and
-    # then go silent, so the callback never fires and /current_node is never
-    # published.  fake_nav2_server's VirtualRobot publishes map→odom→base_link
-    # at 30 Hz, giving localisation2 the live TF stream it needs.
-    #
-    # This node is started HERE (sim_nav.launch.py) and NOT inside
-    # _topo_nav_nodes(), so it runs only before Gazebo is up.  Once the user
-    # starts Gazebo from the UI, robot_state_publisher takes over the TF chain
-    # and fake_nav2_server's action servers must not compete with real Nav2 —
-    # sowbot_sim.launch.py's kill_fake_nav2 process kills it when /clock appears.
-    fake_nav2 = TimerAction(
-        period=2.0,
-        actions=[Node(
-            package='topological_nav_simulator',
-            executable='fake_nav2_server',
-            name='fake_nav2_server',
-            output='screen',
-            parameters=[{'use_sim_time': False}],  # no /clock in sim_nav; wall time keeps TF timestamps valid
-        )],
+    # ── map_manager2 ──────────────────────────────────────────────────────────
+    # broadcast_tf=False suppresses the spurious map->map self-transform that
+    # causes "TF_SELF_TRANSFORM: Ignoring transform" warnings.
+    map_manager = Node(
+        package='topological_navigation',
+        executable='map_manager2.py',
+        name='topological_map_manager_2',
+        output='screen',
+        arguments=[map_path],
+        parameters=[sim_time, {'broadcast_tf': False}],
     )
 
-    # ── Topo nav + Nav2 (delayed to let static TFs and topo stack settle) ───────
-    # 15 s gives map_manager2 and localisation2 time to fully initialise
-    # before navigation2 starts waiting for the localisation ready signal.
-    # With 5 s the two were racing: navigation2 timed out before
-    # localisation2 had finished building the KD-tree and confirming the
-    # TF chain, causing the "action server not ready" error.
-    #
-    # use_sim_time=True: fake_nav2_server publishes /clock (wall time) at
-    # 100 Hz before Gazebo starts, keeping TF timestamps valid.  Once Gazebo
-    # starts, ros_gz_bridge's RELIABLE /clock takes over automatically.
-    topo_stack = TimerAction(
-        period=15.0,
-        actions=sowbot_sim._topo_nav_nodes(tmap2_file, devkit_launch_pkg, use_sim_time=True),
-    )
+    # ── localisation2 (t+2s) ──────────────────────────────────────────────────
+    # Needs the topo map (ready almost immediately) and TF map->base_link
+    # (provided by the static bootstraps above).
+    localisation = TimerAction(period=2.0, actions=[
+        Node(
+            package='topological_navigation',
+            executable='localisation2.py',
+            name='topological_localisation',
+            output='screen',
+            parameters=[sim_time],
+        ),
+    ])
+
+    # ── navigation2 (t+4s) ────────────────────────────────────────────────────
+    # Waits for localisation to signal ready before accepting goals.
+    navigation = TimerAction(period=4.0, actions=[
+        Node(
+            package='topological_navigation',
+            executable='navigation2.py',
+            name='topological_navigation',
+            output='screen',
+            parameters=[sim_time],
+        ),
+    ])
+
+    # ── topological_map_visualiser (t+5s) ─────────────────────────────────────
+    visualiser = TimerAction(period=5.0, actions=[
+        Node(
+            package='topological_navigation_visual',
+            executable='topological_map_visualiser.py',
+            name='topological_map_visualiser',
+            output='screen',
+            parameters=[sim_time, {'edit_mode': True}],
+        ),
+    ])
 
     return LaunchDescription([
         odom_relay,
         odom_to_base_footprint,
         base_footprint_to_base_link,
         ui_node,
-        fake_nav2,
-        topo_stack,
+        map_manager,
+        localisation,
+        navigation,
+        visualiser,
     ])
