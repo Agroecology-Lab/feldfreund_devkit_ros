@@ -17,10 +17,20 @@ echo "------------------------------------------------------"
 # this exec'd shell (and the ros2 daemon it spawns) discovers a different graph
 # than the running stack — the classic "empty `ros2 node list` while neo is up".
 # `docker exec` does NOT inherit `docker run --env`, so we set it explicitly.
-# This is the loopback URI from manage.py _loopback_dds_uri(). For on-robot
-# crossover runs, override CYCLONEDDS_URI in the environment before calling this.
-LOOPBACK_DDS_URI='<CycloneDDS><Domain><General><Interfaces><NetworkInterface name="lo" priority="default" multicast="true"/></Interfaces></General><Discovery><MaxAutoParticipantIndex>200</MaxAutoParticipantIndex><ParticipantIndex>auto</ParticipantIndex></Discovery></Domain></CycloneDDS>'
-DDS_URI="${CYCLONEDDS_URI:-$LOOPBACK_DDS_URI}"
+#
+# Strategy: read CYCLONEDDS_URI directly from the running container's env.
+# manage.py already computed the right config (loopback for sim/dev, crossover
+# peer-to-peer for on-robot 192.168.10.x) and passed it via --env at docker run.
+# Reading it back here is simpler and more robust than duplicating that logic,
+# and avoids any hardcoded-XML quoting bugs.
+DDS_URI=$(docker exec "$CONTAINER_NAME" printenv CYCLONEDDS_URI 2>/dev/null)
+
+if [ -z "$DDS_URI" ]; then
+    # Container was started without CYCLONEDDS_URI (shouldn't happen with a
+    # current manage.py, but fall back gracefully to the loopback config).
+    echo "[WARN] CYCLONEDDS_URI not found in container env — falling back to loopback."
+    DDS_URI='<CycloneDDS><Domain><General><Interfaces><NetworkInterface name="lo" priority="default" multicast="true"/></Interfaces></General><Discovery><MaxAutoParticipantIndex>200</MaxAutoParticipantIndex><ParticipantIndex>auto</ParticipantIndex></Discovery></Domain></CycloneDDS>'
+fi
 
 # Enter the container and source the environment
 # Handles both Humble and Jazzy paths automatically
