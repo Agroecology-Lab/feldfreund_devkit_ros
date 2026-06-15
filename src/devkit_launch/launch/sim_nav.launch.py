@@ -46,7 +46,7 @@ import pathlib
 
 from ament_index_python.packages import get_package_share_directory
 from launch import LaunchDescription
-from launch.actions import TimerAction
+from launch.actions import ExecuteProcess, TimerAction
 from launch_ros.actions import Node
 
 
@@ -81,12 +81,7 @@ def generate_launch_description():
         executable='relay',
         name='odom_wheels_relay',
         arguments=['/odom', '/odom/wheels'],
-        parameters=[{'use_sim_time': False}],
-        output='screen',
-    )
-
-    
-    # ── Bootstrap odom → base_footprint ───────────────────────────────────────
+        parameters=[{'use_sim_time': True}],
     # nav2_params_sim.yaml sets robot_base_frame: base_footprint everywhere.
     # That frame is normally published by robot_state_publisher, which lives
     # in the Gazebo layer (sowbot_sim.launch.py).  Without Gazebo running,
@@ -157,6 +152,22 @@ def generate_launch_description():
         )],
     )
 
+    # ── Kill fake_nav2_server once /clock arrives from the bridge ─────────────
+    # fake_nav2_server publishes map→odom→base_link at wall time. Once Gazebo
+    # starts and ros_gz_bridge publishes /clock, its wall-time TF stamps race
+    # with the sim-time TF from RSP/bridge and corrupt the robot's map position.
+    # We poll for /clock and SIGTERM fake_nav2_server as soon as it appears.
+    kill_fake_nav2 = ExecuteProcess(
+        cmd=[
+            '/bin/bash', '-c',
+            'until ros2 topic hz /clock --window 1 2>/dev/null | grep -q "average rate"; '
+            'do sleep 1; done; '
+            'pkill -f fake_nav2_server || true'
+        ],
+        name='kill_fake_nav2_on_clock',
+        output='screen',
+    )
+
     # ── Topo nav + Nav2 (delayed to let static TFs and topo stack settle) ───────
     # 15 s gives map_manager2 and localisation2 time to fully initialise
     # before navigation2 starts waiting for the localisation ready signal.
@@ -165,9 +176,11 @@ def generate_launch_description():
     # TF chain, causing the "action server not ready" error.
     # If Gazebo starts later, Nav2/topo-nav wait for real TF data before
     # accepting goals — the bootstrap TFs keep them unblocked in the interim.
+    # use_sim_time=True: once Gazebo starts, /clock drives all timestamps so
+    # localisation2 and Nav2 stay in sync with the bridge's odom/TF output.
     topo_stack = TimerAction(
         period=15.0,
-        actions=sowbot_sim._topo_nav_nodes(tmap2_file, devkit_launch_pkg, use_sim_time=False),
+        actions=sowbot_sim._topo_nav_nodes(tmap2_file, devkit_launch_pkg, use_sim_time=True),
     )
 
     return LaunchDescription([
@@ -176,5 +189,6 @@ def generate_launch_description():
         base_footprint_to_base_link,
         ui_node,
         fake_nav2,
+        kill_fake_nav2,
         topo_stack,
     ])
