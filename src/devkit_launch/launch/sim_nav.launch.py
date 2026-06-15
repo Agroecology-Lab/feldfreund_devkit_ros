@@ -82,6 +82,10 @@ def generate_launch_description():
         name='odom_wheels_relay',
         arguments=['/odom', '/odom/wheels'],
         parameters=[{'use_sim_time': True}],
+        output='screen',
+    )
+
+    # ── Bootstrap odom → base_footprint ───────────────────────────────────────
     # nav2_params_sim.yaml sets robot_base_frame: base_footprint everywhere.
     # That frame is normally published by robot_state_publisher, which lives
     # in the Gazebo layer (sowbot_sim.launch.py).  Without Gazebo running,
