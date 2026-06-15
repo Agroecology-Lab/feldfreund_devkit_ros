@@ -208,14 +208,39 @@ def generate_launch_description():
         }.items(),
     )
 
-    # Kill fake_nav2_server once /clock is live from ros_gz_bridge.
-    # Placed here (Gazebo layer) so it only runs when Gazebo actually starts —
-    # not at nav-stack boot where /clock never appears and the poll exits
-    # spuriously, killing the server that topo nav depends on.
+    bridge_cfg = os.path.join(pkg_agro, 'config', 'ros_gz_bridge.yaml')
+
+    # Preflight: kill any lingering bridge from a previous session before
+    # sim_launch starts a fresh one.
+    preflight_pkill = ExecuteProcess(
+        cmd=['/bin/bash', '-c', 'pkill -f parameter_bridge || true'],
+        name='preflight_pkill',
+        output='screen',
+    )
+
+    # Bridge watchdog: if parameter_bridge dies (e.g. GZ restart), revive it.
+    bridge_watchdog = ExecuteProcess(
+        cmd=[
+            '/bin/bash', '-c',
+            (
+                'while true; do sleep 5; '
+                'pgrep -f parameter_bridge >/dev/null || '
+                'ros2 run ros_gz_bridge parameter_bridge --ros-args '
+                '-p config_file:=' + bridge_cfg + '; '
+                'done'
+            ),
+        ],
+        name='bridge_watchdog',
+        output='screen',
+    )
+
+    # Kill fake_nav2_server once /clock is being published RELIABLE from the
+    # bridge.  topic hz has a startup lag and doesn't expose QoS; topic info
+    # --verbose confirms the bridge is fully up with the right reliability.
     kill_fake_nav2 = ExecuteProcess(
         cmd=[
             '/bin/bash', '-c',
-            'until ros2 topic hz /clock --window 1 2>/dev/null | grep -q "average rate"; '
+            'until ros2 topic info /clock --verbose 2>/dev/null | grep -q RELIABLE; '
             'do sleep 1; done; '
             'pkill -f fake_nav2_server || true'
         ],
@@ -229,6 +254,8 @@ def generate_launch_description():
         x_arg,
         y_arg,
         z_arg,
+        preflight_pkill,
         sim_launch,
+        bridge_watchdog,
         kill_fake_nav2,
     ])
