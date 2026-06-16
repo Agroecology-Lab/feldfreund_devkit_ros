@@ -5,23 +5,25 @@
 # as part of the type name and produces "No template specialization for the pair".
 # Use this YAML config instead; load it with:
 #   ros2 run ros_gz_bridge parameter_bridge --ros-args -p config_file:=<path>
+#
+# NOTE: the model's plugins (DiffDrive, JointStatePublisher, sensors) publish on
+# UNSCOPED gz topics (/cmd_vel, /joint_states, /odom, /imu, /gps, /scan), NOT
+# /model/agro_robot/*. Verified with `gz topic -i`. Names must match exactly or
+# the bridge connects to nothing.
 
 - ros_topic_name: /cmd_vel
-  gz_topic_name: /model/agro_robot/cmd_vel
+  gz_topic_name: /cmd_vel
   ros_type_name: geometry_msgs/msg/Twist
   gz_type_name: gz.msgs.Twist
   direction: ROS_TO_GZ
 
-# FIX: DiffDrive plugin publishes to "<odom_topic>" scoped under the model,
-# which resolves to /model/agro_robot/odom — NOT /model/agro_robot/odometry.
 - ros_topic_name: /odom
-  gz_topic_name: /model/agro_robot/odom
+  gz_topic_name: /odom
   ros_type_name: nav_msgs/msg/Odometry
   gz_type_name: gz.msgs.Odometry
   direction: GZ_TO_ROS
 
-# FIX: DiffDrive plugin has <tf_topic>/tf</tf_topic> which is an absolute path,
-# so it publishes to the global /tf topic — NOT /model/agro_robot/tf.
+# DiffDrive has <tf_topic>/tf</tf_topic> (absolute) so it stays on the global /tf.
 - ros_topic_name: /tf
   gz_topic_name: /tf
   ros_type_name: tf2_msgs/msg/TFMessage
@@ -31,25 +33,25 @@
     reliability: reliable
 
 - ros_topic_name: /scan
-  gz_topic_name: /model/agro_robot/scan
+  gz_topic_name: /scan
   ros_type_name: sensor_msgs/msg/LaserScan
   gz_type_name: gz.msgs.LaserScan
   direction: GZ_TO_ROS
 
 - ros_topic_name: /imu
-  gz_topic_name: /model/agro_robot/imu
+  gz_topic_name: /imu
   ros_type_name: sensor_msgs/msg/Imu
   gz_type_name: gz.msgs.IMU
   direction: GZ_TO_ROS
 
 - ros_topic_name: /gps/fix
-  gz_topic_name: /model/agro_robot/gps
+  gz_topic_name: /gps
   ros_type_name: sensor_msgs/msg/NavSatFix
   gz_type_name: gz.msgs.NavSat
   direction: GZ_TO_ROS
 
 - ros_topic_name: /joint_states
-  gz_topic_name: /model/agro_robot/joint_states
+  gz_topic_name: /joint_states
   ros_type_name: sensor_msgs/msg/JointState
   gz_type_name: gz.msgs.Model
   direction: GZ_TO_ROS
