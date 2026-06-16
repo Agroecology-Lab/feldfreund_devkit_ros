@@ -461,29 +461,44 @@
     rpy="0 0.2618 ${pi}"/>
 
   <!-- ══════════════════════════════════════════════════════════════
-       TRACKED VEHICLE PLUGIN  (gz-sim Harmonic)
-       Drives belt surface velocity directly; track joints are fixed.
+       TRACKED VEHICLE PLUGIN  (gz-sim8 / Harmonic)
+       TrackedVehicle handles cmd_vel → belt surface velocity.
+       TrackController per side sets the actual belt speed.
+       NOTE: TrackedVehicle does NOT publish odom/tf; use
+       ros_gz_bridge + a separate odometry node, or re-add
+       gz-sim-diff-drive-system in parallel for odom only
+       (with wheel_radius=${drive_radius}, joints=drive joints).
+       cmd_vel topic default: /model/amiga_ng/cmd_vel
        ══════════════════════════════════════════════════════════════ -->
   <gazebo>
     <plugin filename="gz-sim-tracked-vehicle-system"
             name="gz::sim::systems::TrackedVehicle">
-      <left_track>left_track_link</left_track>
-      <right_track>right_track_link</right_track>
+      <left_track><link>left_track_link</link></left_track>
+      <right_track><link>right_track_link</link></right_track>
 
-      <wheel_separation>${track_sep}</wheel_separation>
-      <track_mu>2.0</track_mu>
-      <track_mu2>0.5</track_mu2>
+      <tracks_separation>${track_sep}</tracks_separation>
+      <tracks_height>${track_height}</tracks_height>
+      <steering_efficiency>0.5</steering_efficiency>
+    </plugin>
+  </gazebo>
 
-      <max_linear_acceleration>0.43</max_linear_acceleration>
-      <max_angular_acceleration>1.0</max_angular_acceleration>
+  <!-- TrackController: one per side; listens on
+       /model/amiga_ng/left_track_link/track_cmd_vel  (default) -->
+  <gazebo>
+    <plugin filename="gz-sim-track-controller-system"
+            name="gz::sim::systems::TrackController">
+      <link>left_track_link</link>
+      <min_velocity>-1.5</min_velocity>
+      <max_velocity>1.5</max_velocity>
+    </plugin>
+  </gazebo>
 
-      <topic>cmd_vel</topic>
-      <odom_topic>odom</odom_topic>
-      <tf_topic>tf</tf_topic>
-
-      <odom_publish_frequency>50</odom_publish_frequency>
-      <frame_id>odom</frame_id>
-      <child_frame_id>base_footprint</child_frame_id>
+  <gazebo>
+    <plugin filename="gz-sim-track-controller-system"
+            name="gz::sim::systems::TrackController">
+      <link>right_track_link</link>
+      <min_velocity>-1.5</min_velocity>
+      <max_velocity>1.5</max_velocity>
     </plugin>
   </gazebo>
 
