@@ -139,7 +139,7 @@ def compute_field_params(rows, headland_width, default_row_width, plant_spacing)
             row_width = spacing - furrow_width
     else:
         # Single row (or no measurable spacing): fall back to sane defaults.
-        furrow_width = 0.1
+        furrow_width = 0.3
 
     # Clamp to Forest3D's crop_rows schema minimums so an unusual map can never
     # emit a config the generator rejects (row_width >= 0.2, furrow >= 0.1).
@@ -151,7 +151,7 @@ def compute_field_params(rows, headland_width, default_row_width, plant_spacing)
     along = [r['a'][row_axis] for r in rows] + [r['b'][row_axis] for r in rows]
     across = [r['a'][cross_axis] for r in rows] + [r['b'][cross_axis] for r in rows]
     row_length = max(along) - min(along)
-    field_length = row_length + 1 * headland_width
+    field_length = row_length + 2 * headland_width
     field_width = max(across) - min(across) + 2 * headland_width
 
     # Plants per row mirrors Forest3D's RowPlacement.place():
