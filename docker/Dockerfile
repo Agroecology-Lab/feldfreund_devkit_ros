@@ -222,7 +222,7 @@ RUN mkdir -p /root/.rosys && echo '{}' > /root/.rosys/rosys.config.json
 
 ENV PYTHONPATH="/root/.lizard:/workspace/install/lib/python3.12/site-packages"
 
-ENV MESA_GL_VERSION_OVERRIDE=3.3
+# ENV MESA_GL_VERSION_OVERRIDE=3.3 commented out for testing, remove if no issues found
 
 # ============================================================
 # Stage 7: Workspace — Local Sources
