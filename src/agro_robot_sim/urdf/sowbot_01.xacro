@@ -503,6 +503,34 @@
   </gazebo>
 
   <!-- ══════════════════════════════════════════════════════════════
+       ODOM-ONLY DIFFDRIVE PLUGIN (gz-sim8 / Harmonic)
+       TrackedVehicle/TrackController above own actual motion;
+       this DiffDrive instance is wired to a dead cmd_vel topic so it
+       NEVER drives the robot — it only integrates left/right drive
+       joint velocities into odometry + odom->base_link TF, matching
+       the unscoped /odom gz topic that ros_gz_bridge.yaml expects.
+       ══════════════════════════════════════════════════════════════ -->
+  <gazebo>
+    <plugin filename="gz-sim-diff-drive-system"
+            name="gz::sim::systems::DiffDrive">
+      <left_joint>left_drive_joint</left_joint>
+      <right_joint>right_drive_joint</right_joint>
+
+      <wheel_separation>${track_sep}</wheel_separation>
+      <wheel_radius>${drive_radius}</wheel_radius>
+
+      <!-- unused sink topic: never publish real cmd_vel here -->
+      <topic>_unused_diffdrive_cmd_vel</topic>
+
+      <odom_topic>odom</odom_topic>
+      <tf_topic>/tf</tf_topic>
+      <frame_id>odom</frame_id>
+      <child_frame_id>base_link</child_frame_id>
+      <odom_publish_frequency>50</odom_publish_frequency>
+    </plugin>
+  </gazebo>
+
+  <!-- ══════════════════════════════════════════════════════════════
        JOINT STATE PUBLISHER PLUGIN
        ══════════════════════════════════════════════════════════════ -->
   <gazebo>
