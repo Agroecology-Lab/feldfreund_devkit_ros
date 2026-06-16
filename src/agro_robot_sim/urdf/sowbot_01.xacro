@@ -14,7 +14,7 @@
     OAK-D rear:       xyz="-0.438  0.273  0.951"
 
   Plugins (Gazebo Harmonic; topics bridged by ros_gz_bridge):
-    gz-sim-diff-drive-system       cmd_vel → /cmd_vel, odom → /odom  (skid-steer / track diff)
+    gz-sim-tracked-vehicle-system  cmd_vel → /cmd_vel, odom → /odom  (belt surface velocity)
     gz-sim-joint-state-publisher   joint_states → /joint_states
     gz-sim-sensors-system / imu-system / navsat-system
 -->
@@ -116,11 +116,10 @@
         <inertia ixx="0.8" ixy="0" ixz="0" iyy="2.0" iyz="0" izz="2.0"/>
       </inertial>
     </link>
-    <joint name="${prefix}_track_joint" type="continuous">
+    <joint name="${prefix}_track_joint" type="fixed">
       <parent link="base_link"/>
       <child  link="${prefix}_track_link"/>
       <origin xyz="0 ${y} 0" rpy="0 0 0"/>
-      <axis xyz="0 ${axis_y} 0"/>
     </joint>
 
     <!-- Drive roller (front) — full track height; forms the rounded front end -->
@@ -462,30 +461,44 @@
     rpy="0 0.2618 ${pi}"/>
 
   <!-- ══════════════════════════════════════════════════════════════
-       DIFF DRIVE PLUGIN  (track skid-steer)
-       Left/right drive rollers are the powered joints.
-       wheel_separation = track_sep (centre-to-centre).
-       wheel_radius     = drive_radius.
+       TRACKED VEHICLE PLUGIN  (gz-sim8 / Harmonic)
+       TrackedVehicle handles cmd_vel → belt surface velocity.
+       TrackController per side sets the actual belt speed.
+       NOTE: TrackedVehicle does NOT publish odom/tf; use
+       ros_gz_bridge + a separate odometry node, or re-add
+       gz-sim-diff-drive-system in parallel for odom only
+       (with wheel_radius=${drive_radius}, joints=drive joints).
+       cmd_vel topic default: /model/amiga_ng/cmd_vel
        ══════════════════════════════════════════════════════════════ -->
   <gazebo>
-    <plugin filename="gz-sim-diff-drive-system"
-            name="gz::sim::systems::DiffDrive">
-      <left_joint>left_track_joint</left_joint>
-      <right_joint>right_track_joint</right_joint>
+    <plugin filename="gz-sim-tracked-vehicle-system"
+            name="gz::sim::systems::TrackedVehicle">
+      <left_track><link>left_track_link</link></left_track>
+      <right_track><link>right_track_link</link></right_track>
 
-      <wheel_separation>${track_sep}</wheel_separation>
-      <wheel_radius>${drive_radius}</wheel_radius>
+      <tracks_separation>${track_sep}</tracks_separation>
+      <tracks_height>${track_height}</tracks_height>
+      <steering_efficiency>0.5</steering_efficiency>
+    </plugin>
+  </gazebo>
 
-      <max_linear_acceleration>0.43</max_linear_acceleration>
-      <max_angular_acceleration>1.0</max_angular_acceleration>
+  <!-- TrackController: one per side; listens on
+       /model/amiga_ng/left_track_link/track_cmd_vel  (default) -->
+  <gazebo>
+    <plugin filename="gz-sim-track-controller-system"
+            name="gz::sim::systems::TrackController">
+      <link>left_track_link</link>
+      <min_velocity>-1.5</min_velocity>
+      <max_velocity>1.5</max_velocity>
+    </plugin>
+  </gazebo>
 
-      <topic>cmd_vel</topic>
-      <odom_topic>odom</odom_topic>
-      <tf_topic>tf</tf_topic>
-
-      <odom_publish_frequency>50</odom_publish_frequency>
-      <frame_id>odom</frame_id>
-      <child_frame_id>base_footprint</child_frame_id>
+  <gazebo>
+    <plugin filename="gz-sim-track-controller-system"
+            name="gz::sim::systems::TrackController">
+      <link>right_track_link</link>
+      <min_velocity>-1.5</min_velocity>
+      <max_velocity>1.5</max_velocity>
     </plugin>
   </gazebo>
 
@@ -496,8 +509,6 @@
     <plugin filename="gz-sim-joint-state-publisher-system"
             name="gz::sim::systems::JointStatePublisher">
       <topic>joint_states</topic>
-      <joint_name>left_track_joint</joint_name>
-      <joint_name>right_track_joint</joint_name>
       <joint_name>left_drive_joint</joint_name>
       <joint_name>right_drive_joint</joint_name>
       <joint_name>left_idler_joint</joint_name>
