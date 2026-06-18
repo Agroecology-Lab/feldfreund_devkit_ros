@@ -73,7 +73,7 @@ def _nav2_sim_nodes(params_file: str, use_sim_time: bool = True) -> list:
             package='nav2_controller',
             executable='controller_server',
             name='controller_server',
-            remappings=remappings + [('cmd_vel', 'cmd_vel_nav')],
+            remappings=remappings,
             output='screen',
             parameters=[{'use_sim_time': use_sim_time}, params_file],
             arguments=['--ros-args', '--log-level', 'info'],
@@ -85,25 +85,17 @@ def _nav2_sim_nodes(params_file: str, use_sim_time: bool = True) -> list:
             package='nav2_behaviors',
             executable='behavior_server',
             name='behavior_server',
-            remappings=remappings + [('cmd_vel', 'cmd_vel_nav')],
+            remappings=remappings,
             output='screen',
             parameters=[{'use_sim_time': use_sim_time}, params_file],
             arguments=['--ros-args', '--log-level', 'info'],
         ),
         Node(package='nav2_bt_navigator',      executable='bt_navigator',      name='bt_navigator',      **common),
         Node(package='nav2_waypoint_follower', executable='waypoint_follower', name='waypoint_follower', **common),
-        Node(
-            package='nav2_velocity_smoother',
-            executable='velocity_smoother',
-            name='velocity_smoother',
-            remappings=remappings + [
-                ('cmd_vel',          'cmd_vel_nav'),
-                ('cmd_vel_smoothed', 'cmd_vel'),
-            ],
-            output='screen',
-            parameters=[{'use_sim_time': use_sim_time}, params_file],
-            arguments=['--ros-args', '--log-level', 'info'],
-        ),
+        # velocity_smoother intentionally omitted in sim: its output on /cmd_vel
+        # races with joystick cmd_vel and publishes zeros when Nav2 is idle,
+        # preventing manual driving.  controller_server and behavior_server
+        # publish directly to /cmd_vel → ros_gz_bridge → Gazebo DiffDrive.
         # collision_monitor intentionally omitted — see module docstring.
         # docking_server intentionally omitted — no dock in sim world.
         Node(
