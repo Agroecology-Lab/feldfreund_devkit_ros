@@ -215,4 +215,4 @@ lifecycle_manager_navigation:
       - behavior_server
       - bt_navigator
       - waypoint_follower
-      - velocity_smoother
+      # velocity_smoother removed — see _nav2_sim_nodes() in sowbot_sim.launch.py
