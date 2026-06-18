@@ -254,6 +254,47 @@ def patch_ground_soil_colour(base_dir):
     print(f"Patched {ground_sdf} with flat soil colour (no asset imported)")
 
 
+# Forest3D's world template defaults to the ODE physics engine. The Sowbot
+# model's track drive (gz-sim-tracked-vehicle-system / TrackController) only
+# transmits motion through DART's contact-surface-velocity API — under ODE,
+# TrackedVehicle and TrackController publish/consume valid non-zero commands
+# (confirmed via `gz topic -e`) but the physics step silently never moves the
+# robot, with no error. Swap the engine to DART so the spawned robot can
+# actually drive.
+ODE_PHYSICS = "<physics type='ode'>"
+DART_PHYSICS = "<physics type='dart'>"
+
+
+def patch_world_physics_engine(world_path):
+    """Switch the generated world's physics engine from ODE to DART.
+
+    Forest3D regenerates the world file from scratch on every run (manage.py
+    does `rm -f {topo_world}` before each `forest3d generate`), so this must
+    run every time, not just once by hand. Warns (rather than silently
+    no-op'ing) if the expected ODE tag isn't found, so a Forest3D template
+    change becomes visible instead of leaving an unpatched, non-functional
+    world.
+    """
+    world_path = Path(world_path)
+    if not world_path.exists():
+        print(f"WARNING: {world_path} not found — skipping physics engine patch",
+              file=sys.stderr)
+        return
+    world_text = world_path.read_text()
+    if DART_PHYSICS in world_text:
+        print(f"{world_path} already uses DART physics — nothing to patch")
+        return
+    if ODE_PHYSICS not in world_text:
+        print(f"WARNING: expected '{ODE_PHYSICS}' not found in {world_path}; "
+              "Forest3D may have changed its physics default — leaving as-is. "
+              "TrackedVehicle/TrackController require DART; verify manually.",
+              file=sys.stderr)
+        return
+    world_path.write_text(world_text.replace(ODE_PHYSICS, DART_PHYSICS))
+    print(f"Patched {world_path}: physics engine ode -> dart "
+          "(required for TrackedVehicle/TrackController motion)")
+
+
 def write_forest3d_yaml(params, gps_lat, gps_lon, output_path, density_crop, model_path):
     config = {
         'terrain': {
@@ -355,4 +396,10 @@ if __name__ == '__main__':
             gen_cmd += ['-o', args.world_out]
         print(f"Running: {' '.join(gen_cmd)}")
         subprocess.run(gen_cmd, check=True)
+
+        # Step 3: Forest3D's world template defaults to ODE; the Sowbot track
+        # drive needs DART (see patch_world_physics_engine docstring).
+        if args.world_out:
+            patch_world_physics_engine(args.world_out)
+
         print("Done.")
