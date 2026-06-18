@@ -479,6 +479,10 @@
       <tracks_separation>${track_sep}</tracks_separation>
       <tracks_height>${track_height}</tracks_height>
       <steering_efficiency>0.5</steering_efficiency>
+
+      <!-- Explicit global topic; without this the plugin defaults to
+           /model/{entity_name}/cmd_vel which the bridge does not route. -->
+      <topic>/cmd_vel</topic>
     </plugin>
   </gazebo>
 
