@@ -80,7 +80,9 @@ def generate_launch_description():
             (
                 'echo "[spawn] waiting for gz sim..."; '
                 f'until {GZ_BIN} service -l 2>/dev/null | grep -q "/world/"; do sleep 2; done; '
-                'echo "[spawn] gz ready — spawning agro_robot"; '
+                'echo "[spawn] gz service ready — waiting 30s for GUI to finish init..."; '
+                'sleep 30; '
+                'echo "[spawn] spawning agro_robot"; '
                 f'URDF=$(xacro {xacro_file_eager}) && '
                 'ros2 run ros_gz_sim create'
                 ' -name agro_robot'
