@@ -36,13 +36,30 @@ class DevkitManager:
         subprocess.run(['docker', 'stop', self.container_name], capture_output=True)
         sys.exit(0)
 
-    def build(self, full_clean: bool = False, sim: bool = False):
-        """Builds the Docker image."""
+    def build(self, full_clean: bool = False, sim: bool = False, pull_external: bool = False):
+        """Builds the Docker image.
+
+        Three modes, matched by Dockerfile cache boundaries:
+          - build             : local-only. Docker cache reused for everything,
+                                 including external git clones (Stage 8), as
+                                 long as the Dockerfile text and EXTERNAL_CACHEBUST
+                                 haven't changed. Local src/ edits only
+                                 invalidate Stage 7.5 onward.
+          - build +pull       : re-clones the external repos (Stage 8) via a
+                                 bumped EXTERNAL_CACHEBUST build-arg, but still
+                                 reuses cached apt/pip layers above it.
+          - full-build        : --no-cache. Drops everything, rebuilds from
+                                 scratch (also implies a fresh external pull,
+                                 since nothing is cached).
+        """
         build_cmd = ['docker', 'build', '-t', self.image_name, '-f', 'docker/Dockerfile', '.']
 
         if full_clean:
             self._log("Full rebuild requested: Purging Docker cache...", "WARN")
             build_cmd.insert(2, '--no-cache')
+        elif pull_external:
+            self._log("Re-pulling external repos (Stage 8) only...", "WARN")
+            build_cmd += ['--build-arg', f'EXTERNAL_CACHEBUST={int(time.time())}']
 
         if sim:
             build_cmd += ['--build-arg', 'INSTALL_SIM=true']
@@ -408,10 +425,15 @@ if __name__ == '__main__':
     manager = DevkitManager()
     action = sys.argv[1] if len(sys.argv) > 1 else 'up'
     sim = '+sim' in sys.argv
+    pull_external = '+pull' in sys.argv
 
     if action == 'build':
-        manager.build(full_clean=False, sim=sim)
+        # build        -> local-only (Docker cache reused, see build() docstring)
+        # build +pull  -> also re-clone external repos (Stage 8)
+        # build +sim   -> combinable with either of the above
+        manager.build(full_clean=False, sim=sim, pull_external=pull_external)
     elif action == 'full-build':
+        # full-build -> --no-cache, drops everything (local + external + apt/pip)
         manager.build(full_clean=True, sim=sim)
     elif action == 'neo':
         manager.run_neo(sys.argv[2:])
