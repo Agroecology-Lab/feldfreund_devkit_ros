@@ -225,20 +225,23 @@ ENV PYTHONPATH="/root/.lizard:/workspace/install/lib/python3.12/site-packages"
 # ENV MESA_GL_VERSION_OVERRIDE=3.3 commented out for testing, remove if no issues found
 
 # ============================================================
-# Stage 7: Workspace — Local Sources
+# Stage 7: Workspace dir
 # ============================================================
 
 WORKDIR /workspace
-COPY ./src/devkit_driver    ./src/devkit_driver
-COPY ./src/devkit_launch    ./src/devkit_launch
-COPY ./src/devkit_ui        ./src/devkit_ui
-COPY ./src/agro_robot_sim   ./src/agro_robot_sim
-
 
 # ============================================================
 # Stage 8: Workspace — Git Clones (each repo has its own
 #           retry loop so one failure does not skip the rest)
 # ============================================================
+# Placed BEFORE the local-source COPY (Stage 7.5) so that editing local code
+# (devkit_driver/devkit_launch/devkit_ui/agro_robot_sim) does NOT invalidate
+# this layer and force a re-clone of every external repo. Docker only
+# invalidates a RUN layer if its own inputs change, and this stage's only
+# input is EXTERNAL_CACHEBUST below — bump that (via `manage.py build +pull`)
+# to force a fresh pull of just these repos, without a full --no-cache build.
+ARG EXTERNAL_CACHEBUST=1
+
 # All repos clone in parallel; each retries 5x. Any failed clone fails the
 # build (a missing repo breaks rosdep/colcon downstream anyway).
 RUN clone() { \
@@ -260,10 +263,6 @@ RUN clone() { \
     rc=0; for p in $pids; do wait "$p" || rc=1; done; \
     test "$rc" = 0 && test -f src/vision_opencv/cv_bridge/package.xml
 
-# agro_robot_sim now lives in this repo (src/agro_robot_sim, copied in Stage 7).
-# Drop the copy that ships inside caatingarobotics so colcon doesn't see two.
-RUN rm -rf src/caatingarobotics/src/agro_robot_sim
-
 RUN sed -i 's/default_value="Test Rover"/default_value=""/' \
       src/ublox_dgnss/ublox_dgnss/launch/ublox_mb+r_rover.launch.py
 
@@ -275,6 +274,20 @@ RUN awk '/create_subscription<sensor_msgs::msg::NavSatFix>/ { in_sub=1 } in_sub 
     mv /tmp/_fc.cpp src/fusioncore/fusioncore_ros/src/fusion_node.cpp && \
     grep -q "rclcpp::SensorDataQoS()" src/fusioncore/fusioncore_ros/src/fusion_node.cpp
 
+# ============================================================
+# Stage 7.5: Workspace — Local Sources
+# ============================================================
+# Now AFTER the external clones (Stage 8). A local code edit only
+# invalidates this layer and what follows (colcon build) — not the
+# git-clone layer above, which stays cached.
+COPY ./src/devkit_driver    ./src/devkit_driver
+COPY ./src/devkit_launch    ./src/devkit_launch
+COPY ./src/devkit_ui        ./src/devkit_ui
+COPY ./src/agro_robot_sim   ./src/agro_robot_sim
+
+# agro_robot_sim now lives in this repo (src/agro_robot_sim, copied above).
+# Drop the copy that ships inside caatingarobotics so colcon doesn't see two.
+RUN rm -rf src/caatingarobotics/src/agro_robot_sim
 
 # ============================================================
 # Stage 9: rosdep — Automated Dependency Resolution
