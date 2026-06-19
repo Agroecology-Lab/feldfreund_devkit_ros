@@ -3307,4 +3307,12 @@ def ros_main() -> None:
 
 app.on_startup(lambda: threading.Thread(target=ros_main).start())
 ui_run.APP_IMPORT_STRING = f'{__name__}:app'
-ui.run(uvicorn_reload_dirs=str(Path(__file__).parent.resolve()), favicon='🤖', port=80)
+# reload=False is mandatory here. This module is imported (never run as
+# __main__) by the `ui_node` console-script entry point, so there's no
+# __name__ guard around this call -- every import executes it. NiceGUI's
+# default reload=True spins up uvicorn's reload supervisor, which re-imports
+# this module in a worker process to load `app`; that re-import re-runs this
+# exact line a second time and tries to bind port 80 again while the
+# supervisor still holds it -> EADDRINUSE. Hot-reload also has no use case
+# in a container that gets rebuilt/restarted on code changes anyway.
+ui.run(favicon='🤖', port=80, reload=False)
