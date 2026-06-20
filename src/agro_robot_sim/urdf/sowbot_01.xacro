@@ -74,6 +74,13 @@
       <geometry> <box size="0.01 0.01 0.01"/> </geometry>
       <material name="black"/>
     </visual>
+    <!-- Nominal chassis inertia; prevents ODE instability from a zero-mass parent
+         when all child links are fixed. Values approximate a 5 kg rigid frame
+         (pod/track inertias dominate; this just anchors the merged body). -->
+    <inertial>
+      <mass value="5.0"/>
+      <inertia ixx="0.5" ixy="0" ixz="0" iyy="1.0" iyz="0" izz="1.0"/>
+    </inertial>
   </link>
 
   <joint name="base_footprint_joint" type="fixed">
@@ -477,7 +484,7 @@
       <right_track><link>right_track_link</link></right_track>
 
       <tracks_separation>${track_sep}</tracks_separation>
-      <tracks_height>${track_height}</tracks_height>
+      <tracks_height>${drive_radius}</tracks_height>  <!-- half-height to contact surface, not full box height -->
       <steering_efficiency>0.5</steering_efficiency>
 
       <!-- Explicit global topic; without this the plugin defaults to
