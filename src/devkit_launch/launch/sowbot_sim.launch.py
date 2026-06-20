@@ -16,13 +16,15 @@ fake clock source, no race condition.
 
 Startup sequence inside this file
 ----------------------------------
-1. preflight_pkill  — kills any stale parameter_bridge from a previous run
-2. sim_launch       — gz sim + robot_state_publisher + spawn + ros_gz_bridge
-                      (ros_gz_bridge starts 2s after spawn exits, per sim.launch.py)
-3. nav2 (t+15s)     — Nav2 nodes with use_sim_time=True; by this point
+1. sim_launch       — gz sim + robot_state_publisher + spawn + ros_gz_bridge
+                      (ros_gz_bridge starts 2s after spawn exits, per sim.launch.py;
+                      its lifecycle is owned solely by sim.launch.py's
+                      OnProcessExit handler — no separate watchdog/pkill here,
+                      to avoid two supervisors racing over one parameter_bridge
+                      process and leaving /cmd_vel with no live subscriber)
+2. nav2 (t+15s)     — Nav2 nodes with use_sim_time=True; by this point
                       /clock is live from the bridge and TF frames carry
                       Gazebo sim-time stamps, so all TF lookups succeed
-4. bridge_watchdog  — revives parameter_bridge if it dies (e.g. gz restart)
 
 Nav2 node helpers (_nav2_sim_nodes, _topo_nav_nodes) are kept here so
 that any future callers can import them via importlib if needed.
@@ -211,29 +213,6 @@ def generate_launch_description():
 
     bridge_cfg = os.path.join(pkg_agro, 'config', 'ros_gz_bridge.yaml')
 
-    # Kill any stale bridge from a previous session before sim_launch starts.
-    preflight_pkill = ExecuteProcess(
-        cmd=['/bin/bash', '-c', 'pkill -f parameter_bridge || true'],
-        name='preflight_pkill',
-        output='screen',
-    )
-
-    # Bridge watchdog: revive parameter_bridge if it dies (e.g. gz restart).
-    bridge_watchdog = ExecuteProcess(
-        cmd=[
-            '/bin/bash', '-c',
-            (
-                'while true; do sleep 5; '
-                'pgrep -f parameter_bridge >/dev/null || '
-                'ros2 run ros_gz_bridge parameter_bridge --ros-args '
-                '-p config_file:=' + bridge_cfg + '; '
-                'done'
-            ),
-        ],
-        name='bridge_watchdog',
-        output='screen',
-    )
-
     # ── Nav2 (t+15s) ──────────────────────────────────────────────────────────
     # 15s gives gz sim time to start, the robot to spawn, and ros_gz_bridge
     # to come up and start publishing /clock with RELIABLE QoS.  By the time
@@ -251,8 +230,6 @@ def generate_launch_description():
         x_arg,
         y_arg,
         z_arg,
-        preflight_pkill,
         sim_launch,
-        bridge_watchdog,
         nav2,
     ])
