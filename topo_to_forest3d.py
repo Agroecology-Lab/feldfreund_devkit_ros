@@ -254,6 +254,74 @@ def patch_ground_soil_colour(base_dir):
     print(f"Patched {ground_sdf} with flat soil colour (no asset imported)")
 
 
+# Forest3D's generated ground <collision> has no <surface><friction> block at
+# all. gz-sim-tracked-vehicle-system / TrackController publish/consume valid
+# non-zero track_cmd_vel commands (confirmed via `gz topic -e`) and DART
+# physics is active (see patch_world_physics_engine below), but with zero
+# friction defined at the track/ground contact the belts have nothing to grip
+# — /odom stays at the noise floor with no error. Inserted right after the
+# </geometry> close of the ground collision block, the one fixed string every
+# Forest3D-generated ground model.sdf is expected to contain.
+GROUND_COLLISION_GEOMETRY_CLOSE = (
+    '                <geometry>\n'
+    '                    <mesh>\n'
+    '                        <uri>model://ground/mesh/terrain.stl</uri>\n'
+    '                    </mesh>\n'
+    '                </geometry>\n'
+    '            </collision>'
+)
+GROUND_FRICTION_SURFACE = (
+    '                <geometry>\n'
+    '                    <mesh>\n'
+    '                        <uri>model://ground/mesh/terrain.stl</uri>\n'
+    '                    </mesh>\n'
+    '                </geometry>\n'
+    '                <surface>\n'
+    '                    <friction>\n'
+    '                        <ode>\n'
+    '                            <mu>0.9</mu>\n'
+    '                            <mu2>0.9</mu2>\n'
+    '                        </ode>\n'
+    '                    </friction>\n'
+    '                    <contact>\n'
+    '                        <ode/>\n'
+    '                    </contact>\n'
+    '                </surface>\n'
+    '            </collision>'
+)
+
+
+def patch_ground_friction(base_dir):
+    """Add a friction surface to the ground collision so tracks can grip.
+
+    Must run every time, same as patch_world_physics_engine, since Forest3D
+    regenerates model.sdf from scratch on every `forest3d terrain crop_rows`
+    run. Warns (rather than silently no-op'ing) if the expected collision
+    block isn't found, so a Forest3D template change becomes visible instead
+    of leaving a frictionless, non-functional ground.
+    """
+    ground_sdf = base_dir / 'models' / 'ground' / 'model.sdf'
+    if not ground_sdf.exists():
+        print(f"WARNING: {ground_sdf} not found — skipping ground friction patch",
+              file=sys.stderr)
+        return
+    sdf_text = ground_sdf.read_text()
+    if '<surface>' in sdf_text:
+        print(f"{ground_sdf} already has a <surface> block — nothing to patch")
+        return
+    if GROUND_COLLISION_GEOMETRY_CLOSE not in sdf_text:
+        print(f"WARNING: expected ground collision block not found in "
+              f"{ground_sdf}; Forest3D may have changed its template — "
+              "leaving as-is. TrackedVehicle needs ground friction; verify "
+              "manually.", file=sys.stderr)
+        return
+    sdf_text = sdf_text.replace(GROUND_COLLISION_GEOMETRY_CLOSE,
+                                 GROUND_FRICTION_SURFACE)
+    ground_sdf.write_text(sdf_text)
+    print(f"Patched {ground_sdf} with mu=mu2=0.9 friction surface "
+          "(required for TrackedVehicle/TrackController to grip the ground)")
+
+
 # Forest3D's world template defaults to the ODE physics engine. The Sowbot
 # model's track drive (gz-sim-tracked-vehicle-system / TrackController) only
 # transmits motion through DART's contact-surface-velocity API — under ODE,
@@ -382,6 +450,11 @@ if __name__ == '__main__':
         terrain_cmd = [*base_cmd, 'terrain', 'crop_rows']
         print(f"Running: {' '.join(terrain_cmd)}")
         subprocess.run(terrain_cmd, check=True)
+
+        # Step 1b.5: Forest3D's ground collision has no friction surface at
+        # all (see patch_ground_friction docstring) — must run every time,
+        # independent of whether a soil texture was seeded.
+        patch_ground_friction(base_dir)
 
         # Step 1c: With no imported asset, Forest3D leaves a flat gray material —
         # recolour it to soil-brown. When textures were seeded it already wrote a
