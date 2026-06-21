@@ -123,7 +123,7 @@ def _nav2_nodes(params_file, real_condition):
     ]
 
 
-def _topo_nav_nodes(tmap2_file, sim_condition, real_condition, devkit_launch_pkg):
+def _topo_nav_nodes(tmap2_file, sim_condition, real_condition, devkit_bringup_pkg):
     """Inlined topo nav stack with sim/real conditional Nav2 backends.
 
     Replaces the upstream topological_navigation.launch.py which hardcodes
@@ -134,7 +134,7 @@ def _topo_nav_nodes(tmap2_file, sim_condition, real_condition, devkit_launch_pkg
     map_path = tmap2_file or os.path.join(
         topo_share, 'config', 'mixed_actions_map.yaml')
 
-    nav2_params = os.path.join(devkit_launch_pkg, 'config', 'nav2_params.yaml')
+    nav2_params = os.path.join(devkit_bringup_pkg, 'config', 'nav2_params.yaml')
 
     return [
         # 1. Map Manager — loads and publishes the topological map
@@ -206,7 +206,7 @@ def _topo_nav_nodes(tmap2_file, sim_condition, real_condition, devkit_launch_pkg
 
 def generate_launch_description():
     ublox_pkg         = get_package_share_directory('ublox_dgnss')
-    devkit_launch_pkg = get_package_share_directory('devkit_launch')
+    devkit_bringup_pkg = get_package_share_directory('devkit_bringup')
     ui_pkg            = get_package_share_directory('devkit_ui')
 
     rover_port   = os.getenv('GPS_PORT_ROVER',  'virtual')
@@ -220,7 +220,7 @@ def generate_launch_description():
     mcu_port     = os.getenv('MCU_PORT',    'virtual')
     tmap2_file   = os.getenv('TMAP2_FILE',  '')
 
-    fusioncore_config = os.path.join(devkit_launch_pkg, 'config', 'fusioncore.yaml')
+    fusioncore_config = os.path.join(devkit_bringup_pkg, 'config', 'fusioncore.yaml')
 
     any_hw_present = (rover_port  != 'virtual' or
                       rover1_port != 'virtual' or
@@ -264,7 +264,7 @@ def generate_launch_description():
     # will always be True once ntrip.yaml is committed. Use an explicit env var
     # so operators can toggle NTRIP without touching the image.
     # To enable: set NTRIP_ENABLED=true in .env (fixusb.py writes this file).
-    ntrip_config  = os.path.join(devkit_launch_pkg, 'config', 'ntrip.yaml')
+    ntrip_config  = os.path.join(devkit_bringup_pkg, 'config', 'ntrip.yaml')
     ntrip_enabled = os.getenv('NTRIP_ENABLED', 'false').lower() == 'true'
 
     return LaunchDescription([
@@ -465,7 +465,7 @@ def generate_launch_description():
         # ── Devkit Driver ────────────────────────────────────────────────────
         IncludeLaunchDescription(
             PythonLaunchDescriptionSource(
-                os.path.join(devkit_launch_pkg, 'launch', 'devkit_driver.launch.py')
+                os.path.join(devkit_bringup_pkg, 'launch', 'devkit_driver.launch.py')
             ),
             launch_arguments={'port': mcu_port}.items(),
         ),
@@ -504,7 +504,7 @@ def generate_launch_description():
         # perception). Gated to real hardware: the safety topics (/estop/*,
         # /bumper/*) and the monitored nodes (devkit_driver, usb_cam,
         # crop_row_node) do not exist in sim, so the safety beat would sit
-        # false continuously. Config installs to share/devkit_launch/config via
+        # false continuously. Config installs to share/devkit_bringup/config via
         # the install(DIRECTORY ... config) rule in CMakeLists.txt.
         # NOTE: executable is sentor_node.py (scripts/), NOT test_sentor.py.
         # The heartbeat publish rate / timeout are owned by SafetyMonitor's own
@@ -519,11 +519,11 @@ def generate_launch_description():
                     output='screen',
                     parameters=[{
                         'config_file': os.path.join(
-                            devkit_launch_pkg, 'config', 'sowbot_monitor.yaml'),
+                            devkit_bringup_pkg, 'config', 'sowbot_monitor.yaml'),
                     }],
                 ),
             ],
         ),
 
         # ── Topological Navigation ───────────────────────────────────────────
-    ] + _topo_nav_nodes(tmap2_file, sim_condition, real_condition, devkit_launch_pkg))
+    ] + _topo_nav_nodes(tmap2_file, sim_condition, real_condition, devkit_bringup_pkg))

@@ -57,7 +57,7 @@ def generate_launch_description():
     arg_file_path = DeclareLaunchArgument(
         name_arg_file_path,
         default_value=[
-            get_package_share_directory('devkit_launch'),
+            get_package_share_directory('devkit_bringup'),
             '/config/',
             LaunchConfiguration(name_arg_file_name)
         ]

@@ -362,12 +362,12 @@ class DevkitManager:
             # instance on container boot and lets the user restart Gazebo without
             # tearing down the nav stack.
             nav_launch_cmd = (
-                "ros2 launch devkit_launch sim_nav.launch.py "
+                "ros2 launch devkit_bringup sim_nav.launch.py "
                 + " ".join(extra_args)
             )
         else:
             nav_launch_cmd = (
-                f"ros2 launch devkit_launch devkit.launch.py "
+                f"ros2 launch devkit_bringup devkit.launch.py "
                 f"sim:={is_sim} rover_port:={r_port} mcu_port:={mcu_port} "
                 + " ".join(extra_args)
             )
@@ -405,7 +405,7 @@ class DevkitManager:
 
         ros_command = (
             f"{self._ros_source()} && "
-            "ros2 launch devkit_launch neo.launch.py " +
+            "ros2 launch devkit_bringup neo.launch.py " +
             " ".join(extra_args)
         )
 

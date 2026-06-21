@@ -2922,7 +2922,7 @@ class NiceGuiNode(Node):
                     ),
                 }
                 _SIM_CMD = [
-                    'ros2', 'launch', 'devkit_launch', 'sowbot_sim.launch.py',
+                    'ros2', 'launch', 'devkit_bringup', 'sowbot_sim.launch.py',
                     'world:=maize.world',
                 ]
 

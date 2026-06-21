@@ -12,7 +12,7 @@ from launch_ros.actions import Node
 
 def generate_launch_description():
     """Generate launch description for the complete devkit system."""
-    pkg_dir = get_package_share_directory('devkit_launch')
+    pkg_dir = get_package_share_directory('devkit_bringup')
 
     # Include the GNSS launch file
     gnss_launch = IncludeLaunchDescription(

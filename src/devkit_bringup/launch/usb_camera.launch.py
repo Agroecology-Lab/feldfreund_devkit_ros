@@ -12,7 +12,7 @@ def generate_launch_description():
 
     # Get the configuration file path
     config_file = os.path.join(
-        get_package_share_directory('devkit_launch'),
+        get_package_share_directory('devkit_bringup'),
         'config',
         'camera.yaml'
     )

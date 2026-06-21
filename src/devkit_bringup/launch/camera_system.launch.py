@@ -9,7 +9,7 @@ from launch.conditions import IfCondition  # Required for conditional logic
 
 def generate_launch_description():
     """Generate launch description for the complete camera system."""
-    pkg_dir = get_package_share_directory('devkit_launch')
+    pkg_dir = get_package_share_directory('devkit_bringup')
 
     # Read the hardware flags from the environment
     # Note: .env is loaded into the environment by manage.py

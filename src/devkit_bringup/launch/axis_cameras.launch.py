@@ -11,9 +11,9 @@ from launch_ros.actions import Node
 def generate_launch_description():
     """Generate launch description for AXIS cameras."""
 
-    devkit_launch_dir = get_package_share_directory('devkit_launch')
-    axis_config = os.path.join(devkit_launch_dir, 'config', 'axis_camera.yaml')
-    secrets_file = os.path.join(devkit_launch_dir, 'config', 'secrets.yaml')
+    devkit_bringup_dir = get_package_share_directory('devkit_bringup')
+    axis_config = os.path.join(devkit_bringup_dir, 'config', 'axis_camera.yaml')
+    secrets_file = os.path.join(devkit_bringup_dir, 'config', 'secrets.yaml')
 
     # Load secrets
     try:

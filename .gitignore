@@ -32,7 +32,7 @@ log/
 build/
 install/
 
-devkit_launch/config/secrets.yaml
+devkit_bringup/config/secrets.yaml
 ublox_dgnss/
 src/ublox_dgnss/
 
