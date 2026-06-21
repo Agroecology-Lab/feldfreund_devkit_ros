@@ -1,0 +1,20 @@
+# ntrip.yaml — NTRIP client configuration for u-blox F9P RTK corrections
+#
+# This file is loaded by devkit.launch.py when it exists and ntrip_client
+# package is available. Fill in all fields below, then restart the launch.
+#
+# Requirements:
+#   ros2 pkg list | grep ntrip_client
+#   If missing: sudo apt install ros-jazzy-ntrip-client
+#
+# To disable NTRIP: leave host empty or delete this file.
+#
+ntrip_client_node:
+  ros__parameters:
+    host: ""           # NTRIP caster hostname or IP, e.g. "ntrip.example.com"
+    port: 2101         # NTRIP caster port (standard is 2101)
+    mountpoint: ""     # Mountpoint name, e.g. "MOUNTPOINT0"
+    authenticate: true
+    username: ""
+    password: ""
+    rtcm_message_package: rtcm_msgs  # Must match ublox_dgnss expectation

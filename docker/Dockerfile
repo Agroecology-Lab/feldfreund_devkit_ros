@@ -235,7 +235,7 @@ WORKDIR /workspace
 #           retry loop so one failure does not skip the rest)
 # ============================================================
 # Placed BEFORE the local-source COPY (Stage 7.5) so that editing local code
-# (devkit_driver/devkit_launch/devkit_ui/agro_robot_sim) does NOT invalidate
+# (devkit_driver/devkit_bringup/devkit_ui/devkit_simulation) does NOT invalidate
 # this layer and force a re-clone of every external repo. Docker only
 # invalidates a RUN layer if its own inputs change, and this stage's only
 # input is EXTERNAL_CACHEBUST below — bump that (via `manage.py build +pull`)
@@ -281,11 +281,11 @@ RUN awk '/create_subscription<sensor_msgs::msg::NavSatFix>/ { in_sub=1 } in_sub 
 # invalidates this layer and what follows (colcon build) — not the
 # git-clone layer above, which stays cached.
 COPY ./src/devkit_driver    ./src/devkit_driver
-COPY ./src/devkit_launch    ./src/devkit_launch
+COPY ./src/devkit_bringup    ./src/devkit_bringup
 COPY ./src/devkit_ui        ./src/devkit_ui
-COPY ./src/agro_robot_sim   ./src/agro_robot_sim
+COPY ./src/devkit_simulation   ./src/devkit_simulation
 
-# agro_robot_sim now lives in this repo (src/agro_robot_sim, copied above).
+# devkit_simulation now lives in this repo (src/devkit_simulation, copied above).
 # Drop the copy that ships inside caatingarobotics so colcon doesn't see two.
 RUN rm -rf src/caatingarobotics/src/agro_robot_sim
 
@@ -339,7 +339,7 @@ RUN apt-get update && \
           lizard \
           ament_python \
           gazebo_ros \
-          agro_robot_sim \
+          devkit_simulation \
           caatinga_nav \
           caatinga_vision \
           sowbot_row_follow \

@@ -21,5 +21,5 @@ services:
     environment:
       - ROS_DOMAIN_ID=0
       - RMW_IMPLEMENTATION=rmw_cyclonedds_cpp
-    command: bash -c "source /opt/ros/jazzy/setup.bash && [ -f /workspace/install/setup.bash ] && source /workspace/install/setup.bash; ros2 launch devkit_launch devkit_nocams.launch.py"
+    command: bash -c "source /opt/ros/jazzy/setup.bash && [ -f /workspace/install/setup.bash ] && source /workspace/install/setup.bash; ros2 launch devkit_bringup devkit_nocams.launch.py"
     restart: unless-stopped

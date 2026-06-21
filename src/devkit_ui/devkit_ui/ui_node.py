@@ -2922,7 +2922,7 @@ class NiceGuiNode(Node):
                     ),
                 }
                 _SIM_CMD = [
-                    'ros2', 'launch', 'devkit_launch', 'sowbot_sim.launch.py',
+                    'ros2', 'launch', 'devkit_bringup', 'sowbot_sim.launch.py',
                     'world:=maize.world',
                 ]
 
@@ -3020,8 +3020,8 @@ class NiceGuiNode(Node):
                 # rather than silently no-op. The generator script is mounted
                 # at /workspace/topo_to_forest3d.py by manage.py.
                 _MAP_FILE   = '/workspace/maps/maize_map'
-                _WORLD_FILE = ('/workspace/install/agro_robot_sim/share/'
-                               'agro_robot_sim/worlds/maize.world')
+                _WORLD_FILE = ('/workspace/install/devkit_simulation/share/'
+                               'devkit_simulation/worlds/maize.world')
 
                 def _rebuild_world():
                     if _gazebo_proc[0] is not None and _gazebo_proc[0].poll() is None:
@@ -3069,9 +3069,9 @@ class NiceGuiNode(Node):
                     try:
                         env = {**os.environ, 'DISPLAY': os.environ.get('DISPLAY', ':0'),
                                'GZ_SIM_RESOURCE_PATH': '/workspace/models' + (':' + os.environ['GZ_SIM_RESOURCE_PATH'] if os.environ.get('GZ_SIM_RESOURCE_PATH') else '')}
-                        pkg = subprocess.check_output(['ros2', 'pkg', 'prefix', 'agro_robot_sim'], text=True).strip()
+                        pkg = subprocess.check_output(['ros2', 'pkg', 'prefix', 'devkit_simulation'], text=True).strip()
                         _gazebo_proc[0] = subprocess.Popen(
-                            ['gz', 'sim', '-r', f'{pkg}/share/agro_robot_sim/worlds/maize.world'],
+                            ['gz', 'sim', '-r', f'{pkg}/share/devkit_simulation/worlds/maize.world'],
                             stdout=open('/tmp/gazebo_world.log', 'w'), stderr=subprocess.STDOUT,
                             env=env, start_new_session=True)
                         _gazebo_lbl.set_text(f'world launched — pid {_gazebo_proc[0].pid}')
@@ -3085,9 +3085,9 @@ class NiceGuiNode(Node):
                         _spawn_lbl.set_text('already running')
                         return
                     try:
-                        pkg = subprocess.check_output(['ros2', 'pkg', 'prefix', 'agro_robot_sim'], text=True).strip()
-                        xacro_file    = f'{pkg}/share/agro_robot_sim/urdf/sowbot_01.xacro'
-                        bridge_config = f'{pkg}/share/agro_robot_sim/config/ros_gz_bridge.yaml'
+                        pkg = subprocess.check_output(['ros2', 'pkg', 'prefix', 'devkit_simulation'], text=True).strip()
+                        xacro_file    = f'{pkg}/share/devkit_simulation/urdf/sowbot_01.xacro'
+                        bridge_config = f'{pkg}/share/devkit_simulation/config/ros_gz_bridge.yaml'
                         cmd = (f'xacro {xacro_file} > /tmp/agro_robot_resolved.urdf && '
                                f'ros2 run ros_gz_sim create -name agro_robot '
                                f'-string "$(cat /tmp/agro_robot_resolved.urdf)" -x 0.0 -y 0.0 -z 0.3 && '

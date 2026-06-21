@@ -62,18 +62,18 @@ def on_startup() -> None:
     """Configures the hardware system and launches the ROS spin thread."""
     # Priority 1: Standard ROS 2 share directory (post-build)
     try:
-        pkg_share = get_package_share_directory('devkit_launch')
+        pkg_share = get_package_share_directory('devkit_bringup')
         config_path = Path(pkg_share) / 'config' / 'feldfreund.py'
     except Exception:
-        config_path = Path('/workspace/src/devkit_launch/config/feldfreund.py')
+        config_path = Path('/workspace/src/devkit_bringup/config/feldfreund.py')
 
     # Priority 2: Direct workspace source path (for development/hot-reloading)
     if not config_path.exists():
-        config_path = Path('/workspace/src/devkit_launch/config/feldfreund.py')
+        config_path = Path('/workspace/src/devkit_bringup/config/feldfreund.py')
 
     # Priority 3: Relative path from script (host-side execution fallback)
     if not config_path.exists():
-        config_path = Path(__file__).parents[3] / 'devkit_launch/config/feldfreund.py'
+        config_path = Path(__file__).parents[3] / 'devkit_bringup/config/feldfreund.py'
 
     if not config_path.exists():
         # Node cannot safely initialize without a hardware definition

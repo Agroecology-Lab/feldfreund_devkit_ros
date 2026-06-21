@@ -1,0 +1,119 @@
+# config/fusioncore.yaml
+# FusionCore UKF — Sowbot dual F9P + Lizard wheel odometry
+#
+# Param names verified against fusioncore_ros/src/fusion_node.cpp (fusioncore main, 2026-05-07).
+# All topics are hardcoded in fusioncore — /gnss/fix and /odom/wheels are not configurable.
+# Ensure devkit.launch.py relays:
+#   /rover/ublox_nav_sat_fix_hp → /gnss/fix
+#   /odom                       → /odom/wheels
+#
+# No separate IMU. Heading supplied by dual-antenna NAV-RELPOSNED shim.
+# BNO085 is wired up: devkit_driver now publishes /imu/data from the ImuBno085
+# Lizard module. imu.* params below are active.
+#
+# Validate after launch:
+#   ros2 topic hz /fusion/odom
+#   ros2 topic echo /fusion/odom --field pose.pose.position
+#   ros2 service call /fusioncore/reset std_srvs/srv/Trigger
+
+fusioncore:
+  ros__parameters:
+
+    # ── Frames ────────────────────────────────────────────────────────────────
+    base_frame:   base_link
+    odom_frame:   odom
+    # TF (odom → base_link) is always published — there is no publish_tf param.
+    publish_rate: 30.0      # Hz — matches Nav2 / topo nav costmap rate
+
+    # Ground robot: zero Z position and Z velocity in all published output.
+    publish.force_2d: true
+
+    # ── GNSS ──────────────────────────────────────────────────────────────────
+    # Fix topic is hardcoded to /gnss/fix — not configurable.
+    # Heading topic carries sensor_msgs/Imu with yaw quaternion (ENU), from
+    # relposned_heading_shim. covariance[8] carries acc_heading² from F9P.
+    gnss.heading_topic: /gnss/heading
+
+    # fusioncore fix_type enum: 1=GPS, 2=DGPS, 3=RTK_FLOAT, 4=RTK_FIXED
+    # rtk_navsatfix_shim maps carr_soln to NavSatFix status as follows:
+    #   carr_soln=0 (no RTK)    → receiver's own status (GPS/SBAS/DGPS)
+    #   carr_soln=1 (RTK FLOAT) → STATUS_SBAS_FIX → fusioncore DGPS (2)
+    #   carr_soln=2 (RTK FIXED) → STATUS_GBAS_FIX → fusioncore RTK_FIXED (4)
+    #
+    # min_fix_type=4: accept RTK FIXED only. FLOAT fixes are fused as DGPS (2)
+    # and rejected here, so the filter runs on wheel odom + heading alone until
+    # the baseline converges. Set to 2 to fuse FLOAT fixes (useful during
+    # startup convergence in large fields, at the cost of ~0.3 m position noise).
+    gnss.min_fix_type: 4
+
+    # Mahalanobis outlier gate — 5σ is conservative for open field.
+    # Do NOT lower below chi2 critical values or normal GPS noise trips the gate.
+    outlier_threshold_gnss: 9.49
+
+    # Tracked platform: relax lateral non-holonomic constraint to allow
+    # sideways slip during turns. Default (wheeled differential drive) is ~0.1.
+    encoder.nhc_vy_sigma: 3.0
+
+    # Base position noise floor (m). Adaptive covariance tracks reality above this.
+    # RTK FIXED CEP is ~0.02 m, FLOAT ~0.3 m. The HP fix covariance reflects the
+    # actual solution quality so the floor just needs to be below FIXED accuracy.
+    gnss.base_noise_xy: 0.05
+    gnss.base_noise_z:  0.10
+
+    # Heading noise fallback (rad). Only used when shim covariance[8] is zero.
+    # F9P dual-antenna spec: ~0.2° (0.0035 rad) at 1 m baseline, open sky.
+    # In practice with multipath/crop canopy expect 0.5–1.0° (0.009–0.017 rad).
+    # relposned_heading_shim populates covariance[8] from acc_heading, so this
+    # fallback only fires if the F9P reports zero accuracy — leave conservative.
+    gnss.heading_noise: 0.017
+
+    # Physical offset of rover antenna from base_link origin, in robot body frame.
+    # Convention: x=forward, y=left, z=up (metres).
+    # TODO: measure on physical robot before field use.
+    # Lever arm correction activates automatically once heading is validated.
+    gnss.lever_arm_x: 0.0
+    gnss.lever_arm_y: 0.0
+    gnss.lever_arm_z: 0.0
+
+    # ── Second GNSS receiver (rear F9P) ───────────────────────────────────────
+    # Uncomment when rear NavSatFix relay is wired up in devkit.launch.py:
+    #   /base/ublox_nav_sat_fix_hp → /gnss/fix2
+    # gnss.fix2_topic:    /gnss/fix2
+    # gnss.lever_arm2_x:  <measured, negative = rear of base_link>
+    # gnss.lever_arm2_y:  0.0
+    # gnss.lever_arm2_z:  0.0
+
+    # ── GNSS velocity (slip detection) ────────────────────────────────────────
+    # Fuses horizontal GPS speed as an independent measurement update.
+    # Expects nav_msgs/Odometry on this topic with ENU velocity in twist field:
+    #   linear.x = east (m/s), linear.y = north (m/s)
+    # Innovation between GPS vel and wheel odom reveals wheel slip.
+    # Uncomment once the UBXNavPvt → Odometry bridge node is written.
+    # gnss.velocity_topic: /gnss/velocity
+
+    # ── Wheel odometry ─────────────────────────────────────────────────────────
+    # Encoder topic is hardcoded to /odom/wheels — not configurable.
+    # devkit.launch.py relays /odom → /odom/wheels to match.
+    encoder.vel_noise: 0.05   # m/s
+    encoder.yaw_noise: 0.02   # rad/s
+
+    # ── ZUPT ──────────────────────────────────────────────────────────────────
+    # Suppresses velocity drift when stationary (node dwell, row-end turns).
+    zupt.enabled:            true
+    zupt.velocity_threshold: 0.02   # m/s — tighter than upstream default (0.05)
+    zupt.angular_threshold:  0.02   # rad/s
+
+    # ── IMU (not yet wired) ────────────────────────────────────────────────────
+    # BNO085 on Lizard board. Enable once devkit_driver publishes /imu/data.
+    imu.gyro_noise:   0.005
+    imu.accel_noise:  0.1
+    imu.frame_id:     imu_link
+    imu.has_magnetometer: true
+
+    # ── UKF process noise ─────────────────────────────────────────────────────
+    # Defaults are reasonable for a slow field robot. Tune if yaw drifts
+    # during row-end turns or position wanders during GNSS outages.
+    # ukf.q_position:    0.01
+    # ukf.q_orientation: 1.0e-9
+    # ukf.q_velocity:    0.1
+    # ukf.q_angular_vel: 0.1

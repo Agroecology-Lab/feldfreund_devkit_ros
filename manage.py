@@ -330,8 +330,8 @@ class DevkitManager:
         # a vmf gt_map.csv via get_maize_topo.py, then build maize.world FROM
         # that map with the forest3d pipeline (topo_to_forest3d.py). The vmf
         # generated.world is no longer launched, so we no longer symlink it.
-        topo_world = ("/workspace/install/agro_robot_sim/share/"
-                      "agro_robot_sim/worlds/maize.world")
+        topo_world = ("/workspace/install/devkit_simulation/share/"
+                      "devkit_simulation/worlds/maize.world")
         world_gen = (
             # Bootstrap node positions only if no map has been authored yet.
             "([ -f /workspace/maps/maize_map ] || ("
@@ -362,12 +362,12 @@ class DevkitManager:
             # instance on container boot and lets the user restart Gazebo without
             # tearing down the nav stack.
             nav_launch_cmd = (
-                "ros2 launch devkit_launch sim_nav.launch.py "
+                "ros2 launch devkit_bringup sim_nav.launch.py "
                 + " ".join(extra_args)
             )
         else:
             nav_launch_cmd = (
-                f"ros2 launch devkit_launch devkit.launch.py "
+                f"ros2 launch devkit_bringup devkit.launch.py "
                 f"sim:={is_sim} rover_port:={r_port} mcu_port:={mcu_port} "
                 + " ".join(extra_args)
             )
@@ -405,7 +405,7 @@ class DevkitManager:
 
         ros_command = (
             f"{self._ros_source()} && "
-            "ros2 launch devkit_launch neo.launch.py " +
+            "ros2 launch devkit_bringup neo.launch.py " +
             " ".join(extra_args)
         )
 

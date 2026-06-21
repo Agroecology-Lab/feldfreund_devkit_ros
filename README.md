@@ -215,9 +215,9 @@ python3 agbot-diagnostic.py full
 | **feldfreund_devkit_ros** (root) | your repo | MIT (©Zauberzeug GmbH & Agroecology Lab) | ✅ | *None (Local Project)* | Derivative of upstream field-friend; retain Zauberzeug notice |
 | **devkit_driver** | local | MIT (©ATB) | ✅ | *None (Utility Driver)* | Retain ATB copyright notice |
 | **devkit_ui** | local | MIT (©Agroecology Lab) | ✅ | *None (UI Extension)* | |
-| **devkit_launch** | local | MIT | ✅ | *None (Config/Launch)* | Corrected from `proprietary` |
+| **devkit_bringup** | local | MIT | ✅ | *None (Config/Launch)* | Corrected from `proprietary` |
 | **sowbot_row_follow** | caatingarobotics | BSD-2-Clause | ✅ | [de Silva et al., 2024](https://arxiv.org/abs/2209.14003) | LICENSE file fixed to match header/metadata; updated to use the Transition State Model (TSM) for visual crop row navigation; ©PRBonn + ©Agroecology Lab |
-| **caatingarobotics** *(agro_robot_sim, caatinga_nav, caatinga_vision)* | github.com/samuk | Apache-2.0 | ✅ | *None (Fork Infrastructure)* | Your fork (row_follow is the BSD-2 exception, above) |
+| **caatingarobotics** *(devkit_simulation, caatinga_nav, caatinga_vision)* | github.com/samuk | Apache-2.0 | ✅ | *None (Fork Infrastructure)* | Your fork (row_follow is the BSD-2 exception, above) |
 | **topological_navigation** | LCAS (`aoc_refactor`) | Apache-2.0 (©LCAS) | ✅ | [Fentanes et al., 2015](https://www.researchgate.net/publication/282752920_Now_or_later_Predicting_and_maximising_success_of_navigation_actions_from_long-term_experience) | High-level planner; derived from the EU STRANDS long-term autonomy project framework |
 | **fusioncore** | manankharwar | Apache-2.0 | ✅ | [Kharwar, 2026](https://arxiv.org/abs/2605.25239) | GNSS fusion; patched in-build; retain NOTICE if present |
 | **Forest3D** | unitsSpaceLab | GPL (©UNITS Space Lab) | Do not ship in final product | [Cottiga,S., Bourr, K., & Seriani, S. (2026)](https://kbourr.com/#publications)| Sim-only — 3D forestry /agriculture simulation environment |
@@ -246,7 +246,7 @@ Feldfreund DevKit ROS is a comprehensive ROS2 package that handles the communica
 - Camera systems (USB and AXIS cameras)
 - Example UI to control the robot
 
-All launch files and configuration files (except for the UI) are stored in the `devkit_launch` package.
+All launch files and configuration files (except for the UI) are stored in the `devkit_bringup` package.
 
 ## Components
 
@@ -380,7 +380,7 @@ The system can be started using different launch files:
 To launch the complete system:
 
 ```bash
-ros2 launch devkit_launch devkit.launch.py
+ros2 launch devkit_bringup devkit.launch.py
 ```
 
 ## AXIS Camera Authentication
@@ -414,11 +414,11 @@ cd devkit_ros
 
 Before building, check and adjust if needed:
 
-1. **ROS2 Configuration** (`devkit_launch/config/devkit.yaml`):
+1. **ROS2 Configuration** (`devkit_bringup/config/devkit.yaml`):
    - Verify `serial_port` matches your setup (default: "/dev/ttyTHS0")
    - Check `flash_parameters` for your hardware (default: "-j orin --nand")
 
-2. **Lizard Configuration** (`devkit_launch/config/devkit.liz`):
+2. **Lizard Configuration** (`devkit_bringup/config/devkit.liz`):
    - Verify motor configuration matches your hardware
    - Check pin assignments for bumpers and emergency stops
    - Adjust any other hardware-specific settings
