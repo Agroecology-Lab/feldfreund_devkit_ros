@@ -1,0 +1,578 @@
+<?xml version="1.0"?>
+<!--
+  Reference dimensions 
+    track ground length   ≈ 1.035 m
+    overall body width     ≈ 0.940 m
+    overall height         ≈ 0.520 m (chassis) + mast
+    track contact width    ≈ 0.242 m (each track)
+
+  Original Amiga-NG sensor TF positions preserved (relative to base_link):
+    GPS (gps_link):   xyz="-0.343  0.273  1.016"
+    IMU (bno085):     xyz="-0.300  0.000  0.000"
+    LiDAR:            xyz=" 0.000  0.562  0.141"  (use_lidar:=true)
+    OAK-D front:      xyz="-0.248  0.273  0.951"
+    OAK-D rear:       xyz="-0.438  0.273  0.951"
+
+  Plugins (Gazebo Harmonic; topics bridged by ros_gz_bridge):
+    gz-sim-tracked-vehicle-system  cmd_vel → /cmd_vel, odom → /odom  (belt surface velocity)
+    gz-sim-joint-state-publisher   joint_states → /joint_states
+    gz-sim-sensors-system / imu-system / navsat-system
+-->
+<robot xmlns:xacro="http://www.ros.org/wiki/xacro" name="amiga_ng">
+
+  <!-- ── Track / chassis dimensions (RTU.V4) ── -->
+  <xacro:property name="track_length"   value="1.035"/>    <!-- ground contact length -->
+  <xacro:property name="track_width"    value="0.242"/>    <!-- each track contact width -->
+  <xacro:property name="track_height"   value="0.22"/>     <!-- track unit vertical extent -->
+  <xacro:property name="drive_radius"   value="0.11"/>     <!-- track roller radius (drive frame) -->
+
+  <!-- Track centre-to-centre spacing (body width minus one track width) -->
+  <xacro:property name="track_sep"      value="0.698"/>    <!-- 0.940 - 0.242 -->
+  <xacro:property name="track_half"     value="${track_sep/2}"/>
+
+  <!-- base_link sits at the track roller axle height -->
+  <xacro:property name="base_link_z"    value="${drive_radius}"/>
+
+  <!-- ── Side body pods (two boxes, one above each track) ── -->
+  <xacro:property name="pod_len"        value="1.10"/>
+  <xacro:property name="pod_wid"        value="0.30"/>
+  <xacro:property name="pod_h"          value="0.32"/>
+  <!-- pod inner face roughly above the track; centre offset = track_half -->
+  <xacro:property name="pod_y"          value="${track_half}"/>
+  <!-- pod centre: body extends down so its base reaches the track axle centre
+       (base_link z=0), giving the drive/idler axles something to attach to -->
+  <xacro:property name="pod_z"          value="0.16"/>
+
+  <!-- ── Transverse top frame joining the pods ── -->
+  <xacro:property name="frame_wid"      value="0.94"/>
+  <xacro:property name="frame_len"      value="0.12"/>
+  <xacro:property name="frame_h"        value="0.04"/>
+
+  <!-- ── Mast (vertical post carrying GPS / comms / e-stop) ── -->
+  <xacro:property name="mast_h"         value="0.55"/>
+  <xacro:property name="mast_r"         value="0.025"/>
+
+  <!-- ── Materials ── -->
+  <material name="amiga_green">  <color rgba="0.18 0.42 0.18 1.0"/> </material>
+  <material name="white">        <color rgba="0.88 0.88 0.86 1.0"/> </material>
+  <material name="black">        <color rgba="0.10 0.10 0.10 1.0"/> </material>
+  <material name="grey">         <color rgba="0.55 0.55 0.55 1.0"/> </material>
+  <material name="darkgrey">     <color rgba="0.35 0.35 0.35 1.0"/> </material>
+  <material name="orange">       <color rgba="1.00 0.50 0.00 1.0"/> </material>
+  <material name="red">          <color rgba="0.80 0.10 0.10 1.0"/> </material>
+
+  <!-- ══════════════════════════════════════════════════════════════
+       BASE FRAMES
+       base_footprint → base_link  (raised by drive_radius so the
+       footprint sits on the ground; base_link at track axle height)
+       ══════════════════════════════════════════════════════════════ -->
+  <link name="base_footprint"/>
+
+  <link name="base_link">
+    <visual>
+      <origin xyz="0 0 0" rpy="0 0 0"/>
+      <geometry> <box size="0.01 0.01 0.01"/> </geometry>
+      <material name="black"/>
+    </visual>
+    <!-- Nominal chassis inertia; prevents ODE instability from a zero-mass parent
+         when all child links are fixed. Values approximate a 5 kg rigid frame
+         (pod/track inertias dominate; this just anchors the merged body). -->
+    <inertial>
+      <mass value="5.0"/>
+      <inertia ixx="0.5" ixy="0" ixz="0" iyy="1.0" iyz="0" izz="1.0"/>
+    </inertial>
+  </link>
+
+  <joint name="base_footprint_joint" type="fixed">
+    <parent link="base_footprint"/>
+    <child  link="base_link"/>
+    <origin xyz="0 0 ${base_link_z}" rpy="0 0 0"/>
+  </joint>
+
+  <!-- ══════════════════════════════════════════════════════════════
+       TRACKS  (left + right)
+       Each track = a long rounded box (rubber belt) plus a drive
+       roller and idler roller for a treaded look. The continuous
+       joint on the drive roller is what the diff-drive plugin spins.
+       ══════════════════════════════════════════════════════════════ -->
+  <xacro:macro name="track" params="prefix y axis_y">
+    <!-- Belt body (visual + collision); fixed to base_link -->
+    <link name="${prefix}_track_link">
+      <visual>
+        <origin xyz="0 0 0" rpy="0 0 0"/>
+        <geometry> <box size="${track_length - 2*drive_radius} ${track_width} ${track_height}"/> </geometry>
+        <material name="black"/>
+      </visual>
+      <collision>
+        <origin xyz="0 0 0" rpy="0 0 0"/>
+        <geometry> <box size="${track_length - 2*drive_radius} ${track_width} ${track_height}"/> </geometry>
+        <surface>
+          <friction>
+            <ode>
+              <mu>0.7</mu>
+              <mu2>150</mu2>
+              <fdir1>0 1 0</fdir1>
+              <slip1>0.0</slip1>
+              <slip2>0.0</slip2>
+            </ode>
+          </friction>
+        </surface>
+      </collision>
+      <inertial>
+        <mass value="18.0"/>
+        <inertia ixx="0.8" ixy="0" ixz="0" iyy="2.0" iyz="0" izz="2.0"/>
+      </inertial>
+    </link>
+    <joint name="${prefix}_track_joint" type="fixed">
+      <parent link="base_link"/>
+      <child  link="${prefix}_track_link"/>
+      <origin xyz="0 ${y} 0" rpy="0 0 0"/>
+    </joint>
+
+    <!-- Drive roller (front) — full track height; forms the rounded front end -->
+    <link name="${prefix}_drive_link">
+      <visual>
+        <origin xyz="0 0 0" rpy="${pi/2} 0 0"/>
+        <geometry> <cylinder radius="${track_height/2}" length="${track_width}"/> </geometry>
+        <material name="black"/>
+      </visual>
+      <collision>
+        <origin xyz="0 0 0" rpy="${pi/2} 0 0"/>
+        <geometry> <cylinder radius="${track_height/2}" length="${track_width}"/> </geometry>
+      </collision>
+      <inertial>
+        <mass value="4.0"/>
+        <inertia ixx="0.05" ixy="0" ixz="0" iyy="0.05" iyz="0" izz="0.05"/>
+      </inertial>
+    </link>
+    <joint name="${prefix}_drive_joint" type="continuous">
+      <parent link="base_link"/>
+      <child  link="${prefix}_drive_link"/>
+      <origin xyz="${track_length/2 - drive_radius} ${y} 0" rpy="0 0 0"/>
+      <axis xyz="0 ${axis_y} 0"/>
+    </joint>
+
+    <!-- Idler roller (rear) — full track height; forms the rounded rear end -->
+    <link name="${prefix}_idler_link">
+      <visual>
+        <origin xyz="0 0 0" rpy="${pi/2} 0 0"/>
+        <geometry> <cylinder radius="${track_height/2}" length="${track_width}"/> </geometry>
+        <material name="black"/>
+      </visual>
+      <inertial>
+        <mass value="4.0"/>
+        <inertia ixx="0.05" ixy="0" ixz="0" iyy="0.05" iyz="0" izz="0.05"/>
+      </inertial>
+    </link>
+    <joint name="${prefix}_idler_joint" type="continuous">
+      <parent link="base_link"/>
+      <child  link="${prefix}_idler_link"/>
+      <origin xyz="-${track_length/2 - drive_radius} ${y} 0" rpy="0 0 0"/>
+      <axis xyz="0 ${axis_y} 0"/>
+    </joint>
+  </xacro:macro>
+
+  <xacro:track prefix="left"  y=" ${track_half}" axis_y=" 1"/>
+  <xacro:track prefix="right" y="-${track_half}" axis_y="-1"/>
+
+  <!-- ══════════════════════════════════════════════════════════════
+       SIDE BODY PODS  (two boxes above the tracks — the split body)
+       ══════════════════════════════════════════════════════════════ -->
+  <xacro:macro name="pod" params="prefix y face">
+    <!-- Pod profile: VERTICAL lower section (full length 1.10, z -0.16..0) so the
+         body sides clear the track, plus a SLANTED upper section (z 0..+0.16) whose
+         top sets back by the rake at each end — vertical walls below, raked shoulders
+         above, matching the reference. Track top (pod-frame z=-0.05) sits inside the
+         vertical wall, so the track cannot foul the body.
+         Literals (no math fns / in-macro properties) for parser compatibility:
+           pod_h=0.32; lower box h=0.16 @z=-0.08 (full len 1.10);
+           upper box h=0.16 @z=+0.08 (top len 0.58);
+           upper slant_len=0.3053, pitch=0.5517 rad (~31.6°), centre x=±0.42 z=+0.08
+           (spans shoulder-outer 0.55/0.0 to top-inner 0.29/+0.16) -->
+    <link name="${prefix}_pod_link">
+      <!-- lower vertical box (full length) -->
+      <visual>
+        <origin xyz="0 0 -0.08" rpy="0 0 0"/>
+        <geometry> <box size="${pod_len} ${pod_wid} 0.16"/> </geometry>
+        <material name="white"/>
+      </visual>
+      <!-- upper central box (top length) -->
+      <visual>
+        <origin xyz="0 0 0.08" rpy="0 0 0"/>
+        <geometry> <box size="0.58 ${pod_wid} 0.16"/> </geometry>
+        <material name="white"/>
+      </visual>
+      <!-- front upper slant face (shoulder up to top) -->
+      <visual>
+        <origin xyz="0.42 0 0.08" rpy="0 0.5517 0"/>
+        <geometry> <box size="0.3053 ${pod_wid} 0.005"/> </geometry>
+        <material name="white"/>
+      </visual>
+      <!-- rear upper slant face -->
+      <visual>
+        <origin xyz="-0.42 0 0.08" rpy="0 -0.5517 0"/>
+        <geometry> <box size="0.3053 ${pod_wid} 0.005"/> </geometry>
+        <material name="white"/>
+      </visual>
+
+      <!-- ── Rectangular access hatch (visual only) ───────────────────
+           A single bolt-on access cover on the OUTER side face of the pod
+           (face param: +Y for left pod, -Y for right), light grey, with a
+           small grab handle. Upper-central side, clear of the lower wall and
+           axle mounts (z=-0.16, x=±0.41). Collision stays the full solid box. -->
+      <visual>
+        <origin xyz="0.04 ${face} 0.03" rpy="0 0 0"/>
+        <geometry> <box size="0.30 0.006 0.18"/> </geometry>
+        <material name="grey"/>
+      </visual>
+      <!-- handle: small grab bar standing off the hatch -->
+      <visual>
+        <origin xyz="0.04 ${face*1.18} 0.03" rpy="0 1.5708 0"/>
+        <geometry> <cylinder radius="0.008" length="0.06"/> </geometry>
+        <material name="darkgrey"/>
+      </visual>
+
+      <!-- collision: simple full box (slant is visual only) -->
+      <collision>
+        <origin xyz="0 0 0" rpy="0 0 0"/>
+        <geometry> <box size="${pod_len} ${pod_wid} ${pod_h}"/> </geometry>
+      </collision>
+      <inertial>
+        <mass value="35.0"/>
+        <inertia ixx="3.0" ixy="0" ixz="0" iyy="3.0" iyz="0" izz="3.0"/>
+      </inertial>
+    </link>
+    <joint name="${prefix}_pod_joint" type="fixed">
+      <parent link="base_link"/>
+      <child  link="${prefix}_pod_link"/>
+      <origin xyz="0 ${y} ${pod_z}" rpy="0 0 0"/>
+    </joint>
+  </xacro:macro>
+
+  <xacro:pod prefix="left"  y=" ${pod_y}" face=" 0.152"/>
+  <xacro:pod prefix="right" y="-${pod_y}" face="-0.152"/>
+
+  <!-- ══════════════════════════════════════════════════════════════
+       TOP FRAME  (transverse bar joining the two pods)
+       Sits across the top of both pods near the front.
+       ══════════════════════════════════════════════════════════════ -->
+  <link name="top_frame">
+    <visual>
+      <origin xyz="0 0 0" rpy="0 0 0"/>
+      <geometry> <box size="${frame_len} ${frame_wid} ${frame_h}"/> </geometry>
+      <material name="grey"/>
+    </visual>
+    <collision>
+      <origin xyz="0 0 0" rpy="0 0 0"/>
+      <geometry> <box size="${frame_len} ${frame_wid} ${frame_h}"/> </geometry>
+    </collision>
+    <inertial>
+      <mass value="4.0"/>
+      <inertia ixx="0.3" ixy="0" ixz="0" iyy="0.05" iyz="0" izz="0.3"/>
+    </inertial>
+  </link>
+
+  <joint name="top_frame_joint" type="fixed">
+    <parent link="base_link"/>
+    <child  link="top_frame"/>
+    <origin xyz="0 0 ${pod_z + pod_h/2 + frame_h/2}" rpy="0 0 0"/>
+  </joint>
+
+  <!-- ══════════════════════════════════════════════════════════════
+       MAST  (vertical post on the top frame; carries GPS / comms / e-stop)
+       ══════════════════════════════════════════════════════════════ -->
+  <link name="mast_link">
+    <visual>
+      <origin xyz="0 0 0" rpy="0 0 0"/>
+      <geometry> <cylinder radius="${mast_r}" length="${mast_h}"/> </geometry>
+      <material name="grey"/>
+    </visual>
+    <collision>
+      <origin xyz="0 0 0" rpy="0 0 0"/>
+      <geometry> <cylinder radius="${mast_r}" length="${mast_h}"/> </geometry>
+    </collision>
+    <inertial>
+      <mass value="1.5"/>
+      <inertia ixx="0.05" ixy="0" ixz="0" iyy="0.05" iyz="0" izz="0.001"/>
+    </inertial>
+  </link>
+
+  <!-- Mast mounted on the LEFT pod, near the front corner (one side) -->
+  <joint name="mast_joint" type="fixed">
+    <parent link="left_pod_link"/>
+    <child  link="mast_link"/>
+    <origin xyz="0.15 0 ${pod_h/2 + mast_h/2}" rpy="0 0 0"/>
+  </joint>
+
+  <!-- Comms / control enclosure on the mast (the blue box in the drawing) -->
+  <link name="comms_box">
+    <visual>
+      <origin xyz="0 0 0" rpy="0 0 0"/>
+      <geometry> <box size="0.10 0.14 0.22"/> </geometry>
+      <material name="grey"/>
+    </visual>
+    <inertial>
+      <mass value="1.0"/>
+      <inertia ixx="0.01" ixy="0" ixz="0" iyy="0.01" iyz="0" izz="0.01"/>
+    </inertial>
+  </link>
+  <joint name="comms_box_joint" type="fixed">
+    <parent link="mast_link"/>
+    <child  link="comms_box"/>
+    <origin xyz="0.07 0 0.05" rpy="0 0 0"/>
+  </joint>
+
+  <!-- E-stop button (red mushroom) on the front face -->
+  <link name="estop_link">
+    <visual>
+      <origin xyz="0 0 0" rpy="0 ${pi/2} 0"/>
+      <geometry> <cylinder radius="0.025" length="0.03"/> </geometry>
+      <material name="red"/>
+    </visual>
+  </link>
+  <joint name="estop_joint" type="fixed">
+    <parent link="left_pod_link"/>
+    <child  link="estop_link"/>
+    <origin xyz="${pod_len/2 + 0.015} 0 -0.05" rpy="0 0 0"/>
+  </joint>
+
+  <!-- ══════════════════════════════════════════════════════════════
+       GPS  (xyz="-0.343 0.273 1.016" rel base_link) — preserved
+       ══════════════════════════════════════════════════════════════ -->
+  <link name="gps_link">
+    <visual>
+      <geometry> <box size="0.06 0.06 0.02"/> </geometry>
+      <material name="black"/>
+    </visual>
+    <inertial>
+      <mass value="0.1"/>
+      <inertia ixx="0.001" ixy="0" ixz="0" iyy="0.001" iyz="0" izz="0.001"/>
+    </inertial>
+  </link>
+
+  <joint name="gps_joint" type="fixed">
+    <parent link="mast_link"/>
+    <child  link="gps_link"/>
+    <origin xyz="0 0 ${mast_h/2 + 0.02}" rpy="0 0 0"/>
+  </joint>
+
+  <gazebo reference="gps_link">
+    <sensor name="gps_sensor" type="navsat">
+      <always_on>true</always_on>
+      <update_rate>10.0</update_rate>
+      <topic>gps</topic>
+      <gz_frame_id>gps_link</gz_frame_id>
+    </sensor>
+  </gazebo>
+
+  <!-- ══════════════════════════════════════════════════════════════
+       IMU  (BNO085; xyz="-0.3 0 0" rel base_link) — preserved
+       ══════════════════════════════════════════════════════════════ -->
+  <link name="imu_link">
+    <visual>
+      <geometry> <box size="0.03 0.03 0.01"/> </geometry>
+      <material name="black"/>
+    </visual>
+    <inertial>
+      <mass value="0.05"/>
+      <inertia ixx="0.0001" ixy="0" ixz="0" iyy="0.0001" iyz="0" izz="0.0001"/>
+    </inertial>
+  </link>
+
+  <joint name="imu_joint" type="fixed">
+    <parent link="mast_link"/>
+    <child  link="imu_link"/>
+    <origin xyz="${mast_r + 0.02} 0 0.0" rpy="0 0 0"/>
+  </joint>
+
+  <gazebo reference="imu_link">
+    <sensor name="imu_sensor" type="imu">
+      <always_on>true</always_on>
+      <update_rate>100</update_rate>
+      <topic>imu</topic>
+      <gz_frame_id>imu_link</gz_frame_id>
+      <imu>
+        <angular_velocity/>
+        <linear_acceleration/>
+      </imu>
+    </sensor>
+  </gazebo>
+
+  <!-- ══════════════════════════════════════════════════════════════
+       LIDAR  (xyz="0 0.562 0.141"; use_lidar arg) — preserved
+       ══════════════════════════════════════════════════════════════ -->
+  <xacro:arg name="use_lidar" default="false"/>
+
+  <xacro:if value="$(arg use_lidar)">
+    <link name="lidar_link">
+      <visual>
+        <geometry> <cylinder radius="0.05" length="0.07"/> </geometry>
+        <material name="black"/>
+      </visual>
+    </link>
+
+    <joint name="lidar_joint" type="fixed">
+      <parent link="base_link"/>
+      <child  link="lidar_link"/>
+      <origin xyz="0.000 0.562 0.141" rpy="0 0 0"/>
+    </joint>
+
+    <gazebo reference="lidar_link">
+      <sensor name="lidar" type="gpu_lidar">
+        <pose>0 0 0 0 0 0</pose>
+        <topic>scan</topic>
+        <gz_frame_id>lidar_link</gz_frame_id>
+        <update_rate>10</update_rate>
+        <visualize>false</visualize>
+        <lidar>
+          <scan>
+            <horizontal>
+              <samples>360</samples>
+              <min_angle>-3.14159</min_angle>
+              <max_angle> 3.14159</max_angle>
+            </horizontal>
+          </scan>
+          <range>
+            <min>0.4</min>
+            <max>20.0</max>
+          </range>
+        </lidar>
+      </sensor>
+    </gazebo>
+  </xacro:if>
+
+  <!-- ══════════════════════════════════════════════════════════════
+       OAK-D CAMERAS  (front + rear; visual only) — preserved
+       ══════════════════════════════════════════════════════════════ -->
+  <xacro:macro name="oak_camera" params="name xyz rpy">
+    <link name="${name}_link">
+      <visual>
+        <origin xyz="0 0 0" rpy="0 0 0"/>
+        <geometry> <box size="0.03 0.09 0.03"/> </geometry>
+        <material name="black"/>
+      </visual>
+    </link>
+    <joint name="${name}_joint" type="fixed">
+      <parent link="mast_link"/>
+      <child  link="${name}_link"/>
+      <origin xyz="${xyz}" rpy="${rpy}"/>
+    </joint>
+  </xacro:macro>
+
+  <!-- Front camera: mast front face, upper; rear camera: just below, facing back -->
+  <xacro:oak_camera name="oak0"
+    xyz="${mast_r + 0.02} 0  0.12"
+    rpy="0 0.2618 0"/>
+  <xacro:oak_camera name="oak1"
+    xyz="-${mast_r + 0.02} 0  0.06"
+    rpy="0 0.2618 ${pi}"/>
+
+  <!-- ══════════════════════════════════════════════════════════════
+       TRACKED VEHICLE PLUGIN  (gz-sim8 / Harmonic)
+       TrackedVehicle handles cmd_vel → belt surface velocity.
+       TrackController per side sets the actual belt speed.
+       NOTE: TrackedVehicle does NOT publish odom/tf; use
+       ros_gz_bridge + a separate odometry node, or re-add
+       gz-sim-diff-drive-system in parallel for odom only
+       (with wheel_radius=${drive_radius}, joints=drive joints).
+       cmd_vel topic default: /model/amiga_ng/cmd_vel
+       ══════════════════════════════════════════════════════════════ -->
+  <gazebo>
+    <plugin filename="gz-sim-tracked-vehicle-system"
+            name="gz::sim::systems::TrackedVehicle">
+      <left_track><link>left_track_link</link></left_track>
+      <right_track><link>right_track_link</link></right_track>
+
+      <tracks_separation>${track_sep}</tracks_separation>
+      <tracks_height>${drive_radius}</tracks_height>  <!-- half-height to contact surface, not full box height -->
+      <steering_efficiency>0.5</steering_efficiency>
+
+      <!-- Explicit global topic; without this the plugin defaults to
+           /model/{entity_name}/cmd_vel which the bridge does not route. -->
+      <topic>/cmd_vel</topic>
+    </plugin>
+  </gazebo>
+
+  <!-- TrackController: one per side; listens on
+       /model/amiga_ng/left_track_link/track_cmd_vel  (default) -->
+  <gazebo>
+    <plugin filename="gz-sim-track-controller-system"
+            name="gz::sim::systems::TrackController">
+      <link>left_track_link</link>
+      <min_velocity>-1.5</min_velocity>
+      <max_velocity>1.5</max_velocity>
+    </plugin>
+  </gazebo>
+
+  <gazebo>
+    <plugin filename="gz-sim-track-controller-system"
+            name="gz::sim::systems::TrackController">
+      <link>right_track_link</link>
+      <min_velocity>-1.5</min_velocity>
+      <max_velocity>1.5</max_velocity>
+    </plugin>
+  </gazebo>
+
+  <!-- ══════════════════════════════════════════════════════════════
+       ODOM-ONLY DIFFDRIVE PLUGIN (gz-sim8 / Harmonic)
+       TrackedVehicle/TrackController above own actual motion;
+       this DiffDrive instance is wired to a dead cmd_vel topic so it
+       NEVER drives the robot — it only integrates left/right drive
+       joint velocities into odometry + odom->base_link TF, matching
+       the unscoped /odom gz topic that ros_gz_bridge.yaml expects.
+       ══════════════════════════════════════════════════════════════ -->
+  <gazebo>
+    <plugin filename="gz-sim-diff-drive-system"
+            name="gz::sim::systems::DiffDrive">
+      <left_joint>left_drive_joint</left_joint>
+      <right_joint>right_drive_joint</right_joint>
+
+      <wheel_separation>${track_sep}</wheel_separation>
+      <wheel_radius>${drive_radius}</wheel_radius>
+
+      <!-- unused sink topic: never publish real cmd_vel here -->
+      <topic>_unused_diffdrive_cmd_vel</topic>
+
+      <odom_topic>odom</odom_topic>
+      <tf_topic>/tf</tf_topic>
+      <frame_id>odom</frame_id>
+      <child_frame_id>base_link</child_frame_id>
+      <odom_publish_frequency>50</odom_publish_frequency>
+    </plugin>
+  </gazebo>
+
+  <!-- ══════════════════════════════════════════════════════════════
+       JOINT STATE PUBLISHER PLUGIN
+       ══════════════════════════════════════════════════════════════ -->
+  <gazebo>
+    <plugin filename="gz-sim-joint-state-publisher-system"
+            name="gz::sim::systems::JointStatePublisher">
+      <topic>joint_states</topic>
+      <joint_name>left_drive_joint</joint_name>
+      <joint_name>right_drive_joint</joint_name>
+      <joint_name>left_idler_joint</joint_name>
+      <joint_name>right_idler_joint</joint_name>
+    </plugin>
+  </gazebo>
+
+  <!-- ══════════════════════════════════════════════════════════════
+       WORLD-LEVEL SENSOR / IMU / NAVSAT SYSTEM PLUGINS
+       ══════════════════════════════════════════════════════════════ -->
+  <gazebo>
+    <plugin filename="gz-sim-sensors-system"
+            name="gz::sim::systems::Sensors">
+      <render_engine>ogre2</render_engine>
+    </plugin>
+  </gazebo>
+
+  <gazebo>
+    <plugin filename="gz-sim-imu-system"
+            name="gz::sim::systems::Imu"/>
+  </gazebo>
+
+  <gazebo>
+    <plugin filename="gz-sim-navsat-system"
+            name="gz::sim::systems::NavSat"/>
+  </gazebo>
+
+</robot>

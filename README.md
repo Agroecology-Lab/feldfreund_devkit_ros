@@ -217,7 +217,7 @@ python3 agbot-diagnostic.py full
 | **devkit_ui** | local | MIT (©Agroecology Lab) | ✅ | *None (UI Extension)* | |
 | **devkit_launch** | local | MIT | ✅ | *None (Config/Launch)* | Corrected from `proprietary` |
 | **sowbot_row_follow** | caatingarobotics | BSD-2-Clause | ✅ | [de Silva et al., 2024](https://arxiv.org/abs/2209.14003) | LICENSE file fixed to match header/metadata; updated to use the Transition State Model (TSM) for visual crop row navigation; ©PRBonn + ©Agroecology Lab |
-| **caatingarobotics** *(agro_robot_sim, caatinga_nav, caatinga_vision)* | github.com/samuk | Apache-2.0 | ✅ | *None (Fork Infrastructure)* | Your fork (row_follow is the BSD-2 exception, above) |
+| **caatingarobotics** *(devkit_simulation, caatinga_nav, caatinga_vision)* | github.com/samuk | Apache-2.0 | ✅ | *None (Fork Infrastructure)* | Your fork (row_follow is the BSD-2 exception, above) |
 | **topological_navigation** | LCAS (`aoc_refactor`) | Apache-2.0 (©LCAS) | ✅ | [Fentanes et al., 2015](https://www.researchgate.net/publication/282752920_Now_or_later_Predicting_and_maximising_success_of_navigation_actions_from_long-term_experience) | High-level planner; derived from the EU STRANDS long-term autonomy project framework |
 | **fusioncore** | manankharwar | Apache-2.0 | ✅ | [Kharwar, 2026](https://arxiv.org/abs/2605.25239) | GNSS fusion; patched in-build; retain NOTICE if present |
 | **Forest3D** | unitsSpaceLab | GPL (©UNITS Space Lab) | Do not ship in final product | [Cottiga,S., Bourr, K., & Seriani, S. (2026)](https://kbourr.com/#publications)| Sim-only — 3D forestry /agriculture simulation environment |

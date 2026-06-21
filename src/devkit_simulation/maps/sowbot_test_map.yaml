@@ -1,0 +1,417 @@
+# sowbot_test_map.yaml — topological map for the minha_fazenda.sdf world.
+#
+# World geometry (post coordinates from minha_fazenda.sdf):
+#   Row 1: x ∈ [2.0, 14.2],   y drifts -0.34 → -1.13
+#   Row 2: x ∈ [1.9, 12.0],   y ≈ 2.76 → 2.99
+#   Row 3: x ∈ [2.1, 14.0],   y ≈ 5.59 → 6.26   (+1 outlier at (14.04, 2.55))
+#
+# Planner-legal corridor centerlines (assuming inflation_radius=0.55 m
+# and footprint half-extent=0.30 m, giving 0.85 m no-fly radius per post):
+#
+#   south headland   : free y < -1.98   → using y=-2.5  (0.52m margin)
+#   R1 (rows 1-2)    : free y ∈ (0.51, 1.91)   → y=1.2  (1.40m wide)
+#   R2 (rows 2-3)    : free y ∈ (3.84, 4.74)   → y=4.3  (0.90m wide — TIGHT)
+#   R3 (north row 3) : free y > 7.11   → using y=7.5   (0.39m margin)
+#
+# Topology (mirroring mixed_test_map's pattern, but with rows running E–W
+# instead of N–S because that's how the SDF world is laid out):
+#
+#                                            HL_E(16, -2.5)
+#                                                 ▲
+#   R3_IN(0, 7.5) ───── (corridor R3) ─────► R3_OUT(16, 7.5)
+#                                                 │
+#   R2_IN(0, 4.3) ───── (corridor R2) ─────► R2_OUT(16, 4.3)
+#                                                 │
+#   R1_IN(0, 1.2) ───── (corridor R1) ─────► R1_OUT(16, 1.2)
+#                                                 │
+#   HL_W(0, -2.5) ◄──── south headland highway ───┘
+#       │
+#       │
+#   HOME(0, 0)
+#
+# Robot footprint mismatch warning:
+#   The configured footprint in nav2_params_sim.yaml is a 0.6×0.5 m box.
+#   The actual robot is ~1.74×1.52 m. The planner will happily plan paths
+#   through corridors that the real robot cannot physically fit through.
+#   This map's clearances assume the configured (small) footprint. When
+#   the footprint is fixed to match the actual robot, R2 (0.90 m wide)
+#   will become unplannable. At that point either widen the row spacing
+#   in minha_fazenda.sdf, or drop R2 from this map entirely.
+#
+# Edge actions:
+#   All edges use navigate_to_pose for now. Once sowbot_row_follow is up
+#   and providing /limbic_row_follow, the R{n}_IN → R{n}_OUT edges can be
+#   switched to action: limbic_row_follow — declaration is already present
+#   in the `actions:` block below.
+#
+# GPS origin:
+#   (-8.0, -36.0) — Pernambuco, Brazilian Caatinga region. Dummy values
+#   for the Leaflet visualiser; not used for navigation.
+
+meta:
+  last_updated: 20-05-2026_12-00-00
+  origin:
+    latitude: -8.0
+    longitude: -36.0
+    altitude: 0
+metric_map: sowbot_test_map
+name: sowbot_test_map
+pointset: sowbot_test_map
+transformation:
+  topo_frame_id: map
+  parent: map
+  rotation:
+    w: 1.0
+    x: 0.0
+    y: 0.0
+    z: 0.0
+  translation:
+    x: 0.0
+    y: 0.0
+    z: 0.0
+
+definitions:
+  default_bt: "<root main_tree_to_execute=\"MainTree\">\n  <BehaviorTree ID=\"MainTree\"\
+    >\n    <PipelineSequence name=\"NavigateWithReplanning\">\n      <ComputePathToPose\
+    \ goal=\"{goal}\" path=\"{path}\" planner_id=\"GridBased\"/>\n      <FollowPath\
+    \ path=\"{path}\" controller_id=\"FollowPath\"/>\n    </PipelineSequence>\n  </BehaviorTree>\n\
+    </root>\n"
+  goal_align_bt: "<root main_tree_to_execute=\"MainTree\">\n  <BehaviorTree ID=\"\
+    MainTree\">\n    <PipelineSequence name=\"NavigateWithReplanning\">\n      <ComputePathToPose\
+    \ goal=\"{goal}\" path=\"{path}\" planner_id=\"GridBased\"/>\n      <FollowPath\
+    \ path=\"{path}\" controller_id=\"FollowPath\"/>\n    </PipelineSequence>\n  </BehaviorTree>\n\
+    </root>\n"
+  row_traversal_bt: "<root main_tree_to_execute=\"MainTree\">\n  <BehaviorTree ID=\"\
+    MainTree\">\n    <PipelineSequence name=\"NavigateWithReplanning\">\n      <ComputePathThroughPoses\
+    \ goals=\"{goals}\" path=\"{path}\" planner_id=\"GridBased\"/>\n      <FollowPath\
+    \ path=\"{path}\" controller_id=\"FollowPath\"/>\n    </PipelineSequence>\n  </BehaviorTree>\n\
+    </root>\n"
+
+actions:
+  navigate_to_pose:
+    composable: false
+    action_type: nav2_msgs.action.NavigateToPose
+    action_server: /navigate_to_pose
+    action_goal_template:
+      pose:
+        header:
+          frame_id: ${node.nav_frame}
+        pose: ${node.pose}
+      behavior_tree: ${definitions.default_bt}
+  navigate_to_poses:
+    composable: true
+    action_type: nav2_msgs.action.NavigateThroughPoses
+    action_server: /navigate_through_poses
+    action_goal_template:
+      poses:
+      - header:
+          frame_id: ${node.nav_frame}
+        pose: ${node.pose}
+      behavior_tree: ${definitions.default_bt}
+  limbic_row_follow:
+    composable: false
+    action_type: nav2_msgs.action.NavigateToPose
+    action_server: /limbic_row_follow
+    action_goal_template:
+      pose:
+        header:
+          frame_id: ${node.nav_frame}
+        pose: ${node.pose}
+      behavior_tree: ''
+
+nodes:
+
+# ── Infrastructure ────────────────────────────────────────────────────────────
+
+- meta:
+    map: sowbot_test_map
+    node: HOME
+    pointset: sowbot_test_map
+  node:
+    edges:
+    - action: navigate_to_pose
+      edge_id: HOME_HL_W
+      node: HL_W
+    name: HOME
+    nav_frame: map
+    pose:
+      orientation: {w: 1.0, x: 0.0, y: 0.0, z: 0.0}
+      position: {x: 0.0, y: 0.0, z: 0.0}
+    properties:
+      xy_goal_tolerance: 0.5
+      yaw_goal_tolerance: 0.2
+      dropped_by: sowbot_test_map
+      gps_lat: -8.0000000
+      gps_lon: -36.0000000
+      gps_fix_type: 5
+      gps_hdop: null
+    verts:
+    - {x: -1.5, y: -1.5}
+    - {x:  1.5, y: -1.5}
+    - {x:  1.5, y:  1.5}
+    - {x: -1.5, y:  1.5}
+
+- meta:
+    map: sowbot_test_map
+    node: HL_W
+    pointset: sowbot_test_map
+  node:
+    edges:
+    - action: navigate_to_pose
+      edge_id: HL_W_HOME
+      node: HOME
+    - action: navigate_to_pose
+      edge_id: HL_W_HL_E
+      node: HL_E
+    - action: navigate_to_pose
+      edge_id: HL_W_R1_IN
+      node: R1_IN
+    - action: navigate_to_pose
+      edge_id: HL_W_R2_IN
+      node: R2_IN
+    - action: navigate_to_pose
+      edge_id: HL_W_R3_IN
+      node: R3_IN
+    name: HL_W
+    nav_frame: map
+    pose:
+      orientation: {w: 1.0, x: 0.0, y: 0.0, z: 0.0}
+      position: {x: 0.0, y: -2.5, z: 0.0}
+    properties:
+      xy_goal_tolerance: 0.3
+      yaw_goal_tolerance: 0.1
+      dropped_by: sowbot_test_map
+      gps_lat: -8.0000225
+      gps_lon: -36.0000000
+      gps_fix_type: 5
+      gps_hdop: null
+    verts:
+    - {x: -1.0, y: -1.0}
+    - {x:  1.0, y: -1.0}
+    - {x:  1.0, y:  1.0}
+    - {x: -1.0, y:  1.0}
+
+- meta:
+    map: sowbot_test_map
+    node: HL_E
+    pointset: sowbot_test_map
+  node:
+    edges:
+    - action: navigate_to_pose
+      edge_id: HL_E_HL_W
+      node: HL_W
+    name: HL_E
+    nav_frame: map
+    pose:
+      orientation: {w: 1.0, x: 0.0, y: 0.0, z: 0.0}
+      position: {x: 16.0, y: -2.5, z: 0.0}
+    properties:
+      xy_goal_tolerance: 0.3
+      yaw_goal_tolerance: 0.1
+      dropped_by: sowbot_test_map
+      gps_lat: -8.0000225
+      gps_lon: -35.9998546
+      gps_fix_type: 5
+      gps_hdop: null
+    verts:
+    - {x: -1.0, y: -1.0}
+    - {x:  1.0, y: -1.0}
+    - {x:  1.0, y:  1.0}
+    - {x: -1.0, y:  1.0}
+
+# ── Row 1  (corridor between row1 and row2 posts, y = +1.2 m) ─────────────────
+
+- meta:
+    map: sowbot_test_map
+    node: R1_IN
+    pointset: sowbot_test_map
+  node:
+    edges:
+    - action: navigate_to_pose   # switch to limbic_row_follow when sowbot_row_follow is up
+      edge_id: R1_IN_R1_OUT
+      node: R1_OUT
+    - action: navigate_to_pose
+      edge_id: R1_IN_HL_W
+      node: HL_W
+    name: R1_IN
+    nav_frame: map
+    pose:
+      orientation: {w: 1.0, x: 0.0, y: 0.0, z: 0.0}
+      position: {x: 0.0, y: 1.2, z: 0.0}
+    properties:
+      xy_goal_tolerance: 0.2
+      yaw_goal_tolerance: 0.1
+      dropped_by: sowbot_test_map
+      gps_lat: -7.9999892
+      gps_lon: -36.0000000
+      gps_fix_type: 5
+      gps_hdop: null
+      row_id: 1
+      row_role: entry
+    verts:
+    - {x: -0.5, y: -0.5}
+    - {x:  0.5, y: -0.5}
+    - {x:  0.5, y:  0.5}
+    - {x: -0.5, y:  0.5}
+
+- meta:
+    map: sowbot_test_map
+    node: R1_OUT
+    pointset: sowbot_test_map
+  node:
+    edges:
+    - action: navigate_to_pose
+      edge_id: R1_OUT_HL_E
+      node: HL_E
+    name: R1_OUT
+    nav_frame: map
+    pose:
+      orientation: {w: 1.0, x: 0.0, y: 0.0, z: 0.0}
+      position: {x: 16.0, y: 1.2, z: 0.0}
+    properties:
+      xy_goal_tolerance: 0.2
+      yaw_goal_tolerance: 0.1
+      dropped_by: sowbot_test_map
+      gps_lat: -7.9999892
+      gps_lon: -35.9998546
+      gps_fix_type: 5
+      gps_hdop: null
+      row_id: 1
+      row_role: exit
+    verts:
+    - {x: -0.5, y: -0.5}
+    - {x:  0.5, y: -0.5}
+    - {x:  0.5, y:  0.5}
+    - {x: -0.5, y:  0.5}
+
+# ── Row 2  (corridor between row2 and row3 posts, y = +4.3 m) ─────────────────
+# NOTE: only 0.9 m wide between inflated obstacles. Will become unplannable
+# if the nav2 footprint param is corrected to match the actual robot width.
+
+- meta:
+    map: sowbot_test_map
+    node: R2_IN
+    pointset: sowbot_test_map
+  node:
+    edges:
+    - action: navigate_to_pose   # switch to limbic_row_follow when sowbot_row_follow is up
+      edge_id: R2_IN_R2_OUT
+      node: R2_OUT
+    - action: navigate_to_pose
+      edge_id: R2_IN_HL_W
+      node: HL_W
+    name: R2_IN
+    nav_frame: map
+    pose:
+      orientation: {w: 1.0, x: 0.0, y: 0.0, z: 0.0}
+      position: {x: 0.0, y: 4.3, z: 0.0}
+    properties:
+      xy_goal_tolerance: 0.2
+      yaw_goal_tolerance: 0.1
+      dropped_by: sowbot_test_map
+      gps_lat: -7.9999613
+      gps_lon: -36.0000000
+      gps_fix_type: 5
+      gps_hdop: null
+      row_id: 2
+      row_role: entry
+    verts:
+    - {x: -0.5, y: -0.5}
+    - {x:  0.5, y: -0.5}
+    - {x:  0.5, y:  0.5}
+    - {x: -0.5, y:  0.5}
+
+- meta:
+    map: sowbot_test_map
+    node: R2_OUT
+    pointset: sowbot_test_map
+  node:
+    edges:
+    - action: navigate_to_pose
+      edge_id: R2_OUT_HL_E
+      node: HL_E
+    name: R2_OUT
+    nav_frame: map
+    pose:
+      orientation: {w: 1.0, x: 0.0, y: 0.0, z: 0.0}
+      position: {x: 16.0, y: 4.3, z: 0.0}
+    properties:
+      xy_goal_tolerance: 0.2
+      yaw_goal_tolerance: 0.1
+      dropped_by: sowbot_test_map
+      gps_lat: -7.9999613
+      gps_lon: -35.9998546
+      gps_fix_type: 5
+      gps_hdop: null
+      row_id: 2
+      row_role: exit
+    verts:
+    - {x: -0.5, y: -0.5}
+    - {x:  0.5, y: -0.5}
+    - {x:  0.5, y:  0.5}
+    - {x: -0.5, y:  0.5}
+
+# ── Row 3  (corridor north of row3 posts, y = +7.5 m) ─────────────────────────
+
+- meta:
+    map: sowbot_test_map
+    node: R3_IN
+    pointset: sowbot_test_map
+  node:
+    edges:
+    - action: navigate_to_pose   # switch to limbic_row_follow when sowbot_row_follow is up
+      edge_id: R3_IN_R3_OUT
+      node: R3_OUT
+    - action: navigate_to_pose
+      edge_id: R3_IN_HL_W
+      node: HL_W
+    name: R3_IN
+    nav_frame: map
+    pose:
+      orientation: {w: 1.0, x: 0.0, y: 0.0, z: 0.0}
+      position: {x: 0.0, y: 7.5, z: 0.0}
+    properties:
+      xy_goal_tolerance: 0.2
+      yaw_goal_tolerance: 0.1
+      dropped_by: sowbot_test_map
+      gps_lat: -7.9999325
+      gps_lon: -36.0000000
+      gps_fix_type: 5
+      gps_hdop: null
+      row_id: 3
+      row_role: entry
+    verts:
+    - {x: -0.5, y: -0.5}
+    - {x:  0.5, y: -0.5}
+    - {x:  0.5, y:  0.5}
+    - {x: -0.5, y:  0.5}
+
+- meta:
+    map: sowbot_test_map
+    node: R3_OUT
+    pointset: sowbot_test_map
+  node:
+    edges:
+    - action: navigate_to_pose
+      edge_id: R3_OUT_HL_E
+      node: HL_E
+    name: R3_OUT
+    nav_frame: map
+    pose:
+      orientation: {w: 1.0, x: 0.0, y: 0.0, z: 0.0}
+      position: {x: 16.0, y: 7.5, z: 0.0}
+    properties:
+      xy_goal_tolerance: 0.2
+      yaw_goal_tolerance: 0.1
+      dropped_by: sowbot_test_map
+      gps_lat: -7.9999325
+      gps_lon: -35.9998546
+      gps_fix_type: 5
+      gps_hdop: null
+      row_id: 3
+      row_role: exit
+    verts:
+    - {x: -0.5, y: -0.5}
+    - {x:  0.5, y: -0.5}
+    - {x:  0.5, y:  0.5}
+    - {x: -0.5, y:  0.5}

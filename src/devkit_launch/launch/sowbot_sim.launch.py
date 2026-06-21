@@ -175,13 +175,13 @@ def _topo_nav_nodes(tmap2_file: str, devkit_launch_pkg: str, use_sim_time: bool 
 # ---------------------------------------------------------------------------
 
 def generate_launch_description():
-    pkg_agro          = get_package_share_directory('agro_robot_sim')
+    pkg_agro          = get_package_share_directory('devkit_simulation')
     devkit_launch_pkg = get_package_share_directory('devkit_launch')
 
     world_arg = DeclareLaunchArgument(
         'world',
         default_value='maize.world',
-        description='SDF world file name inside agro_robot_sim/worlds/',
+        description='SDF world file name inside devkit_simulation/worlds/',
     )
     x_arg = DeclareLaunchArgument('x', default_value='0.0')
     y_arg = DeclareLaunchArgument('y', default_value='0.0')

@@ -330,8 +330,8 @@ class DevkitManager:
         # a vmf gt_map.csv via get_maize_topo.py, then build maize.world FROM
         # that map with the forest3d pipeline (topo_to_forest3d.py). The vmf
         # generated.world is no longer launched, so we no longer symlink it.
-        topo_world = ("/workspace/install/agro_robot_sim/share/"
-                      "agro_robot_sim/worlds/maize.world")
+        topo_world = ("/workspace/install/devkit_simulation/share/"
+                      "devkit_simulation/worlds/maize.world")
         world_gen = (
             # Bootstrap node positions only if no map has been authored yet.
             "([ -f /workspace/maps/maize_map ] || ("
