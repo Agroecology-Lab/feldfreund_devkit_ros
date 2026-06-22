@@ -16,15 +16,13 @@ fake clock source, no race condition.
 
 Startup sequence inside this file
 ----------------------------------
-1. sim_launch       — gz sim + robot_state_publisher + spawn + ros_gz_bridge
-                      (ros_gz_bridge starts 2s after spawn exits, per sim.launch.py;
-                      its lifecycle is owned solely by sim.launch.py's
-                      OnProcessExit handler — no separate watchdog/pkill here,
-                      to avoid two supervisors racing over one parameter_bridge
-                      process and leaving /cmd_vel with no live subscriber)
-2. nav2 (t+15s)     — Nav2 nodes with use_sim_time=True; by this point
+1. preflight_pkill  — kills any stale parameter_bridge from a previous run
+2. sim_launch       — gz sim + robot_state_publisher + spawn + ros_gz_bridge
+                      (ros_gz_bridge starts 2s after spawn exits, per sim.launch.py)
+3. nav2 (t+15s)     — Nav2 nodes with use_sim_time=True; by this point
                       /clock is live from the bridge and TF frames carry
                       Gazebo sim-time stamps, so all TF lookups succeed
+4. bridge_watchdog  — revives parameter_bridge if it dies (e.g. gz restart)
 
 Nav2 node helpers (_nav2_sim_nodes, _topo_nav_nodes) are kept here so
 that any future callers can import them via importlib if needed.
@@ -118,12 +116,12 @@ def _nav2_sim_nodes(params_file: str, use_sim_time: bool = True) -> list:
 # Topo nav nodes (kept for importlib callers; not used by this file directly)
 # ---------------------------------------------------------------------------
 
-def _topo_nav_nodes(tmap2_file: str, devkit_bringup_pkg: str, use_sim_time: bool = True) -> list:
+def _topo_nav_nodes(tmap2_file: str, devkit_launch_pkg: str, use_sim_time: bool = True) -> list:
     """Topo nav node list — importlib shim for backwards compatibility."""
     topo_share = get_package_share_directory('topological_navigation')
     map_path = tmap2_file or os.path.join(topo_share, 'config', 'mixed_actions_map.yaml')
 
-    nav2_params = os.path.join(devkit_bringup_pkg, 'config', 'nav2_params_sim.yaml')
+    nav2_params = os.path.join(devkit_launch_pkg, 'config', 'nav2_params_sim.yaml')
     sim_time = {'use_sim_time': use_sim_time}
 
     return [
@@ -175,13 +173,20 @@ def _topo_nav_nodes(tmap2_file: str, devkit_bringup_pkg: str, use_sim_time: bool
 # ---------------------------------------------------------------------------
 
 def generate_launch_description():
-    pkg_agro          = get_package_share_directory('devkit_simulation')
-    devkit_bringup_pkg = get_package_share_directory('devkit_bringup')
+    pkg_agro          = get_package_share_directory('agro_robot_sim')
+    devkit_launch_pkg = get_package_share_directory('devkit_launch')
 
     world_arg = DeclareLaunchArgument(
         'world',
         default_value='maize.world',
-        description='SDF world file name inside devkit_simulation/worlds/',
+        description='SDF world file name inside agro_robot_sim/worlds/',
+    )
+    urdf_arg = DeclareLaunchArgument(
+        'urdf',
+        default_value='sowbot_01.xacro',
+        description='URDF/xacro filename inside agro_robot_sim/urdf/. '
+                    'Use sowbot_01.xacro (TrackedVehicle) or '
+                    'robo_caatinga.urdf.xacro (DiffDrive skid-steer).',
     )
     x_arg = DeclareLaunchArgument('x', default_value='0.0')
     y_arg = DeclareLaunchArgument('y', default_value='0.0')
@@ -204,7 +209,7 @@ def generate_launch_description():
         ),
         launch_arguments={
             'world': LaunchConfiguration('world'),
-            'urdf':  'sowbot_01.xacro',
+            'urdf':  LaunchConfiguration('urdf'),
             'x':     LaunchConfiguration('x'),
             'y':     LaunchConfiguration('y'),
             'z':     LaunchConfiguration('z'),
@@ -213,12 +218,35 @@ def generate_launch_description():
 
     bridge_cfg = os.path.join(pkg_agro, 'config', 'ros_gz_bridge.yaml')
 
+    # Kill any stale bridge from a previous session before sim_launch starts.
+    preflight_pkill = ExecuteProcess(
+        cmd=['/bin/bash', '-c', 'pkill -f parameter_bridge || true'],
+        name='preflight_pkill',
+        output='screen',
+    )
+
+    # Bridge watchdog: revive parameter_bridge if it dies (e.g. gz restart).
+    bridge_watchdog = ExecuteProcess(
+        cmd=[
+            '/bin/bash', '-c',
+            (
+                'while true; do sleep 5; '
+                'pgrep -f parameter_bridge >/dev/null || '
+                'ros2 run ros_gz_bridge parameter_bridge --ros-args '
+                '-p config_file:=' + bridge_cfg + '; '
+                'done'
+            ),
+        ],
+        name='bridge_watchdog',
+        output='screen',
+    )
+
     # ── Nav2 (t+15s) ──────────────────────────────────────────────────────────
     # 15s gives gz sim time to start, the robot to spawn, and ros_gz_bridge
     # to come up and start publishing /clock with RELIABLE QoS.  By the time
     # Nav2 initialises, /clock is live and all TF frames carry Gazebo
     # sim-time stamps — so use_sim_time=True works correctly from the start.
-    nav2_params = os.path.join(devkit_bringup_pkg, 'config', 'nav2_params_sim.yaml')
+    nav2_params = os.path.join(devkit_launch_pkg, 'config', 'nav2_params_sim.yaml')
     nav2 = TimerAction(
         period=15.0,
         actions=_nav2_sim_nodes(nav2_params, use_sim_time=True),
@@ -227,9 +255,12 @@ def generate_launch_description():
     return LaunchDescription([
         gz_resource_path,
         world_arg,
+        urdf_arg,
         x_arg,
         y_arg,
         z_arg,
+        preflight_pkill,
         sim_launch,
+        bridge_watchdog,
         nav2,
     ])
