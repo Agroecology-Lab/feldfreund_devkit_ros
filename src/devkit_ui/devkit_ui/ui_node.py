@@ -2902,6 +2902,26 @@ class NiceGuiNode(Node):
                 _gazebo_daemons: list = []   # Xvfb, x11vnc, websockify for browser mode
                 _gazebo_lbl = ui.label('').classes('text-xs font-mono').style('color:#57606a')
 
+                # Robot model selector — controls which xacro is spawned and
+                # which urdf arg is passed to sowbot_sim.launch.py.
+                # sowbot_01:       TrackedVehicle + TrackController (DART required)
+                # robo_caatinga:   DiffDrive skid-steer (ODE or DART both fine)
+                _ROBOT_MODELS = {
+                    'sowbot (tracked)':      'sowbot_01.xacro',
+                    'caatinga (diff drive)': 'robo_caatinga.urdf.xacro',
+                }
+                _robot_model: dict = {'xacro': 'sowbot_01.xacro'}
+
+                with ui.row().classes('items-center gap-3 mb-1'):
+                    ui.html('<span style="font-size:12px;color:#57606a;'
+                            'font-family:monospace">Robot model</span>')
+                    ui.toggle(
+                        list(_ROBOT_MODELS.keys()),
+                        value='sowbot (tracked)',
+                        on_change=lambda e: _robot_model.update(
+                            xacro=_ROBOT_MODELS[e.value]),
+                    ).props('dense')
+
                 _SIM_ENV = {
                     **os.environ,
                     'TMAP2_FILE': '/workspace/maps/maize_map',
@@ -2921,10 +2941,13 @@ class NiceGuiNode(Node):
                         '</Discovery></Domain></CycloneDDS>'
                     ),
                 }
-                _SIM_CMD = [
-                    'ros2', 'launch', 'devkit_bringup', 'sowbot_sim.launch.py',
-                    'world:=maize.world',
-                ]
+                def _sim_cmd() -> list:
+                    """Build the sowbot_sim launch command using the current robot model."""
+                    return [
+                        'ros2', 'launch', 'devkit_launch', 'sowbot_sim.launch.py',
+                        'world:=maize.world',
+                        f'urdf:={_robot_model["xacro"]}',
+                    ]
 
                 def _start_gazebo_native():
                     if _gazebo_proc[0] is not None and _gazebo_proc[0].poll() is None:
@@ -2937,12 +2960,13 @@ class NiceGuiNode(Node):
                         # crashed launch is diagnosable — tail /tmp/gazebo_sim.log.
                         _gz_log = open('/tmp/gazebo_sim.log', 'w')
                         _gazebo_proc[0] = subprocess.Popen(
-                            _SIM_CMD,
+                            _sim_cmd(),
                             stdout=_gz_log, stderr=subprocess.STDOUT,
                             env=env,
                             start_new_session=True,
                         )
-                        _gazebo_lbl.set_text(f'native window — pid {_gazebo_proc[0].pid}')
+                        _gazebo_lbl.set_text(
+                            f'native window — {_robot_model["xacro"]} — pid {_gazebo_proc[0].pid}')
                         _gazebo_lbl.style('color:#1a7f37')
                     except Exception as exc:
                         _gazebo_lbl.set_text(f'ERROR: {exc}')
@@ -2980,12 +3004,13 @@ class NiceGuiNode(Node):
                         # diagnosable — tail /tmp/gazebo_sim.log.
                         _gz_log = open('/tmp/gazebo_sim.log', 'w')
                         _gazebo_proc[0] = subprocess.Popen(
-                            _SIM_CMD,
+                            _sim_cmd(),
                             stdout=_gz_log, stderr=subprocess.STDOUT,
                             env=env,
                             start_new_session=True,
                         )
-                        _gazebo_lbl.set_text(f'browser mode — pid {_gazebo_proc[0].pid}')
+                        _gazebo_lbl.set_text(
+                            f'browser mode — {_robot_model["xacro"]} — pid {_gazebo_proc[0].pid}')
                         _gazebo_lbl.style('color:#1a7f37')
                     except Exception as exc:
                         _gazebo_lbl.set_text(f'ERROR: {exc}')
@@ -3020,8 +3045,8 @@ class NiceGuiNode(Node):
                 # rather than silently no-op. The generator script is mounted
                 # at /workspace/topo_to_forest3d.py by manage.py.
                 _MAP_FILE   = '/workspace/maps/maize_map'
-                _WORLD_FILE = ('/workspace/install/devkit_simulation/share/'
-                               'devkit_simulation/worlds/maize.world')
+                _WORLD_FILE = ('/workspace/install/agro_robot_sim/share/'
+                               'agro_robot_sim/worlds/maize.world')
 
                 def _rebuild_world():
                     if _gazebo_proc[0] is not None and _gazebo_proc[0].poll() is None:
@@ -3069,9 +3094,9 @@ class NiceGuiNode(Node):
                     try:
                         env = {**os.environ, 'DISPLAY': os.environ.get('DISPLAY', ':0'),
                                'GZ_SIM_RESOURCE_PATH': '/workspace/models' + (':' + os.environ['GZ_SIM_RESOURCE_PATH'] if os.environ.get('GZ_SIM_RESOURCE_PATH') else '')}
-                        pkg = subprocess.check_output(['ros2', 'pkg', 'prefix', 'devkit_simulation'], text=True).strip()
+                        pkg = subprocess.check_output(['ros2', 'pkg', 'prefix', 'agro_robot_sim'], text=True).strip()
                         _gazebo_proc[0] = subprocess.Popen(
-                            ['gz', 'sim', '-r', f'{pkg}/share/devkit_simulation/worlds/maize.world'],
+                            ['gz', 'sim', '-r', f'{pkg}/share/agro_robot_sim/worlds/maize.world'],
                             stdout=open('/tmp/gazebo_world.log', 'w'), stderr=subprocess.STDOUT,
                             env=env, start_new_session=True)
                         _gazebo_lbl.set_text(f'world launched — pid {_gazebo_proc[0].pid}')
@@ -3085,9 +3110,9 @@ class NiceGuiNode(Node):
                         _spawn_lbl.set_text('already running')
                         return
                     try:
-                        pkg = subprocess.check_output(['ros2', 'pkg', 'prefix', 'devkit_simulation'], text=True).strip()
-                        xacro_file    = f'{pkg}/share/devkit_simulation/urdf/sowbot_01.xacro'
-                        bridge_config = f'{pkg}/share/devkit_simulation/config/ros_gz_bridge.yaml'
+                        pkg = subprocess.check_output(['ros2', 'pkg', 'prefix', 'agro_robot_sim'], text=True).strip()
+                        xacro_file    = f'{pkg}/share/agro_robot_sim/urdf/{_robot_model["xacro"]}'
+                        bridge_config = f'{pkg}/share/agro_robot_sim/config/ros_gz_bridge.yaml'
                         cmd = (f'xacro {xacro_file} > /tmp/agro_robot_resolved.urdf && '
                                f'ros2 run ros_gz_sim create -name agro_robot '
                                f'-string "$(cat /tmp/agro_robot_resolved.urdf)" -x 0.0 -y 0.0 -z 0.3 && '
@@ -3096,7 +3121,7 @@ class NiceGuiNode(Node):
                         _spawn_proc[0] = subprocess.Popen(['/bin/bash', '-c', cmd],
                             stdout=open('/tmp/gazebo_spawn.log', 'w'), stderr=subprocess.STDOUT,
                             start_new_session=True)
-                        _spawn_lbl.set_text(f'spawning — pid {_spawn_proc[0].pid}')
+                        _spawn_lbl.set_text(f'spawning {_robot_model["xacro"]} — pid {_spawn_proc[0].pid}')
                         _spawn_lbl.style('color:#1a7f37')
                     except Exception as exc:
                         _spawn_lbl.set_text(f'ERROR: {exc}')
