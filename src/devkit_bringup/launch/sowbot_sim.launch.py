@@ -116,12 +116,12 @@ def _nav2_sim_nodes(params_file: str, use_sim_time: bool = True) -> list:
 # Topo nav nodes (kept for importlib callers; not used by this file directly)
 # ---------------------------------------------------------------------------
 
-def _topo_nav_nodes(tmap2_file: str, devkit_launch_pkg: str, use_sim_time: bool = True) -> list:
+def _topo_nav_nodes(tmap2_file: str, devkit_bringup_pkg: str, use_sim_time: bool = True) -> list:
     """Topo nav node list — importlib shim for backwards compatibility."""
     topo_share = get_package_share_directory('topological_navigation')
     map_path = tmap2_file or os.path.join(topo_share, 'config', 'mixed_actions_map.yaml')
 
-    nav2_params = os.path.join(devkit_launch_pkg, 'config', 'nav2_params_sim.yaml')
+    nav2_params = os.path.join(devkit_bringup_pkg, 'config', 'nav2_params_sim.yaml')
     sim_time = {'use_sim_time': use_sim_time}
 
     return [
@@ -173,18 +173,18 @@ def _topo_nav_nodes(tmap2_file: str, devkit_launch_pkg: str, use_sim_time: bool 
 # ---------------------------------------------------------------------------
 
 def generate_launch_description():
-    pkg_agro          = get_package_share_directory('agro_robot_sim')
-    devkit_launch_pkg = get_package_share_directory('devkit_launch')
+    pkg_agro           = get_package_share_directory('devkit_simulation')
+    devkit_bringup_pkg = get_package_share_directory('devkit_bringup')
 
     world_arg = DeclareLaunchArgument(
         'world',
         default_value='maize.world',
-        description='SDF world file name inside agro_robot_sim/worlds/',
+        description='SDF world file name inside devkit_simulation/worlds/',
     )
     urdf_arg = DeclareLaunchArgument(
         'urdf',
         default_value='sowbot_01.xacro',
-        description='URDF/xacro filename inside agro_robot_sim/urdf/. '
+        description='URDF/xacro filename inside devkit_simulation/urdf/. '
                     'Use sowbot_01.xacro (TrackedVehicle) or '
                     'robo_caatinga.urdf.xacro (DiffDrive skid-steer).',
     )
@@ -246,7 +246,7 @@ def generate_launch_description():
     # to come up and start publishing /clock with RELIABLE QoS.  By the time
     # Nav2 initialises, /clock is live and all TF frames carry Gazebo
     # sim-time stamps — so use_sim_time=True works correctly from the start.
-    nav2_params = os.path.join(devkit_launch_pkg, 'config', 'nav2_params_sim.yaml')
+    nav2_params = os.path.join(devkit_bringup_pkg, 'config', 'nav2_params_sim.yaml')
     nav2 = TimerAction(
         period=15.0,
         actions=_nav2_sim_nodes(nav2_params, use_sim_time=True),
