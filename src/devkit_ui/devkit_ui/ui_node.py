@@ -2944,7 +2944,7 @@ class NiceGuiNode(Node):
                 def _sim_cmd() -> list:
                     """Build the sowbot_sim launch command using the current robot model."""
                     return [
-                        'ros2', 'launch', 'devkit_launch', 'sowbot_sim.launch.py',
+                        'ros2', 'launch', 'devkit_bringup', 'sowbot_sim.launch.py',
                         'world:=maize.world',
                         f'urdf:={_robot_model["xacro"]}',
                     ]
@@ -3045,8 +3045,8 @@ class NiceGuiNode(Node):
                 # rather than silently no-op. The generator script is mounted
                 # at /workspace/topo_to_forest3d.py by manage.py.
                 _MAP_FILE   = '/workspace/maps/maize_map'
-                _WORLD_FILE = ('/workspace/install/agro_robot_sim/share/'
-                               'agro_robot_sim/worlds/maize.world')
+                _WORLD_FILE = ('/workspace/install/devkit_simulation/share/'
+                               'devkit_simulation/worlds/maize.world')
 
                 def _rebuild_world():
                     if _gazebo_proc[0] is not None and _gazebo_proc[0].poll() is None:
@@ -3090,7 +3090,7 @@ class NiceGuiNode(Node):
                 # Hardcoded install prefix — avoids shelling out to
                 # `ros2 pkg prefix` which fails when AMENT_PREFIX_PATH
                 # is not set in the UI node's subprocess environment.
-                _AGRO_PKG = '/workspace/install/agro_robot_sim/share/agro_robot_sim'
+                _AGRO_PKG = '/workspace/install/devkit_simulation/share/devkit_simulation'
 
                 def _launch_world():
                     if _gazebo_proc[0] is not None and _gazebo_proc[0].poll() is None:
