@@ -30,7 +30,7 @@ from rclpy.callback_groups import ReentrantCallbackGroup
 from rclpy.executors import MultiThreadedExecutor
 from rclpy.node import Node
 
-from geometry_msgs.msg import Pose, PoseStamped, Quaternion
+from geometry_msgs.msg import Pose, PoseStamped
 from nav2_msgs.action import (
     FollowWaypoints,
     NavigateThroughPoses,
@@ -42,7 +42,6 @@ from rosgraph_msgs.msg import Clock
 from topological_nav_simulator.virtual_robot import (
     VirtualRobot,
     _euler_from_quaternion,
-    _lerp,
     _quaternion_from_yaw,
     _slerp_yaw,
 )
