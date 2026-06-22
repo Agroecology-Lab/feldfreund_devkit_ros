@@ -116,12 +116,12 @@ def _nav2_sim_nodes(params_file: str, use_sim_time: bool = True) -> list:
 # Topo nav nodes (kept for importlib callers; not used by this file directly)
 # ---------------------------------------------------------------------------
 
-def _topo_nav_nodes(tmap2_file: str, devkit_bringup_pkg: str, use_sim_time: bool = True) -> list:
+def _topo_nav_nodes(tmap2_file: str, devkit_launch_pkg: str, use_sim_time: bool = True) -> list:
     """Topo nav node list — importlib shim for backwards compatibility."""
     topo_share = get_package_share_directory('topological_navigation')
     map_path = tmap2_file or os.path.join(topo_share, 'config', 'mixed_actions_map.yaml')
 
-    nav2_params = os.path.join(devkit_bringup_pkg, 'config', 'nav2_params_sim.yaml')
+    nav2_params = os.path.join(devkit_launch_pkg, 'config', 'nav2_params_sim.yaml')
     sim_time = {'use_sim_time': use_sim_time}
 
     return [
@@ -173,8 +173,8 @@ def _topo_nav_nodes(tmap2_file: str, devkit_bringup_pkg: str, use_sim_time: bool
 # ---------------------------------------------------------------------------
 
 def generate_launch_description():
-    pkg_agro           = get_package_share_directory('devkit_simulation')
-    devkit_bringup_pkg = get_package_share_directory('devkit_bringup')
+    pkg_agro          = get_package_share_directory('devkit_simulation')
+    devkit_launch_pkg = get_package_share_directory('devkit_bringup')
 
     world_arg = DeclareLaunchArgument(
         'world',
@@ -201,6 +201,11 @@ def generate_launch_description():
         '/share/virtual_maize_field/models'
         + (':' + existing if existing else ''),
     )
+
+    # DEVKIT_URDF is read by sim.launch.py at generate_launch_description()
+    # time to resolve xacro_file_eager — launch_arguments can't be used there
+    # because substitutions aren't yet evaluated when os.path.join runs.
+    set_urdf_env = SetEnvironmentVariable('DEVKIT_URDF', LaunchConfiguration('urdf'))
 
     # ── Gazebo + robot_state_publisher + spawn + ros_gz_bridge ───────────────
     sim_launch = IncludeLaunchDescription(
@@ -246,7 +251,7 @@ def generate_launch_description():
     # to come up and start publishing /clock with RELIABLE QoS.  By the time
     # Nav2 initialises, /clock is live and all TF frames carry Gazebo
     # sim-time stamps — so use_sim_time=True works correctly from the start.
-    nav2_params = os.path.join(devkit_bringup_pkg, 'config', 'nav2_params_sim.yaml')
+    nav2_params = os.path.join(devkit_launch_pkg, 'config', 'nav2_params_sim.yaml')
     nav2 = TimerAction(
         period=15.0,
         actions=_nav2_sim_nodes(nav2_params, use_sim_time=True),
@@ -254,6 +259,7 @@ def generate_launch_description():
 
     return LaunchDescription([
         gz_resource_path,
+        set_urdf_env,
         world_arg,
         urdf_arg,
         x_arg,
