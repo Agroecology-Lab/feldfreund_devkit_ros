@@ -3,6 +3,7 @@
 import threading
 from pathlib import Path
 import os
+import logging
 
 import rclpy
 from feldfreund_devkit import FeldfreundHardware, FeldfreundSimulation, System, api
@@ -74,13 +75,18 @@ def on_startup() -> None:
     # Priority 3: Relative path from script (host-side execution fallback)
     if not config_path.exists():
         config_path = Path(__file__).parents[3] / 'devkit_bringup/config/feldfreund.py'
+    
+    logging.basicConfig(level=logging.INFO, format="%(levelname)s: %(message)s")
+    log = logging.getLogger("devkit_driver.startup")
+
 
     if not config_path.exists():
         # Node cannot safely initialize without a hardware definition
-        print(f"FATAL: Configuration file not found at {config_path}")
+        log.critical("Configuration file not found at %s", config_path)
         os._exit(1)
 
-    print(f"SYSTEM: Loading hardware configuration from {config_path}")
+    log.info("Loading hardware configuration from %s", config_path)
+
 
     config = config_from_file(str(config_path))
     system = System(config)
