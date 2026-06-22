@@ -1,8 +1,0 @@
-.git/
-__pycache__/
-.mypy_cache/
-.pytest_cache/
-.DS_Store
-*.tmp
-.env
-.venv
