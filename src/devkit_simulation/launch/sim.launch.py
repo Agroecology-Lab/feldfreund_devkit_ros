@@ -71,9 +71,11 @@ def generate_launch_description():
     )
 
     # ── 3. Spawn robot ────────────────────────────────────────────────────────
-    # xacro_file_eager is resolved at generate time so the bash -c string
-    # always receives a real path, not an unresolved substitution token.
-    xacro_file_eager = os.path.join(pkg_share, "urdf", "sowbot_01.xacro")
+    # xacro_file_eager cannot use LaunchConfiguration (it's a substitution, not
+    # a string at generate time).  We read the env var DEVKIT_URDF if set so
+    # the UI can pass the selected model; fallback is sowbot_01.xacro.
+    _urdf_name = os.environ.get("DEVKIT_URDF", "sowbot_01.xacro")
+    xacro_file_eager = os.path.join(pkg_share, "urdf", _urdf_name)
     spawn_entity = ExecuteProcess(
         cmd=[
             "/bin/bash", "-c",
