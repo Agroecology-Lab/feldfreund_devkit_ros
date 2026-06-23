@@ -266,13 +266,6 @@ RUN clone() { \
 RUN sed -i 's/default_value="Test Rover"/default_value=""/' \
       src/ublox_dgnss/ublox_dgnss/launch/ublox_mb+r_rover.launch.py
 
-# Patch fusioncore: BEST_EFFORT QoS for /gnss/fix (ublox publishes BEST_EFFORT;
-# fusioncore's `10` shorthand is RELIABLE → never connects). grep halts the
-# build if upstream changes the subscription form.
-RUN awk '/create_subscription<sensor_msgs::msg::NavSatFix>/ { in_sub=1 } in_sub && /, 10,/ { sub(/, 10,/, ", rclcpp::SensorDataQoS(),"); in_sub=0 } { print }' \
-      src/fusioncore/fusioncore_ros/src/fusion_node.cpp > /tmp/_fc.cpp && \
-    mv /tmp/_fc.cpp src/fusioncore/fusioncore_ros/src/fusion_node.cpp && \
-    grep -q "rclcpp::SensorDataQoS()" src/fusioncore/fusioncore_ros/src/fusion_node.cpp
 
 # ============================================================
 # Stage 7.5: Workspace — Local Sources
