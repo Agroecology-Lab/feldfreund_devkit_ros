@@ -211,7 +211,6 @@ lifecycle_manager_navigation:
       - controller_server
       - smoother_server
       - planner_server
-      - route_server
       - behavior_server
       - bt_navigator
       - waypoint_follower
