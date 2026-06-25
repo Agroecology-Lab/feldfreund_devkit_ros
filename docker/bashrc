@@ -6,8 +6,7 @@ test -f /workspace/install/local_setup.bash && \
     source /workspace/install/local_setup.bash
 
 # CycloneDDS — raise participant cap (default ~120 exhausted by devkit + Nav2 burst)
-export CYCLONEDDS_URI='<CycloneDDS><Domain><Discovery><MaxAutoParticipantIndex>200</MaxAutoParticipantIndex></Discovery></Domain></CycloneDDS>'
-
+export CYCLONEDDS_URI='<CycloneDDS><Domain><General><Interfaces><NetworkInterface name="lo" priority="default" multicast="true"/></Interfaces></General><Discovery><MaxAutoParticipantIndex>200</MaxAutoParticipantIndex><ParticipantIndex>auto</ParticipantIndex></Discovery></Domain></CycloneDDS>'
 # Mesa — pin to llvmpipe (no /dev/dri in container; harmless if GPU appears later)
 export MESA_LOADER_DRIVER_OVERRIDE=llvmpipe
 export GALLIUM_DRIVER=llvmpipe
