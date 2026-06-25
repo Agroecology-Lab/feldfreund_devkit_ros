@@ -2935,11 +2935,6 @@ class NiceGuiNode(Node):
                         + (':' + os.environ['GZ_SIM_RESOURCE_PATH']
                            if os.environ.get('GZ_SIM_RESOURCE_PATH') else '')
                     ),
-                    'CYCLONEDDS_URI': (
-                        '<CycloneDDS><Domain><Discovery>'
-                        '<MaxAutoParticipantIndex>200</MaxAutoParticipantIndex>'
-                        '</Discovery></Domain></CycloneDDS>'
-                    ),
                 }
                 def _sim_cmd() -> list:
                     """Build the sowbot_sim launch command using the current robot model."""
