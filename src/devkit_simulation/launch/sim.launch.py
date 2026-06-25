@@ -67,6 +67,13 @@ def generate_launch_description():
                 Command(["xacro ", xacro_file]), value_type=str
             ),
             "use_sim_time": True,
+            # Republish fixed joints on /tf at 50 Hz instead of one-shot
+            # /tf_static. Without this, Nav2 nodes that join after sim startup
+            # miss the transient-local /tf_static delivery (stamped at t=0 sim
+            # time, appears ancient by the time Nav2 is alive) and the
+            # base_footprint -> base_link transform is never seen.
+            "publish_frequency": 50.0,
+            "ignore_timestamp": True,
         }],
     )
 
