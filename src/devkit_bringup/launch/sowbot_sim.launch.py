@@ -80,7 +80,6 @@ def _nav2_sim_nodes(params_file: str, use_sim_time: bool = True) -> list:
         ),
         Node(package='nav2_smoother',          executable='smoother_server',   name='smoother_server',   **common),
         Node(package='nav2_planner',           executable='planner_server',    name='planner_server',    **common),
-        Node(package='nav2_route',             executable='route_server',      name='route_server',      **common),
         Node(
             package='nav2_behaviors',
             executable='behavior_server',
