@@ -9,8 +9,8 @@ Reference open hardware stack(s) under development at [Sowbot.co.uk](https://sow
 
 [Quick start](https://github.com/Agroecology-Lab/feldfreund_devkit_ros#quick-start)
 
-Branch: `caatinga-dev` | ROS 2 Jazzy | Upstream: [zauberzeug/feldfreund\_devkit\_ros](https://github.com/zauberzeug/feldfreund_devkit_ros)  
-**Collaborators welcome.** See [CONTRIBUTING.md](CONTRIBUTING.md). Contact: [sowbot.co.uk](https://sowbot.co.uk)
+**Collaborators welcome.** See [CONTRIBUTING.md](CONTRIBUTING.md). [Quick start](https://github.com/Agroecology-Lab/feldfreund_devkit_ros#quick-start)
+Contact: [sowbot.co.uk](https://sowbot.co.uk)
 
 ## Sowbot Roadmap
 
