@@ -224,7 +224,7 @@ def generate_launch_description():
 
     # Kill any stale bridge from a previous session before sim_launch starts.
     preflight_pkill = ExecuteProcess(
-        cmd=['/bin/bash', '-c', 'pkill -f parameter_bridge || true'],
+        cmd=['/bin/bash', '-c', 'pkill -f "gz sim" || true; pkill -f ros_gz_sim || true; pkill -f parameter_bridge || true'],
         name='preflight_pkill',
         output='screen',
     )

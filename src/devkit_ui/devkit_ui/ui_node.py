@@ -3012,17 +3012,18 @@ class NiceGuiNode(Node):
                         _gazebo_lbl.style('color:#cf222e')
 
                 def _stop_gazebo():
-                    if _gazebo_proc[0] is not None:
-                        try:
-                            pgid = os.getpgid(_gazebo_proc[0].pid)
-                            os.killpg(pgid, signal.SIGTERM)
-                            _gazebo_proc[0].wait(timeout=5)
-                        except subprocess.TimeoutExpired:
-                            os.killpg(pgid, signal.SIGKILL)
-                            _gazebo_proc[0].wait(timeout=2)
-                        except Exception:
-                            pass
-                        _gazebo_proc[0] = None
+                    for proc_var in (_gazebo_proc, _spawn_proc):
+                        if proc_var[0] is not None:
+                            try:
+                                pgid = os.getpgid(proc_var[0].pid)
+                                os.killpg(pgid, signal.SIGTERM)
+                                proc_var[0].wait(timeout=5)
+                            except subprocess.TimeoutExpired:
+                                os.killpg(pgid, signal.SIGKILL)
+                                proc_var[0].wait(timeout=2)
+                            except Exception:
+                                pass
+                            proc_var[0] = None
                     for p in _gazebo_daemons:
                         try:
                             p.terminate()
@@ -3111,7 +3112,8 @@ class NiceGuiNode(Node):
                     try:
                         xacro_file    = f'{_AGRO_PKG}/urdf/{_robot_model["xacro"]}'
                         bridge_config = f'{_AGRO_PKG}/config/ros_gz_bridge.yaml'
-                        cmd = (f'xacro {xacro_file} > /tmp/agro_robot_resolved.urdf && '
+                        cmd = (f'ros2 run ros_gz_sim delete -name agro_robot 2>/dev/null; '
+                               f'xacro {xacro_file} > /tmp/agro_robot_resolved.urdf && '
                                f'ros2 run ros_gz_sim create -name agro_robot '
                                f'-string "$(cat /tmp/agro_robot_resolved.urdf)" -x 0.0 -y 0.0 -z 0.3 && '
                                f'sleep 2 && ros2 run ros_gz_bridge parameter_bridge --ros-args '
