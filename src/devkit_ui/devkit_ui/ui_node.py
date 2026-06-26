@@ -3031,9 +3031,6 @@ class NiceGuiNode(Node):
                         except Exception:
                             pass
                     _gazebo_daemons.clear()
-                    subprocess.run(['pkill', '-f', 'gz sim'], capture_output=True)
-                    subprocess.run(['pkill', '-f', 'parameter_bridge'], capture_output=True)
-                    subprocess.run(['pkill', '-f', 'ros_gz_sim'], capture_output=True)
                     _gazebo_lbl.set_text('stopped')
                     _gazebo_lbl.style('color:#57606a')
 
