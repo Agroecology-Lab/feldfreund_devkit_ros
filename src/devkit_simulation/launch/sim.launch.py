@@ -78,11 +78,12 @@ def generate_launch_description():
     )
 
     # ── 3. Spawn robot ────────────────────────────────────────────────────────
-    # xacro_file_eager cannot use LaunchConfiguration (it's a substitution, not
-    # a string at generate time).  We read the env var DEVKIT_URDF if set so
-    # the UI can pass the selected model; fallback is sowbot_01.xacro.
-    _urdf_name = os.environ.get("DEVKIT_URDF", "sowbot_01.xacro")
-    xacro_file_eager = os.path.join(pkg_share, "urdf", _urdf_name)
+    # DEVKIT_URDF is set by sowbot_sim.launch.py via SetEnvironmentVariable
+    # before this subprocess starts, so the bash variable resolves at runtime
+    # to the model selected in the UI.  os.environ.get() is NOT used here
+    # because SetEnvironmentVariable is a substitution that hasn't evaluated
+    # yet when generate_launch_description() runs — it would always be empty.
+    urdf_dir = os.path.join(pkg_share, "urdf")
     spawn_entity = ExecuteProcess(
         cmd=[
             "/bin/bash", "-c",
@@ -92,7 +93,9 @@ def generate_launch_description():
                 'echo "[spawn] gz service ready — waiting 30s for GUI to finish init..."; '
                 'sleep 30; '
                 'echo "[spawn] spawning agro_robot"; '
-                f'URDF=$(xacro {xacro_file_eager}) && '
+                f'_URDF="${{DEVKIT_URDF:-sowbot_01.xacro}}"; '
+                f'echo "[spawn] using URDF: {urdf_dir}/$_URDF"; '
+                f'URDF=$(xacro {urdf_dir}/$_URDF) && '
                 'ros2 run ros_gz_sim create'
                 ' -name agro_robot'
                 ' -string "$URDF"'
