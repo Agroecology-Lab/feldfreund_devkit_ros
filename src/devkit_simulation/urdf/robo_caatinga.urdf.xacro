@@ -244,6 +244,8 @@
       <child link="${prefix}_wheel"/>
       <origin xyz="${x} ${y} 0" rpy="0 0 0"/>
       <axis xyz="0 1 0"/>
+      <limit effort="100.0" velocity="10.0"/>
+      <dynamics damping="0.1" friction="0.1"/>
     </joint>
   </xacro:macro>
 
