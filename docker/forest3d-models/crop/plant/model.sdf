@@ -5,12 +5,12 @@
         <link name="link">
             <collision name="collision">
                 <geometry>
-                    <mesh><uri>mesh/plant_collision.glb</uri></mesh>
+                    <mesh><uri>mesh/plant_collision.glb</uri><scale>0.7 0.7 0.7</scale></mesh>
                 </geometry>
             </collision>
             <visual name="visual">
                 <geometry>
-                    <mesh><uri>mesh/plant.glb</uri></mesh>
+                    <mesh><uri>mesh/plant.glb</uri><scale>0.7 0.7 0.7</scale></mesh>
                 </geometry>
             </visual>
         </link>

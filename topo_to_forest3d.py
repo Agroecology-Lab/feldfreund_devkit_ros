@@ -398,10 +398,10 @@ if __name__ == '__main__':
                     help='Output forest3d.yaml path')
     ap.add_argument('--headland', type=float, default=2.0,
                     help='Headland width in metres')
-    ap.add_argument('--row-width', type=float, default=0.8,
+    ap.add_argument('--row-width', type=float, default=0.9,
                     help='Default crop row width (m) if spacing cannot be '
                          'measured from the data')
-    ap.add_argument('--plant-spacing', type=float, default=0.8,
+    ap.add_argument('--plant-spacing', type=float, default=1.2,
                     help='Spacing between plants along a row (m). Forest3D '
                          'places int(row_length / plant_spacing) plants per row.')
     ap.add_argument('--density', type=int, default=None,

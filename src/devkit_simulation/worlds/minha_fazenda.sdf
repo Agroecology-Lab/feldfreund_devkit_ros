@@ -116,91 +116,91 @@
          ════════════════════════════════════════════════════════════════════ -->
 
     <!-- Row 1 — y ≈ 0 -->
-    <model name='row1_post_0'><static>true</static><pose>2.028 -0.340 1.095 0 0 -0.0032</pose>
-      <link name='link'><collision name='c'><geometry><box><size>0.119 0.117 2.189</size></box></geometry></collision>
-      <visual name='v'><geometry><box><size>0.119 0.117 2.189</size></box></geometry><material><ambient>0.4 0.6 0.2 1</ambient></material></visual></link></model>
+    <model name='row1_post_0'><static>true</static><pose>2.028 -0.340 0.766 0 0 -0.0032</pose>
+      <link name='link'><collision name='c'><geometry><box><size>0.083 0.082 1.532</size></box></geometry></collision>
+      <visual name='v'><geometry><box><size>0.083 0.082 1.532</size></box></geometry><material><ambient>0.4 0.6 0.2 1</ambient></material></visual></link></model>
 
-    <model name='row1_post_1'><static>true</static><pose>3.912 -0.438 1.095 0 0 -0.0035</pose>
-      <link name='link'><collision name='c'><geometry><box><size>0.119 0.117 2.189</size></box></geometry></collision>
-      <visual name='v'><geometry><box><size>0.119 0.117 2.189</size></box></geometry><material><ambient>0.4 0.6 0.2 1</ambient></material></visual></link></model>
+    <model name='row1_post_1'><static>true</static><pose>3.912 -0.438 0.766 0 0 -0.0035</pose>
+      <link name='link'><collision name='c'><geometry><box><size>0.083 0.082 1.532</size></box></geometry></collision>
+      <visual name='v'><geometry><box><size>0.083 0.082 1.532</size></box></geometry><material><ambient>0.4 0.6 0.2 1</ambient></material></visual></link></model>
 
-    <model name='row1_post_2'><static>true</static><pose>6.060 -0.577 1.095 0 0 -0.0014</pose>
-      <link name='link'><collision name='c'><geometry><box><size>0.119 0.117 2.189</size></box></geometry></collision>
-      <visual name='v'><geometry><box><size>0.119 0.117 2.189</size></box></geometry><material><ambient>0.4 0.6 0.2 1</ambient></material></visual></link></model>
+    <model name='row1_post_2'><static>true</static><pose>6.060 -0.577 0.766 0 0 -0.0014</pose>
+      <link name='link'><collision name='c'><geometry><box><size>0.083 0.082 1.532</size></box></geometry></collision>
+      <visual name='v'><geometry><box><size>0.083 0.082 1.532</size></box></geometry><material><ambient>0.4 0.6 0.2 1</ambient></material></visual></link></model>
 
-    <model name='row1_post_3'><static>true</static><pose>8.005 -0.771 1.095 0 0 -0.0019</pose>
-      <link name='link'><collision name='c'><geometry><box><size>0.119 0.117 2.189</size></box></geometry></collision>
-      <visual name='v'><geometry><box><size>0.119 0.117 2.189</size></box></geometry><material><ambient>0.4 0.6 0.2 1</ambient></material></visual></link></model>
+    <model name='row1_post_3'><static>true</static><pose>8.005 -0.771 0.766 0 0 -0.0019</pose>
+      <link name='link'><collision name='c'><geometry><box><size>0.083 0.082 1.532</size></box></geometry></collision>
+      <visual name='v'><geometry><box><size>0.083 0.082 1.532</size></box></geometry><material><ambient>0.4 0.6 0.2 1</ambient></material></visual></link></model>
 
-    <model name='row1_post_4'><static>true</static><pose>9.950 -0.888 1.095 0 0 -0.0026</pose>
-      <link name='link'><collision name='c'><geometry><box><size>0.119 0.117 2.189</size></box></geometry></collision>
-      <visual name='v'><geometry><box><size>0.119 0.117 2.189</size></box></geometry><material><ambient>0.4 0.6 0.2 1</ambient></material></visual></link></model>
+    <model name='row1_post_4'><static>true</static><pose>9.950 -0.888 0.766 0 0 -0.0026</pose>
+      <link name='link'><collision name='c'><geometry><box><size>0.083 0.082 1.532</size></box></geometry></collision>
+      <visual name='v'><geometry><box><size>0.083 0.082 1.532</size></box></geometry><material><ambient>0.4 0.6 0.2 1</ambient></material></visual></link></model>
 
-    <model name='row1_post_5'><static>true</static><pose>12.051 -0.970 1.095 0 0 -0.0035</pose>
-      <link name='link'><collision name='c'><geometry><box><size>0.119 0.117 2.189</size></box></geometry></collision>
-      <visual name='v'><geometry><box><size>0.119 0.117 2.189</size></box></geometry><material><ambient>0.4 0.6 0.2 1</ambient></material></visual></link></model>
+    <model name='row1_post_5'><static>true</static><pose>12.051 -0.970 0.766 0 0 -0.0035</pose>
+      <link name='link'><collision name='c'><geometry><box><size>0.083 0.082 1.532</size></box></geometry></collision>
+      <visual name='v'><geometry><box><size>0.083 0.082 1.532</size></box></geometry><material><ambient>0.4 0.6 0.2 1</ambient></material></visual></link></model>
 
-    <model name='row1_post_6'><static>true</static><pose>14.192 -1.132 1.095 0 0 -0.0020</pose>
-      <link name='link'><collision name='c'><geometry><box><size>0.119 0.117 2.189</size></box></geometry></collision>
-      <visual name='v'><geometry><box><size>0.119 0.117 2.189</size></box></geometry><material><ambient>0.4 0.6 0.2 1</ambient></material></visual></link></model>
+    <model name='row1_post_6'><static>true</static><pose>14.192 -1.132 0.766 0 0 -0.0020</pose>
+      <link name='link'><collision name='c'><geometry><box><size>0.083 0.082 1.532</size></box></geometry></collision>
+      <visual name='v'><geometry><box><size>0.083 0.082 1.532</size></box></geometry><material><ambient>0.4 0.6 0.2 1</ambient></material></visual></link></model>
 
     <!-- Row 2 — y ≈ 2.9 -->
-    <model name='row2_post_0'><static>true</static><pose>1.909 2.922 1.095 0 0 -0.0024</pose>
-      <link name='link'><collision name='c'><geometry><box><size>0.119 0.117 2.189</size></box></geometry></collision>
-      <visual name='v'><geometry><box><size>0.119 0.117 2.189</size></box></geometry><material><ambient>0.4 0.6 0.2 1</ambient></material></visual></link></model>
+    <model name='row2_post_0'><static>true</static><pose>1.909 2.922 0.766 0 0 -0.0024</pose>
+      <link name='link'><collision name='c'><geometry><box><size>0.083 0.082 1.532</size></box></geometry></collision>
+      <visual name='v'><geometry><box><size>0.083 0.082 1.532</size></box></geometry><material><ambient>0.4 0.6 0.2 1</ambient></material></visual></link></model>
 
-    <model name='row2_post_1'><static>true</static><pose>3.922 2.932 1.095 0 0 -0.0045</pose>
-      <link name='link'><collision name='c'><geometry><box><size>0.119 0.117 2.189</size></box></geometry></collision>
-      <visual name='v'><geometry><box><size>0.119 0.117 2.189</size></box></geometry><material><ambient>0.4 0.6 0.2 1</ambient></material></visual></link></model>
+    <model name='row2_post_1'><static>true</static><pose>3.922 2.932 0.766 0 0 -0.0045</pose>
+      <link name='link'><collision name='c'><geometry><box><size>0.083 0.082 1.532</size></box></geometry></collision>
+      <visual name='v'><geometry><box><size>0.083 0.082 1.532</size></box></geometry><material><ambient>0.4 0.6 0.2 1</ambient></material></visual></link></model>
 
-    <model name='row2_post_2'><static>true</static><pose>5.962 2.973 1.095 0 0 -0.0031</pose>
-      <link name='link'><collision name='c'><geometry><box><size>0.119 0.117 2.189</size></box></geometry></collision>
-      <visual name='v'><geometry><box><size>0.119 0.117 2.189</size></box></geometry><material><ambient>0.4 0.6 0.2 1</ambient></material></visual></link></model>
+    <model name='row2_post_2'><static>true</static><pose>5.962 2.973 0.766 0 0 -0.0031</pose>
+      <link name='link'><collision name='c'><geometry><box><size>0.083 0.082 1.532</size></box></geometry></collision>
+      <visual name='v'><geometry><box><size>0.083 0.082 1.532</size></box></geometry><material><ambient>0.4 0.6 0.2 1</ambient></material></visual></link></model>
 
-    <model name='row2_post_3'><static>true</static><pose>8.020 2.987 1.095 0 0 -0.0035</pose>
-      <link name='link'><collision name='c'><geometry><box><size>0.119 0.117 2.189</size></box></geometry></collision>
-      <visual name='v'><geometry><box><size>0.119 0.117 2.189</size></box></geometry><material><ambient>0.4 0.6 0.2 1</ambient></material></visual></link></model>
+    <model name='row2_post_3'><static>true</static><pose>8.020 2.987 0.766 0 0 -0.0035</pose>
+      <link name='link'><collision name='c'><geometry><box><size>0.083 0.082 1.532</size></box></geometry></collision>
+      <visual name='v'><geometry><box><size>0.083 0.082 1.532</size></box></geometry><material><ambient>0.4 0.6 0.2 1</ambient></material></visual></link></model>
 
-    <model name='row2_post_4'><static>true</static><pose>9.999 2.974 1.095 0 0 -0.0026</pose>
-      <link name='link'><collision name='c'><geometry><box><size>0.119 0.117 2.189</size></box></geometry></collision>
-      <visual name='v'><geometry><box><size>0.119 0.117 2.189</size></box></geometry><material><ambient>0.4 0.6 0.2 1</ambient></material></visual></link></model>
+    <model name='row2_post_4'><static>true</static><pose>9.999 2.974 0.766 0 0 -0.0026</pose>
+      <link name='link'><collision name='c'><geometry><box><size>0.083 0.082 1.532</size></box></geometry></collision>
+      <visual name='v'><geometry><box><size>0.083 0.082 1.532</size></box></geometry><material><ambient>0.4 0.6 0.2 1</ambient></material></visual></link></model>
 
-    <model name='row2_post_5'><static>true</static><pose>12.049 2.757 1.095 0 0 -0.0023</pose>
-      <link name='link'><collision name='c'><geometry><box><size>0.119 0.117 2.189</size></box></geometry></collision>
-      <visual name='v'><geometry><box><size>0.119 0.117 2.189</size></box></geometry><material><ambient>0.4 0.6 0.2 1</ambient></material></visual></link></model>
+    <model name='row2_post_5'><static>true</static><pose>12.049 2.757 0.766 0 0 -0.0023</pose>
+      <link name='link'><collision name='c'><geometry><box><size>0.083 0.082 1.532</size></box></geometry></collision>
+      <visual name='v'><geometry><box><size>0.083 0.082 1.532</size></box></geometry><material><ambient>0.4 0.6 0.2 1</ambient></material></visual></link></model>
 
     <!-- Row 3 — y ≈ 5.1 -->
-    <model name='row3_post_0'><static>true</static><pose>2.089 6.051 1.095 0 0 -0.0025</pose>
-      <link name='link'><collision name='c'><geometry><box><size>0.119 0.117 2.189</size></box></geometry></collision>
-      <visual name='v'><geometry><box><size>0.119 0.117 2.189</size></box></geometry><material><ambient>0.4 0.6 0.2 1</ambient></material></visual></link></model>
+    <model name='row3_post_0'><static>true</static><pose>2.089 6.051 0.766 0 0 -0.0025</pose>
+      <link name='link'><collision name='c'><geometry><box><size>0.083 0.082 1.532</size></box></geometry></collision>
+      <visual name='v'><geometry><box><size>0.083 0.082 1.532</size></box></geometry><material><ambient>0.4 0.6 0.2 1</ambient></material></visual></link></model>
 
-    <model name='row3_post_1'><static>true</static><pose>4.084 6.210 1.095 0 0 -0.0030</pose>
-      <link name='link'><collision name='c'><geometry><box><size>0.119 0.117 2.189</size></box></geometry></collision>
-      <visual name='v'><geometry><box><size>0.119 0.117 2.189</size></box></geometry><material><ambient>0.4 0.6 0.2 1</ambient></material></visual></link></model>
+    <model name='row3_post_1'><static>true</static><pose>4.084 6.210 0.766 0 0 -0.0030</pose>
+      <link name='link'><collision name='c'><geometry><box><size>0.083 0.082 1.532</size></box></geometry></collision>
+      <visual name='v'><geometry><box><size>0.083 0.082 1.532</size></box></geometry><material><ambient>0.4 0.6 0.2 1</ambient></material></visual></link></model>
 
-    <model name='row3_post_2'><static>true</static><pose>6.030 6.257 1.095 0 0 -0.0024</pose>
-      <link name='link'><collision name='c'><geometry><box><size>0.119 0.117 2.189</size></box></geometry></collision>
-      <visual name='v'><geometry><box><size>0.119 0.117 2.189</size></box></geometry><material><ambient>0.4 0.6 0.2 1</ambient></material></visual></link></model>
+    <model name='row3_post_2'><static>true</static><pose>6.030 6.257 0.766 0 0 -0.0024</pose>
+      <link name='link'><collision name='c'><geometry><box><size>0.083 0.082 1.532</size></box></geometry></collision>
+      <visual name='v'><geometry><box><size>0.083 0.082 1.532</size></box></geometry><material><ambient>0.4 0.6 0.2 1</ambient></material></visual></link></model>
 
-    <model name='row3_post_3'><static>true</static><pose>8.036 6.075 1.095 0 0 -0.0031</pose>
-      <link name='link'><collision name='c'><geometry><box><size>0.119 0.117 2.189</size></box></geometry></collision>
-      <visual name='v'><geometry><box><size>0.119 0.117 2.189</size></box></geometry><material><ambient>0.4 0.6 0.2 1</ambient></material></visual></link></model>
+    <model name='row3_post_3'><static>true</static><pose>8.036 6.075 0.766 0 0 -0.0031</pose>
+      <link name='link'><collision name='c'><geometry><box><size>0.083 0.082 1.532</size></box></geometry></collision>
+      <visual name='v'><geometry><box><size>0.083 0.082 1.532</size></box></geometry><material><ambient>0.4 0.6 0.2 1</ambient></material></visual></link></model>
 
-    <model name='row3_post_4'><static>true</static><pose>9.992 5.779 1.095 0 0 -0.0040</pose>
-      <link name='link'><collision name='c'><geometry><box><size>0.119 0.117 2.189</size></box></geometry></collision>
-      <visual name='v'><geometry><box><size>0.119 0.117 2.189</size></box></geometry><material><ambient>0.4 0.6 0.2 1</ambient></material></visual></link></model>
+    <model name='row3_post_4'><static>true</static><pose>9.992 5.779 0.766 0 0 -0.0040</pose>
+      <link name='link'><collision name='c'><geometry><box><size>0.083 0.082 1.532</size></box></geometry></collision>
+      <visual name='v'><geometry><box><size>0.083 0.082 1.532</size></box></geometry><material><ambient>0.4 0.6 0.2 1</ambient></material></visual></link></model>
 
-    <model name='row3_post_5'><static>true</static><pose>12.042 5.602 1.095 0 0 -0.0019</pose>
-      <link name='link'><collision name='c'><geometry><box><size>0.119 0.117 2.189</size></box></geometry></collision>
-      <visual name='v'><geometry><box><size>0.119 0.117 2.189</size></box></geometry><material><ambient>0.4 0.6 0.2 1</ambient></material></visual></link></model>
+    <model name='row3_post_5'><static>true</static><pose>12.042 5.602 0.766 0 0 -0.0019</pose>
+      <link name='link'><collision name='c'><geometry><box><size>0.083 0.082 1.532</size></box></geometry></collision>
+      <visual name='v'><geometry><box><size>0.083 0.082 1.532</size></box></geometry><material><ambient>0.4 0.6 0.2 1</ambient></material></visual></link></model>
 
-    <model name='row3_post_6'><static>true</static><pose>14.044 2.549 1.095 0 0 -0.0017</pose>
-      <link name='link'><collision name='c'><geometry><box><size>0.119 0.117 2.189</size></box></geometry></collision>
-      <visual name='v'><geometry><box><size>0.119 0.117 2.189</size></box></geometry><material><ambient>0.4 0.6 0.2 1</ambient></material></visual></link></model>
+    <model name='row3_post_6'><static>true</static><pose>14.044 2.549 0.766 0 0 -0.0017</pose>
+      <link name='link'><collision name='c'><geometry><box><size>0.083 0.082 1.532</size></box></geometry></collision>
+      <visual name='v'><geometry><box><size>0.083 0.082 1.532</size></box></geometry><material><ambient>0.4 0.6 0.2 1</ambient></material></visual></link></model>
 
-    <model name='row3_post_7'><static>true</static><pose>14.030 5.588 1.095 0 0 -0.0034</pose>
-      <link name='link'><collision name='c'><geometry><box><size>0.119 0.117 2.189</size></box></geometry></collision>
-      <visual name='v'><geometry><box><size>0.119 0.117 2.189</size></box></geometry><material><ambient>0.4 0.6 0.2 1</ambient></material></visual></link></model>
+    <model name='row3_post_7'><static>true</static><pose>14.030 5.588 0.766 0 0 -0.0034</pose>
+      <link name='link'><collision name='c'><geometry><box><size>0.083 0.082 1.532</size></box></geometry></collision>
+      <visual name='v'><geometry><box><size>0.083 0.082 1.532</size></box></geometry><material><ambient>0.4 0.6 0.2 1</ambient></material></visual></link></model>
 
     <!-- ── GUI camera hint ───────────────────────────────────────────────── -->
     <gui fullscreen='false'>
