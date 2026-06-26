@@ -99,7 +99,7 @@ def generate_launch_description():
                 'ros2 run ros_gz_sim create'
                 ' -name agro_robot'
                 ' -string "$URDF"'
-                ' -x 0.0 -y 0.0 -z 0.13'  # base_link_z=0.11 + 0.02 clearance
+                ' -x 0.0 -y 0.0 -z 0.01'  # base_footprint on ground; base_link raised by wheel_radius via base_footprint_joint
             ),
         ],
         name="spawn_robot",
