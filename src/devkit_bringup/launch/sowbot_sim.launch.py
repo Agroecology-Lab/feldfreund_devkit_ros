@@ -256,6 +256,31 @@ def generate_launch_description():
         actions=_nav2_sim_nodes(nav2_params, use_sim_time=True),
     )
 
+    # Kill the wall-time bootstrap TF publishers from sim_nav.launch.py once
+    # Nav2 is up.  These were needed for topo nav localisation before Gazebo
+    # started, but after the bridge is live their wall-time stamps look ancient
+    # to Nav2's sim-time costmap (transform_tolerance=0.3s), causing
+    # "Costmap timed out waiting for update" and zero cmd_vel output.
+    # odom->base_footprint is now covered by the DiffDrive bridge on /tf;
+    # base_footprint->base_link is covered by robot_state_publisher (50 Hz).
+    # map->odom is left alone — it has no dynamic replacement.
+    kill_bootstrap_tfs = TimerAction(
+        period=16.0,
+        actions=[
+            ExecuteProcess(
+                cmd=[
+                    '/bin/bash', '-c',
+                    'ros2 lifecycle set /odom_to_base_footprint_static shutdown 2>/dev/null; '
+                    'pkill -f "static_transform_publisher.*odom base_footprint" || true; '
+                    'pkill -f "static_transform_publisher.*base_footprint base_link" || true; '
+                    'echo "[bootstrap_tf_killer] killed odom->base_footprint and base_footprint->base_link static publishers"',
+                ],
+                name='kill_bootstrap_tfs',
+                output='screen',
+            ),
+        ],
+    )
+
     return LaunchDescription([
         gz_resource_path,
         set_urdf_env,
@@ -268,4 +293,5 @@ def generate_launch_description():
         sim_launch,
         bridge_watchdog,
         nav2,
+        kill_bootstrap_tfs,
     ])
