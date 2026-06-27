@@ -254,8 +254,15 @@ def generate_launch_description():
     bridge_cfg = os.path.join(pkg_agro, 'config', 'ros_gz_bridge.yaml')
 
     # Kill any stale bridge from a previous session before sim_launch starts.
+    # Also kills fake_nav2_server (the boot-time /clock+TF stub started by
+    # sim_nav.launch.py) — real Nav2, started later in this file, takes over
+    # both the navigation backend and the /clock source (via ros_gz_bridge),
+    # so leaving fake_nav2_server alive would mean two NavigateToPose action
+    # servers competing for the same action name. See nav2_only.launch.py's
+    # module docstring for the full rationale (this mirrors that file's
+    # kill_fake_nav2 step for the other UI entry point).
     preflight_pkill = ExecuteProcess(
-        cmd=['/bin/bash', '-c', 'pkill -f "gz sim" || true; pkill -f ros_gz_sim || true; pkill -f parameter_bridge || true'],
+        cmd=['/bin/bash', '-c', 'pkill -f "gz sim" || true; pkill -f ros_gz_sim || true; pkill -f parameter_bridge || true; pkill -f fake_nav2_server || true'],
         name='preflight_pkill',
         output='screen',
     )
