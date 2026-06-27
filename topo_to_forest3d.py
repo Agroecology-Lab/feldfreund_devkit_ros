@@ -171,6 +171,12 @@ def compute_field_params(rows, headland_width, default_row_width, plant_spacing)
     # Use row_width/2.5 for a coarser mesh (fewer triangles → faster Gazebo).
     resolution = max(0.1, min(0.25, row_width / 2.5))
 
+    # Bounding-box centroid of the topo rows in local XY.  Forest3D generates
+    # its row grid centred at world (0,0); this centroid is the translation
+    # needed to shift the terrain mesh onto the topo node positions.
+    topo_along_centre = (max(along) + min(along)) / 2.0
+    topo_cross_centre = (max(across) + min(across)) / 2.0
+
     return {
         'field_length': round(max(field_length, 5.0), 2),
         'field_width': round(max(field_width, 5.0), 2),
@@ -183,8 +189,11 @@ def compute_field_params(rows, headland_width, default_row_width, plant_spacing)
         'plant_spacing': plant_spacing,
         'stagger': 0.0,
         'resolution': resolution,
-    }, gps_lat, gps_lon, plants_per_row, derived_density
-
+    }, gps_lat, gps_lon, plants_per_row, derived_density, {
+        'row_axis':          row_axis,
+        'topo_along_centre': topo_along_centre,
+        'topo_cross_centre': topo_cross_centre,
+    }
 
 # Soil assets imported from the NiceGUI cockpit land here (a host dir mounted
 # at /workspace/uploads, persisted across image rebuilds). Only the image maps
@@ -363,6 +372,84 @@ def patch_world_physics_engine(world_path):
           "(required for TrackedVehicle/TrackController motion)")
 
 
+
+
+def patch_world_terrain_pose(world_path, params, geo):
+    """Shift the Forest3D ground model so its row grid aligns with the topo map.
+
+    Forest3D always generates its crop-row grid with rows running along the X
+    axis, spaced in Y, centred at world (0, 0).  See:
+      - CropRowTerrain._build_row_heightmap: centre_Y = headland + half_row + i*cycle
+      - BaseTerrain._center_and_shift: subtracts mesh centroid -> mesh at (0,0)
+      - ForestPopulator.create_forest_world: <pose> hardcoded "0 0 0 0 0 0"
+
+    The topo nav nodes are ground truth.  We compute the offset from Forest3D's
+    (0,0) centroid to the topo bounding-box centroid and write it into the
+    <pose> of the ground include using ElementTree — no whitespace fragility.
+
+    If the topo rows run along Y (row_axis=1) the mesh also needs a 90 deg yaw
+    so the row direction aligns before the translation is applied.
+    """
+    import xml.etree.ElementTree as _ET
+
+    world_path = Path(world_path)
+    if not world_path.exists():
+        print(f"WARNING: {world_path} not found — skipping terrain pose patch",
+              file=sys.stderr)
+        return
+
+    row_axis   = geo["row_axis"]
+    topo_along = geo["topo_along_centre"]
+    topo_cross = geo["topo_cross_centre"]
+
+    # Forest3D rows always along X, spaced in Y.
+    # row_axis=0: topo rows also along X -> no rotation.
+    # row_axis=1: topo rows along Y -> +90 deg yaw maps F3D-X to topo-Y.
+    #             After that rotation: pose_x = topo_cross, pose_y = topo_along.
+    if row_axis == 0:
+        pose_x = round(topo_along, 4)
+        pose_y = round(topo_cross, 4)
+        yaw    = 0.0
+    else:
+        pose_x = round(topo_cross, 4)
+        pose_y = round(topo_along, 4)
+        yaw    = round(math.pi / 2, 6)
+
+    pose_str = f"{pose_x} {pose_y} 0 0 0 {yaw}"
+
+    try:
+        tree = _ET.parse(world_path)
+        root = tree.getroot()
+    except _ET.ParseError as exc:
+        print(f"WARNING: cannot parse {world_path} as XML — skipping: {exc}",
+              file=sys.stderr)
+        return
+
+    world_elem = root.find("world") or root
+    patched = False
+    for include in world_elem.findall("include"):
+        uri = include.find("uri")
+        if uri is not None and uri.text and "ground" in uri.text:
+            pose_elem = include.find("pose")
+            if pose_elem is None:
+                pose_elem = _ET.SubElement(include, "pose")
+            if pose_elem.text == pose_str:
+                print(f"Terrain pose already correct ({pose_str}) — nothing to patch")
+                return
+            pose_elem.text = pose_str
+            patched = True
+            break
+
+    if not patched:
+        print(f"WARNING: no ground include found in {world_path} — "
+              "terrain pose not patched.", file=sys.stderr)
+        return
+
+    xml_str = _ET.tostring(root, encoding="unicode")
+    world_path.write_text('<?xml version="1.0" ?>\n' + xml_str)
+    print(f"Patched {world_path}: ground pose -> {pose_str} "
+          "(aligns Forest3D row grid with topo nav nodes)")
+
 def write_forest3d_yaml(params, gps_lat, gps_lon, output_path, density_crop, model_path):
     config = {
         'terrain': {
@@ -423,7 +510,7 @@ if __name__ == '__main__':
 
     print(f"Loaded {len(rows)} rows from {args.topo}")
 
-    params, gps_lat, gps_lon, plants_per_row, derived_density = compute_field_params(
+    params, gps_lat, gps_lon, plants_per_row, derived_density, geo = compute_field_params(
         rows, args.headland, args.row_width, args.plant_spacing)
 
     # density is only a global ceiling in Forest3D's placement loop. Default it
@@ -474,5 +561,10 @@ if __name__ == '__main__':
         # drive needs DART (see patch_world_physics_engine docstring).
         if args.world_out:
             patch_world_physics_engine(args.world_out)
+
+        # Step 4: Shift the ground model pose so Forest3D's row grid aligns
+        # with the topo nav node positions.  The topo map is ground truth.
+        if args.world_out:
+            patch_world_terrain_pose(args.world_out, params, geo)
 
         print("Done.")
