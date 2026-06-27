@@ -1598,9 +1598,15 @@ class NiceGuiNode(Node):
                     with ui.card().style('padding:16px 20px;flex-shrink:0'):
                         ui.html('<div class="sec-label mb-3">Joystick</div>')
                         with ui.row().classes('items-center gap-6'):
+                            def _debug_joystick_move(e):
+                                self.get_logger().info(
+                                    f'[joystick debug] raw e.x={e.x!r} e.y={e.y!r} '
+                                    f'(as float: x={float(e.x):+.3f} y={float(e.y):+.3f})')
+                                self.send_speed(float(e.y), float(e.x))
+
                             ui.joystick(
                                 color='#1a7f37', size=130,
-                                on_move=lambda e: self.send_speed(float(e.y), float(e.x)),
+                                on_move=_debug_joystick_move,
                                 on_end=lambda _: self.send_speed(0.0, 0.0),
                             )
                             with ui.column().classes('gap-3 items-center'):
