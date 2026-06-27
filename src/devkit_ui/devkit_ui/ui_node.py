@@ -2906,9 +2906,11 @@ class NiceGuiNode(Node):
                 # which urdf arg is passed to sowbot_sim.launch.py.
                 # sowbot_01:       TrackedVehicle + TrackController (DART required)
                 # robo_caatinga:   DiffDrive skid-steer (ODE or DART both fine)
+                # ifarmate:        DiffDrive skid-steer (plugin wiring copied from caatinga)
                 _ROBOT_MODELS = {
                     'sowbot (tracked)':      'sowbot_01.xacro',
                     'caatinga (diff drive)': 'robo_caatinga.urdf.xacro',
+                    'ifarmate (diff drive)': 'ifarmate.urdf.xacro',
                 }
                 _robot_model: dict = {'xacro': 'sowbot_01.xacro'}
 
@@ -2943,29 +2945,6 @@ class NiceGuiNode(Node):
                         'world:=maize.world',
                         f'urdf:={_robot_model["xacro"]}',
                     ]
-
-                def _start_gazebo_native():
-                    if _gazebo_proc[0] is not None and _gazebo_proc[0].poll() is None:
-                        _gazebo_lbl.set_text('already running')
-                        return
-                    try:
-                        env = {**_SIM_ENV, 'DISPLAY': os.environ.get('DISPLAY', ':0')}
-                        # We don't use `with` for these because we save the process arguments and
-                        # manage them manually. Log to a file (not DEVNULL) so a
-                        # crashed launch is diagnosable — tail /tmp/gazebo_sim.log.
-                        _gz_log = open('/tmp/gazebo_sim.log', 'w')
-                        _gazebo_proc[0] = subprocess.Popen(
-                            _sim_cmd(),
-                            stdout=_gz_log, stderr=subprocess.STDOUT,
-                            env=env,
-                            start_new_session=True,
-                        )
-                        _gazebo_lbl.set_text(
-                            f'native window — {_robot_model["xacro"]} — pid {_gazebo_proc[0].pid}')
-                        _gazebo_lbl.style('color:#1a7f37')
-                    except Exception as exc:
-                        _gazebo_lbl.set_text(f'ERROR: {exc}')
-                        _gazebo_lbl.style('color:#cf222e')
 
                 def _start_gazebo_browser():
                     if _gazebo_proc[0] is not None and _gazebo_proc[0].poll() is None:
@@ -3131,8 +3110,6 @@ class NiceGuiNode(Node):
                     ui.button('Launch World', on_click=_launch_world).props('color=positive no-caps').classes('px-4')
                     ui.button('Spawn Robot', on_click=_spawn_robot).props('color=primary no-caps').classes('px-4')
                     ui.button('Rebuild World from Map', on_click=_rebuild_world).props(
-                        'outline no-caps').classes('px-4')
-                    ui.button('Launch Sim (native)', on_click=_start_gazebo_native).props(
                         'outline no-caps').classes('px-4')
                     ui.button('Launch Sim (browser)', on_click=_start_gazebo_browser).props(
                         'outline no-caps').classes('px-4')
