@@ -19,10 +19,15 @@ Startup sequence inside this file
 1. preflight_pkill  — kills any stale parameter_bridge from a previous run
 2. sim_launch       — gz sim + robot_state_publisher + spawn + ros_gz_bridge
                       (ros_gz_bridge starts 2s after spawn exits, per sim.launch.py)
-3. nav2 (t+15s)     — Nav2 nodes with use_sim_time=True; by this point
+3. nav2 (t+15s)     — Nav2 server nodes with use_sim_time=True; by this point
                       /clock is live from the bridge and TF frames carry
                       Gazebo sim-time stamps, so all TF lookups succeed
-4. bridge_watchdog  — revives parameter_bridge if it dies (e.g. gz restart)
+4. nav2_lifecycle (t+20s) — lifecycle_manager_navigation, started 5s AFTER
+                      the Nav2 nodes above so it never races their process
+                      startup (previously both started in the same
+                      TimerAction batch; under load this could leave
+                      bt_navigator configured but never activated)
+5. bridge_watchdog  — revives parameter_bridge if it dies (e.g. gz restart)
 
 Nav2 node helpers (_nav2_sim_nodes, _topo_nav_nodes) are kept here so
 that any future callers can import them via importlib if needed.
@@ -60,6 +65,9 @@ from launch_ros.actions import Node
 # ---------------------------------------------------------------------------
 
 def _nav2_sim_nodes(params_file: str, use_sim_time: bool = True) -> list:
+    """Nav2 server/processing nodes only (excludes the lifecycle manager —
+    see _nav2_lifecycle_manager_node() below, which is started on its own
+    delayed timer so it never races the process startup of these nodes)."""
     remappings = [('/tf', 'tf'), ('/tf_static', 'tf_static')]
     common = {
         'output': 'screen',
@@ -97,18 +105,38 @@ def _nav2_sim_nodes(params_file: str, use_sim_time: bool = True) -> list:
         # publish directly to /cmd_vel → ros_gz_bridge → Gazebo DiffDrive.
         # collision_monitor intentionally omitted — see module docstring.
         # docking_server intentionally omitted — no dock in sim world.
-        Node(
-            package='nav2_lifecycle_manager',
-            executable='lifecycle_manager',
-            name='lifecycle_manager_navigation',
-            output='screen',
-            parameters=[
-                {'use_sim_time': use_sim_time},
-                {'autostart': True},
-                params_file,
-            ],
-        ),
     ]
+
+
+def _nav2_lifecycle_manager_node(params_file: str, use_sim_time: bool = True) -> Node:
+    """lifecycle_manager_navigation, split out from _nav2_sim_nodes() and
+    started on its own delayed timer (see `nav2_lifecycle` below).
+
+    Root cause this addresses: previously the lifecycle manager launched in
+    the SAME TimerAction batch as the nodes it manages, so all processes
+    forked at the same instant. ros2 launch does not guarantee a node's
+    rclpy context — let alone its lifecycle service servers — is up the
+    moment the process forks. Under load (gz sim RTF has been observed
+    running low on this stack) bt_navigator/behavior_server can take longer
+    to come up than the lifecycle manager's default 4s bond_timeout, so the
+    bond silently fails and bt_navigator is left configured but never
+    activated — the exact "not auto-activated" symptom seen in testing.
+    Splitting the manager onto a later timer plus a generous bond_timeout
+    gives every managed node a real head start before lifecycle transitions
+    are attempted."""
+    return Node(
+        package='nav2_lifecycle_manager',
+        executable='lifecycle_manager',
+        name='lifecycle_manager_navigation',
+        output='screen',
+        parameters=[
+            {'use_sim_time': use_sim_time},
+            {'autostart': True},
+            {'bond_timeout': 15.0},
+            {'attempt_respawn_reconnection': True},
+            params_file,
+        ],
+    )
 
 
 # ---------------------------------------------------------------------------
@@ -144,6 +172,9 @@ def _topo_nav_nodes(tmap2_file: str, devkit_launch_pkg: str, use_sim_time: bool 
         ]),
 
         TimerAction(period=8.0, actions=_nav2_sim_nodes(nav2_params, use_sim_time=use_sim_time)),
+        TimerAction(period=12.0, actions=[
+            _nav2_lifecycle_manager_node(nav2_params, use_sim_time=use_sim_time),
+        ]),
 
         TimerAction(period=4.0, actions=[
             Node(
@@ -256,6 +287,22 @@ def generate_launch_description():
         actions=_nav2_sim_nodes(nav2_params, use_sim_time=True),
     )
 
+    # ── Nav2 lifecycle manager (t+20s) ────────────────────────────────────────
+    # Started 5s AFTER the Nav2 server nodes above, not in the same batch.
+    # Previously this raced controller_server/behavior_server/bt_navigator's
+    # process startup, since ros2 launch forks everything in a TimerAction
+    # batch at the same instant with no guarantee the managed nodes' lifecycle
+    # services are actually up yet. Under load (gz sim RTF has run low on
+    # this stack) that race meant bt_navigator could be left configured but
+    # never activated, which is exactly the "[NAV2] Server unavailable" /
+    # STATUS_ABORTED failure topo nav goals were hitting. The 5s head start
+    # plus bond_timeout=15.0 (see _nav2_lifecycle_manager_node) gives every
+    # managed node real margin before lifecycle transitions are attempted.
+    nav2_lifecycle = TimerAction(
+        period=20.0,
+        actions=[_nav2_lifecycle_manager_node(nav2_params, use_sim_time=True)],
+    )
+
     # Kill the wall-time bootstrap TF publishers from sim_nav.launch.py once
     # Nav2 is up.  These were needed for topo nav localisation before Gazebo
     # started, but after the bridge is live their wall-time stamps look ancient
@@ -293,5 +340,6 @@ def generate_launch_description():
         sim_launch,
         bridge_watchdog,
         nav2,
+        nav2_lifecycle,
         kill_bootstrap_tfs,
     ])
