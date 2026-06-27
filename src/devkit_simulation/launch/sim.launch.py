@@ -95,11 +95,25 @@ def generate_launch_description():
                 'echo "[spawn] spawning agro_robot"; '
                 f'_URDF="${{DEVKIT_URDF:-sowbot_01.xacro}}"; '
                 f'echo "[spawn] using URDF: {urdf_dir}/$_URDF"; '
+                # Spawn pose comes from topo_to_forest3d.py's HOME-node + 
+                # terrain_offset calculation, not a hardcoded origin — the
+                # world's terrain/crops are shifted by terrain_offset, so a
+                # fixed (0,0) spawn drifts off the topo HOME position once
+                # that offset is non-zero. Falls back to legacy (0,0,0.01)
+                # if the file is missing (e.g. non-sim/manual runs).
+                'SPAWN_FILE="/workspace/spawn_pose.txt"; '
+                'if [ -f "$SPAWN_FILE" ]; then '
+                'read -r SPAWN_X SPAWN_Y SPAWN_Z < "$SPAWN_FILE"; '
+                'echo "[spawn] using spawn pose from $SPAWN_FILE: $SPAWN_X $SPAWN_Y $SPAWN_Z"; '
+                'else '
+                'SPAWN_X=0.0; SPAWN_Y=0.0; SPAWN_Z=0.01; '
+                'echo "[spawn] WARNING: $SPAWN_FILE not found — falling back to (0,0,0.01)"; '
+                'fi; '
                 f'URDF=$(xacro {urdf_dir}/$_URDF) && '
                 'ros2 run ros_gz_sim create'
                 ' -name agro_robot'
                 ' -string "$URDF"'
-                ' -x 0.0 -y 0.0 -z 0.01'  # base_footprint on ground; base_link raised by wheel_radius via base_footprint_joint
+                ' -x "$SPAWN_X" -y "$SPAWN_Y" -z "$SPAWN_Z"'  # base_footprint on ground; base_link raised by wheel_radius via base_footprint_joint
             ),
         ],
         name="spawn_robot",
