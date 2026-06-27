@@ -3,6 +3,7 @@ from ament_index_python.packages import get_package_share_directory
 from launch import LaunchDescription
 from launch.actions import (
     DeclareLaunchArgument,
+    ExecuteProcess,
     GroupAction,
     IncludeLaunchDescription,
     SetEnvironmentVariable,
@@ -12,10 +13,25 @@ from launch.launch_description_sources import PythonLaunchDescriptionSource
 from launch.substitutions import LaunchConfiguration, PythonExpression
 from launch.conditions import IfCondition
 from launch_ros.actions import Node
+from launch_ros.parameter_descriptions import ParameterValue
 
 
-def _nav2_nodes(params_file, real_condition):
-    """Explicit Nav2 node declarations for real hardware.
+def _nav2_nodes(params_file, use_sim_time):
+    """Explicit Nav2 node declarations — runs in BOTH sim and real-hardware
+    modes now (previously real-hardware only, gated by real_condition).
+
+    use_sim_time is the 'sim' LaunchConfiguration substitution (a string
+    'true'/'false', not resolved until launch time) wrapped in ParameterValue
+    so Nav2 receives an actual bool parameter rather than the literal string
+    'true'/'false'. It is NOT a plain Python bool — that would require
+    knowing sim/real at generate_launch_description() parse time, which we
+    don't: 'sim' itself is a LaunchConfiguration, only resolved at runtime.
+    Real Nav2 is now always the navigation backend; in sim mode its
+    use_sim_time=True nodes simply sit waiting for a valid /clock until
+    Gazebo is started via one of the UI buttons (Launch World/Spawn Robot or
+    Launch Sim) — exactly the same wait fake_nav2_server's clock stub already
+    bridges for topo nav today. See _kill_fake_nav2_action() below for why
+    fake_nav2_server's own action servers must stop once that happens.
 
     Replaces IncludeLaunchDescription of navigation_launch.py so we can
     omit collision_monitor, which requires observation_sources (a sensor)
@@ -28,11 +44,11 @@ def _nav2_nodes(params_file, real_condition):
       cmd_vel -> cmd_vel_nav  (velocity_smoother input), cmd_vel_smoothed -> cmd_vel  (velocity_smoother output)
     tf/tf_static are remapped globally via the common remappings list.
     """
+    use_sim_time_param = ParameterValue(use_sim_time, value_type=bool)
     remappings = [('/tf', 'tf'), ('/tf_static', 'tf_static')]
     common = {
         "output": 'screen',
-        "condition": real_condition,
-        "parameters": [{'use_sim_time': False}, params_file],
+        "parameters": [{'use_sim_time': use_sim_time_param}, params_file],
         "arguments": ['--ros-args', '--log-level', 'info'],
         "remappings": remappings,
     }
@@ -44,8 +60,7 @@ def _nav2_nodes(params_file, real_condition):
             name='controller_server',
             remappings=remappings + [('cmd_vel', 'cmd_vel_nav')],
             output='screen',
-            condition=real_condition,
-            parameters=[{'use_sim_time': False}, params_file],
+            parameters=[{'use_sim_time': use_sim_time_param}, params_file],
             arguments=['--ros-args', '--log-level', 'info'],
         ),
         Node(
@@ -72,8 +87,7 @@ def _nav2_nodes(params_file, real_condition):
             name='behavior_server',
             remappings=remappings + [('cmd_vel', 'cmd_vel_nav')],
             output='screen',
-            condition=real_condition,
-            parameters=[{'use_sim_time': False}, params_file],
+            parameters=[{'use_sim_time': use_sim_time_param}, params_file],
             arguments=['--ros-args', '--log-level', 'info'],
         ),
         Node(
@@ -94,8 +108,7 @@ def _nav2_nodes(params_file, real_condition):
             name='velocity_smoother',
             remappings=remappings + [('cmd_vel', 'cmd_vel_nav'), ('cmd_vel_smoothed', 'cmd_vel')],
             output='screen',
-            condition=real_condition,
-            parameters=[{'use_sim_time': False}, params_file],
+            parameters=[{'use_sim_time': use_sim_time_param}, params_file],
             arguments=['--ros-args', '--log-level', 'info'],
         ),
         Node(
@@ -112,9 +125,8 @@ def _nav2_nodes(params_file, real_condition):
             executable='lifecycle_manager',
             name='lifecycle_manager_navigation',
             output='screen',
-            condition=real_condition,
             parameters=[
-                {'use_sim_time': False},
+                {'use_sim_time': use_sim_time_param},
                 {'autostart': True},
                 params_file,
             ],
@@ -122,12 +134,97 @@ def _nav2_nodes(params_file, real_condition):
     ]
 
 
-def _topo_nav_nodes(tmap2_file, sim_condition, real_condition, devkit_bringup_pkg):
-    """Inlined topo nav stack with sim/real conditional Nav2 backends.
+def _kill_fake_nav2_action(sim_condition):
+    """Kill fake_nav2_server once real Nav2's lifecycle manager has actually
+    activated bt_navigator — both run a NavigateToPose action server and
+    would otherwise collide on the same action name.
 
-    Replaces the upstream topological_navigation.launch.py which hardcodes
-    fake_nav2_server unconditionally. Inlining lets us route to either
-    fake_nav2_server (sim) or real Nav2 (hardware).
+    fake_nav2_server itself keeps starting unconditionally in sim mode (see
+    the node below) because its wall-time /clock publisher is still needed:
+    real Nav2 launches at container boot here, well before Gazebo exists, so
+    something has to keep /clock and map->odom->base_link TF alive in the
+    meantime or Nav2's lifecycle/TF lookups fail outright. Once Gazebo's
+    ros_gz_bridge comes up (via any of the UI's Launch World/Spawn
+    Robot/Launch Sim buttons) its RELIABLE /clock wins by QoS precedence
+    automatically — but fake_nav2_server's ACTION SERVERS don't get
+    superseded that way, they just keep running and competing with
+    bt_navigator. So we kill the process outright, on a poll loop, the
+    moment bt_navigator is actually active.
+
+    BOUNDED, NOT INFINITE: bt_navigator activating depends on
+    lifecycle_manager_navigation's autostart bring-up succeeding, which is
+    exactly the kind of thing that's failed silently before in this codebase
+    (see the lifecycle-manager race this whole launch-file split was built
+    to fix). An earlier version of this watchdog looped `while true` with no
+    timeout — if bt_navigator never activates, that version would poll
+    forever with zero visible signal that anything was wrong, while
+    fake_nav2_server kept masking the failure by staying alive and looking
+    functional. This version caps at MAX_ATTEMPTS, logs progress every 10
+    attempts so it's visible in the boot log rather than silent, and on
+    timeout logs a loud, unambiguous ERROR and exits non-zero — making
+    "real Nav2 never came up" a visible failure instead of a quiet one.
+
+    Implemented as a plain bash poll loop rather than a custom node —
+    topological_nav_simulator (which owns fake_nav2_server) isn't a package
+    we maintain here, so adding a new executable to it isn't an option from
+    this launch file.
+    """
+    poll_interval_s = 2
+    max_attempts = 90   # 90 * 2s = 3 minutes — generous; Gazebo is NOT
+                        # required for bt_navigator to activate, only real
+                        # Nav2's own lifecycle bring-up, so this should
+                        # resolve quickly if it's going to resolve at all.
+    return ExecuteProcess(
+        condition=sim_condition,
+        cmd=[
+            '/bin/bash', '-c',
+            (
+                f'ATTEMPT=0; '
+                f'while [ "$ATTEMPT" -lt {max_attempts} ]; do '
+                f'sleep {poll_interval_s}; '
+                f'ATTEMPT=$((ATTEMPT + 1)); '
+                f'STATE=$(ros2 lifecycle get /bt_navigator 2>/dev/null); '
+                f'if [[ "$STATE" == active* ]]; then '
+                f'pkill -f fake_nav2_server || true; '
+                f'echo "[kill_fake_nav2] bt_navigator active after '
+                f'$((ATTEMPT * {poll_interval_s}))s — killed fake_nav2_server"; '
+                f'exit 0; '
+                f'fi; '
+                f'if [ $((ATTEMPT % 10)) -eq 0 ]; then '
+                f'echo "[kill_fake_nav2] still waiting for bt_navigator to '
+                f'activate ($((ATTEMPT * {poll_interval_s}))s elapsed, '
+                f'last state: ${{STATE:-unknown}})"; '
+                f'fi; '
+                f'done; '
+                f'echo "[kill_fake_nav2] ERROR: bt_navigator did not '
+                f'activate within $(({max_attempts} * {poll_interval_s}))s '
+                f'— real Nav2 lifecycle bring-up appears stuck. '
+                f'fake_nav2_server left running as a fallback. '
+                f'Check lifecycle_manager_navigation and bt_navigator logs." '
+                f'>&2; '
+                f'exit 1'
+            ),
+        ],
+        name='kill_fake_nav2_on_bt_active',
+        output='screen',
+    )
+
+
+def _topo_nav_nodes(tmap2_file, sim, sim_condition, devkit_bringup_pkg):
+    """Inlined topo nav stack with real Nav2 as the navigation backend in
+    BOTH sim and real-hardware modes.
+
+    Previously fake_nav2_server (action servers + clock/TF stub) was the
+    sim-mode backend and real Nav2 was hardware-only. Real Nav2 is now
+    always the navigation backend; fake_nav2_server still starts in sim
+    mode (unconditionally, alongside real Nav2) purely to bridge /clock and
+    map->odom->base_link TF until Gazebo exists, and gets killed by
+    _kill_fake_nav2_action() the moment bt_navigator actually activates.
+    See that function's docstring for the full rationale.
+
+    sim is the 'sim' LaunchConfiguration itself (not yet resolved to a bool)
+    — passed straight through to _nav2_nodes() as use_sim_time, since Nav2's
+    use_sim_time param needs exactly this same true/false value.
     """
     topo_share = get_package_share_directory('topological_navigation')
     map_path = tmap2_file or os.path.join(
@@ -155,9 +252,10 @@ def _topo_nav_nodes(tmap2_file, sim_condition, real_condition, devkit_bringup_pk
             ),
         ]),
 
-        # 3a. Fake Nav2 simulator — SIM ONLY
-        # Provides /navigate_to_pose, /navigate_through_poses, /follow_waypoints
-        # action servers and publishes map -> odom -> base_link TF.
+        # 3a. fake_nav2_server — SIM ONLY, /clock + TF bridge until Gazebo
+        # exists. Its NavigateToPose/etc action servers are a stopgap, not
+        # the real backend — see _kill_fake_nav2_action() below, which kills
+        # this process once real Nav2's bt_navigator is actually active.
         TimerAction(period=2.0, actions=[
             Node(
                 condition=sim_condition,
@@ -173,12 +271,19 @@ def _topo_nav_nodes(tmap2_file, sim_condition, real_condition, devkit_bringup_pk
             ),
         ]),
 
-        # 3b. Real Nav2 — REAL HARDWARE ONLY
-        # Nodes declared explicitly (not via navigation_launch.py include) so
-        # collision_monitor can be cleanly omitted until a sensor is available.
+        # 3b. fake_nav2_server kill watchdog — SIM ONLY. No-op on real
+        # hardware (condition never fires there since fake_nav2_server
+        # never starts).
+        _kill_fake_nav2_action(sim_condition),
+
+        # 3c. Real Nav2 — now the navigation backend in BOTH sim and real
+        # hardware modes (previously real-hardware only). use_sim_time is
+        # the 'sim' LaunchConfiguration itself, resolved at launch time;
         # node_names in nav2_params.yaml controls which nodes the lifecycle
-        # manager brings up — it must match the nodes declared here.
-        TimerAction(period=2.0, actions=_nav2_nodes(nav2_params, real_condition)),
+        # manager brings up — it must match the nodes declared in
+        # _nav2_nodes().
+        TimerAction(period=2.0, actions=_nav2_nodes(
+            nav2_params, use_sim_time=sim)),
 
         # 4. Topological navigation server (delayed 3 s)
         TimerAction(period=3.0, actions=[
@@ -506,4 +611,4 @@ def generate_launch_description():
         ),
 
         # ── Topological Navigation ───────────────────────────────────────────
-    ] + _topo_nav_nodes(tmap2_file, sim_condition, real_condition, devkit_bringup_pkg))
+    ] + _topo_nav_nodes(tmap2_file, sim, sim_condition, devkit_bringup_pkg))
