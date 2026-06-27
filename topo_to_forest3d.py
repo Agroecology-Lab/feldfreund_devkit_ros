@@ -72,6 +72,22 @@ def load_topo(path):
     return nodes
 
 
+def find_spawn_node(nodes, rows):
+    """Pick the topo node the robot should spawn at, in topo-frame coords.
+
+    Prefers a node literally named HOME (the cockpit's convention for the
+    robot's start pose). Falls back to the first row's entry/IN node if no
+    HOME node exists, so single-row or hand-authored maps without a HOME
+    node still get a sane spawn point instead of defaulting to (0,0).
+    """
+    home = nodes.get('HOME')
+    if home is not None:
+        return home['x'], home['y']
+    if rows:
+        return rows[0]['a']
+    return 0.0, 0.0
+
+
 def extract_rows(nodes):
     by_rid = {}
     for name, nd in nodes.items():
@@ -447,6 +463,19 @@ def patch_world_model_poses(world_path, terrain_offset):
           f"({dx:.4f}, {dy:.4f}) to align Forest3D world with topo nav frame")
 
 
+def write_spawn_pose(x, y, z, output_path):
+    """Write the robot spawn pose so sim.launch.py can read it at startup.
+
+    sim.launch.py previously hardcoded -x 0.0 -y 0.0, which only matched
+    HOME's world position by coincidence (before terrain_offset existed,
+    nothing in the world ever moved). Writing it here keeps spawn position
+    derived from the same topo+offset math that places the terrain, instead
+    of drifting out of sync with it.
+    """
+    Path(output_path).write_text(f"{x} {y} {z}\n")
+    print(f"Wrote spawn pose ({x}, {y}, {z}) to {output_path}")
+
+
 def write_forest3d_yaml(params, gps_lat, gps_lon, output_path, density_crop, model_path):
     config = {
         'terrain': {
@@ -498,6 +527,12 @@ if __name__ == '__main__':
                     help='Also run forest3d generate after writing config')
     ap.add_argument('--world-out', default=None,
                     help='Output world path for forest3d generate (optional)')
+    ap.add_argument('--spawn-out', default='/workspace/spawn_pose.txt',
+                    help='Output path for the robot spawn pose (x y z), '
+                         'read by sim.launch.py instead of a hardcoded origin')
+    ap.add_argument('--spawn-z', type=float, default=0.01,
+                    help='Spawn height above ground (base_footprint), '
+                         'matches sim.launch.py default')
     args = ap.parse_args()
 
     nodes = load_topo(args.topo)
@@ -510,6 +545,21 @@ if __name__ == '__main__':
     params, gps_lat, gps_lon, plants_per_row, derived_density, terrain_offset = compute_field_params(
         rows, args.headland, args.row_width, args.plant_spacing)
 
+    # Robot spawn point: the topo map's HOME node (or first row's IN node as
+    # fallback), shifted by the same terrain_offset that's about to be baked
+    # into the world. Without this, the robot spawns at literal world (0,0)
+    # (sim.launch.py's hardcoded default) while the terrain — and HOME's
+    # *intended* position relative to it — has moved by terrain_offset.
+    # Before terrain_offset existed this was harmless because nothing in the
+    # world ever moved; once the world is shifted, HOME and the hardcoded
+    # spawn silently drift apart.
+    spawn_topo_x, spawn_topo_y = find_spawn_node(nodes, rows)
+    spawn_world_x = round(spawn_topo_x + terrain_offset[0], 4)
+    spawn_world_y = round(spawn_topo_y + terrain_offset[1], 4)
+    print(f"  Spawn point (topo HOME -> world): "
+          f"({spawn_topo_x}, {spawn_topo_y}) + offset {terrain_offset} "
+          f"= ({spawn_world_x}, {spawn_world_y})")
+
     # density is only a global ceiling in Forest3D's placement loop. Default it
     # to the geometry-derived count so it never truncates the rows; honour an
     # explicit --density override when given.
@@ -518,6 +568,7 @@ if __name__ == '__main__':
 
     write_forest3d_yaml(params, gps_lat, gps_lon, args.out, density,
                         args.models_path)
+    write_spawn_pose(spawn_world_x, spawn_world_y, args.spawn_z, args.spawn_out)
 
     if args.generate:
         base_cmd = ['python3', '-m', 'forest3d']
