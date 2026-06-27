@@ -3127,8 +3127,27 @@ class NiceGuiNode(Node):
 
                         cmd = (f'ros2 run ros_gz_sim delete -name agro_robot 2>/dev/null; '
                                f'xacro {xacro_file} > /tmp/agro_robot_resolved.urdf && '
+                               # Spawn pose comes from topo_to_forest3d.py's
+                               # HOME-node + terrain_offset calculation (see
+                               # sim.launch.py for the same logic) — NOT a
+                               # hardcoded origin. The world's terrain/crops
+                               # are shifted by terrain_offset, so a fixed
+                               # (0,0) spawn drifts off the actual ground
+                               # once that offset is non-zero. This button
+                               # had its own copy of the old hardcoded
+                               # -x 0.0 -y 0.0 -z 0.3, separate from
+                               # sim.launch.py's spawn_entity, which is why
+                               # fixing sim.launch.py alone didn't help —
+                               # this is the path the UI button actually
+                               # runs. Falls back to legacy (0,0,0.3) if the
+                               # file is missing.
+                               f'SPAWN_FILE="/workspace/spawn_pose.txt"; '
+                               f'if [ -f "$SPAWN_FILE" ]; then '
+                               f'read -r SPAWN_X SPAWN_Y SPAWN_Z < "$SPAWN_FILE"; '
+                               f'else SPAWN_X=0.0; SPAWN_Y=0.0; SPAWN_Z=0.3; fi; '
                                f'ros2 run ros_gz_sim create -name agro_robot '
-                               f'-string "$(cat /tmp/agro_robot_resolved.urdf)" -x 0.0 -y 0.0 -z 0.3 && '
+                               f'-string "$(cat /tmp/agro_robot_resolved.urdf)" '
+                               f'-x "$SPAWN_X" -y "$SPAWN_Y" -z "$SPAWN_Z" && '
                                f'sleep 2 && ros2 run ros_gz_bridge parameter_bridge --ros-args '
                                f'-p use_sim_time:=true -p config_file:={bridge_config} & '
                                f'{nav2_launch_cmd}')
