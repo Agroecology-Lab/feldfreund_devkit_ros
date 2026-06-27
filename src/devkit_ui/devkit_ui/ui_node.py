@@ -3097,16 +3097,46 @@ class NiceGuiNode(Node):
                     try:
                         xacro_file    = f'{_AGRO_PKG}/urdf/{_robot_model["xacro"]}'
                         bridge_config = f'{_AGRO_PKG}/config/ros_gz_bridge.yaml'
+
+                        # Hand off to nav2_only.launch.py for Nav2 — extracted
+                        # from sowbot_sim.launch.py specifically so this manual
+                        # flow can add Nav2 on top of the Gazebo/robot/bridge
+                        # already started above, without sowbot_sim.launch.py's
+                        # preflight_pkill killing them and its own sim_launch
+                        # spawning a duplicate world+robot. Both launch files
+                        # share the same _nav2_sim_nodes()/_nav2_lifecycle_
+                        # manager_node() helpers (nav2_only imports them via
+                        # importlib) so the t+5s lifecycle stagger and
+                        # bond_timeout=15.0 fix live in one place only.
+                        #
+                        # Fixed 10s sleep before launching: the spawn+bridge
+                        # sequence to our left (xacro && create && sleep 2 &&
+                        # bridge) needs a few seconds beyond its own sleep 2
+                        # for ros_gz_bridge to actually start and begin
+                        # publishing /clock — without this, Nav2's lifecycle
+                        # nodes could come up before any sim-time clock source
+                        # exists. Not a readiness check, just a fixed delay
+                        # (matches the style of sim.launch.py's own `sleep 30`
+                        # after its gz-service poll) — increase if this proves
+                        # too short under load.
+                        nav2_launch_cmd = (
+                            f'sleep 10 && '
+                            f'ros2 launch devkit_bringup nav2_only.launch.py '
+                            f'>> /tmp/gazebo_spawn.log 2>&1'
+                        )
+
                         cmd = (f'ros2 run ros_gz_sim delete -name agro_robot 2>/dev/null; '
                                f'xacro {xacro_file} > /tmp/agro_robot_resolved.urdf && '
                                f'ros2 run ros_gz_sim create -name agro_robot '
                                f'-string "$(cat /tmp/agro_robot_resolved.urdf)" -x 0.0 -y 0.0 -z 0.3 && '
                                f'sleep 2 && ros2 run ros_gz_bridge parameter_bridge --ros-args '
-                               f'-p use_sim_time:=true -p config_file:={bridge_config}')
+                               f'-p use_sim_time:=true -p config_file:={bridge_config} & '
+                               f'{nav2_launch_cmd}')
                         _spawn_proc[0] = subprocess.Popen(['/bin/bash', '-c', cmd],
                             stdout=open('/tmp/gazebo_spawn.log', 'w'), stderr=subprocess.STDOUT,
                             start_new_session=True)
-                        _spawn_lbl.set_text(f'spawning {_robot_model["xacro"]} — pid {_spawn_proc[0].pid}')
+                        _spawn_lbl.set_text(
+                            f'spawning {_robot_model["xacro"]} + Nav2 — pid {_spawn_proc[0].pid}')
                         _spawn_lbl.style('color:#1a7f37')
                     except Exception as exc:
                         _spawn_lbl.set_text(f'ERROR: {exc}')
