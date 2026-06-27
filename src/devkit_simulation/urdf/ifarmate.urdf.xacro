@@ -1,0 +1,514 @@
+<?xml version="1.0"?>
+<!--
+  ifarmate.urdf.xacro  —  Gazebo Harmonic, ROS 2 Jazzy
+  4-wheel skid-steer rover on splayed A-frame legs, raised deck, rear mast.
+  Reference: i-Farmate field photo (legs lift deck above 4 rubber tread wheels,
+  thin antenna mast at rear of deck). Front tool-arm attachment NOT modelled here.
+
+  Target dimensions (user-specified):
+    wheel diameter (height)        = 0.22 m   (radius 0.11)
+    wheelbase (front-rear span)    = 0.79 m
+    track width (left-right, both front & rear) = 0.70 m
+    deck height (ground to deck top) = 0.80 m
+    camera mount zone              = 0.86 m to 1.25 m above ground
+                                      (0.64 m above wheel top, 0.39 m tall)
+
+  Plugin / topic wiring copied verbatim from robo_caatinga.urdf.xacro
+  (gz-sim-diff-drive-system, joint-state-publisher, sensors/imu/navsat
+  world plugins) since that file is the one already verified working
+  against this Gazebo + ros_gz_bridge + Nav2 setup.
+-->
+<robot xmlns:xacro="http://www.ros.org/wiki/xacro" name="ifarmate">
+
+  <!-- ── Core dimensions ── -->
+  <xacro:property name="wheel_radius" value="0.11"/>
+  <xacro:property name="wheel_width"  value="0.10"/>
+  <xacro:property name="track_width"  value="0.70"/>   <!-- left-right, front & rear -->
+  <xacro:property name="wheelbase"    value="0.79"/>   <!-- front-rear axle span -->
+
+  <!-- Deck (flat box on top of the spine/legs). Defined before spine
+       because spine_h is derived from it (spine must physically reach
+       the deck's underside — see note below). -->
+  <xacro:property name="deck_len"     value="0.50"/>
+  <xacro:property name="deck_wid"     value="0.46"/>
+  <xacro:property name="deck_h_box"   value="0.04"/>
+  <xacro:property name="deck_height"  value="0.80"/>   <!-- ground -> deck TOP, user spec -->
+  <!-- deck_joint is relative to base_link, which itself sits wheel_radius
+       above the ground (see base_footprint_joint). So the box centre,
+       in base_link-relative terms, is deck_height - wheel_radius - half
+       the box thickness — NOT deck_height - half thickness alone. -->
+  <xacro:property name="deck_z"       value="${deck_height - wheel_radius - deck_h_box/2}"/>
+
+  <!-- Spine (short stub the legs and deck attach to — NOT something
+       visible in the photo as a distinct part; it's a simplification
+       so the legs/deck have a single rigid body to mount on instead of
+       a 4-way strut junction). Per ground-clearance request: spine is
+       now 0.30 m SHORTER than before (was 0.65 m, now 0.35 m) and its
+       BOTTOM is raised 0.30 m above the wheel axles (base_link z=0) —
+       it floats, connected to base_link only through the 4 legs, not
+       through any continuous post all the way to the ground. Its top
+       still must land exactly at the deck's underside (deck_z -
+       deck_h_box/2) with no gap. -->
+  <xacro:property name="spine_len"    value="0.30"/>
+  <xacro:property name="spine_wid"    value="0.12"/>
+  <xacro:property name="spine_h"      value="${deck_z - deck_h_box/2 - 0.30}"/>
+  <!-- spine bottom sits 0.30 m above base_link; centre is bottom + h/2 -->
+  <xacro:property name="spine_bottom" value="0.30"/>
+  <xacro:property name="spine_z"      value="${spine_bottom + spine_h/2}"/>
+
+  <!-- frame_box dimension properties removed along with the link itself -->
+
+  <!-- Mast (rear antenna) -->
+  <xacro:property name="mast_h"       value="0.30"/>
+  <xacro:property name="mast_r"       value="0.006"/>
+  <!-- mast base at deck top, rear-left corner -->
+  <xacro:property name="mast_x"       value="${-deck_len/2 + 0.05}"/>
+  <xacro:property name="mast_y"       value="${deck_wid/2 - 0.05}"/>
+
+  <!-- Leg (A-frame strut from spine BOTTOM/CENTRE down to each wheel hub).
+       Legs attach at spine_link's own origin, which is its CENTRE
+       (spine_z above base_link) — not its bottom — so leg trig below
+       uses dz = -spine_z, matching the leg_joint's parent frame. -->
+  <xacro:property name="leg_radius"   value="0.018"/>
+
+  <!-- ── Materials ── -->
+  <material name="black">  <color rgba="0.08 0.08 0.08 1.0"/> </material>
+  <material name="darkgrey"><color rgba="0.18 0.18 0.18 1.0"/> </material>
+  <material name="ply">    <color rgba="0.80 0.62 0.38 1.0"/> </material>
+  <material name="orange"> <color rgba="0.95 0.45 0.05 1.0"/> </material>
+  <material name="grey">   <color rgba="0.55 0.55 0.55 1.0"/> </material>
+
+  <!-- ══════════════════════════════════════════════════════════════
+       BASE FRAMES
+       base_footprint on the ground; base_link raised to wheel axle
+       height, matching the caatinga convention.
+       ══════════════════════════════════════════════════════════════ -->
+  <link name="base_footprint"/>
+
+  <link name="base_link">
+    <visual>
+      <origin xyz="0 0 0" rpy="0 0 0"/>
+      <geometry> <box size="0.01 0.01 0.01"/> </geometry>
+      <material name="black"/>
+    </visual>
+  </link>
+
+  <joint name="base_footprint_joint" type="fixed">
+    <parent link="base_footprint"/>
+    <child  link="base_link"/>
+    <origin xyz="0 0 ${wheel_radius}" rpy="0 0 0"/>
+  </joint>
+
+  <!-- ══════════════════════════════════════════════════════════════
+       WHEELS  (4x, rubber tread, skid-steer — NOT mecanum)
+       Same rectangular footprint front & rear: track_width 0.70 m
+       both axles, wheelbase 0.79 m between them.
+       ══════════════════════════════════════════════════════════════ -->
+  <xacro:macro name="wheel" params="prefix x y">
+    <link name="${prefix}_wheel">
+      <visual>
+        <origin xyz="0 0 0" rpy="${pi/2} 0 0"/>
+        <geometry> <cylinder radius="${wheel_radius}" length="${wheel_width}"/> </geometry>
+        <material name="black"/>
+      </visual>
+      <collision>
+        <origin xyz="0 0 0" rpy="${pi/2} 0 0"/>
+        <geometry> <cylinder radius="${wheel_radius}" length="${wheel_width}"/> </geometry>
+      </collision>
+      <inertial>
+        <mass value="3.5"/>
+        <!-- cylinder: ixx=iyy=(1/12)*m*(3r²+h²), izz=(1/2)*m*r² -->
+        <inertia ixx="0.014" ixy="0" ixz="0" iyy="0.014" iyz="0" izz="0.021"/>
+      </inertial>
+    </link>
+
+    <!-- Friction in <gazebo reference> — inline <surface> in URDF
+         <collision> is dropped by sdformat conversion on Harmonic. -->
+    <gazebo reference="${prefix}_wheel">
+      <mu>1.5</mu>
+      <mu2>1.5</mu2>
+      <fdir1>1 0 0</fdir1>
+      <slip1>0.0</slip1>
+      <slip2>0.0</slip2>
+      <minDepth>0.001</minDepth>
+      <kp>1e6</kp>
+      <kd>1.0</kd>
+    </gazebo>
+
+    <joint name="${prefix}_wheel_joint" type="continuous">
+      <parent link="base_link"/>
+      <child  link="${prefix}_wheel"/>
+      <origin xyz="${x} ${y} 0" rpy="0 0 0"/>
+      <axis xyz="0 1 0"/>
+      <limit effort="100.0" velocity="10.0"/>
+      <dynamics damping="0.1" friction="0.1"/>
+    </joint>
+  </xacro:macro>
+
+  <xacro:wheel prefix="front_left"  x="${wheelbase/2}"  y="${track_width/2}"/>
+  <xacro:wheel prefix="front_right" x="${wheelbase/2}"  y="-${track_width/2}"/>
+  <xacro:wheel prefix="back_left"   x="-${wheelbase/2}" y="${track_width/2}"/>
+  <xacro:wheel prefix="back_right"  x="-${wheelbase/2}" y="-${track_width/2}"/>
+
+  <!-- ══════════════════════════════════════════════════════════════
+       SIDE CROSSMEMBERS  (rails linking front & rear wheel hubs on
+       each side — a straight bar at axle height, full wheelbase
+       length, one per side. Visual + collision; fixed to base_link
+       at the wheel axle plane, no rotation needed since both wheels
+       on a side share the same y and z.)
+       ══════════════════════════════════════════════════════════════ -->
+  <xacro:property name="crossmember_r" value="0.025"/>
+
+  <xacro:macro name="crossmember" params="prefix y">
+    <link name="${prefix}_crossmember">
+      <visual>
+        <origin xyz="0 0 0" rpy="0 ${pi/2} 0"/>
+        <geometry> <cylinder radius="${crossmember_r}" length="${wheelbase - 2*wheel_radius}"/> </geometry>
+        <material name="darkgrey"/>
+      </visual>
+      <collision>
+        <origin xyz="0 0 0" rpy="0 ${pi/2} 0"/>
+        <geometry> <cylinder radius="${crossmember_r}" length="${wheelbase - 2*wheel_radius}"/> </geometry>
+      </collision>
+      <inertial>
+        <mass value="2.0"/>
+        <inertia ixx="0.02" ixy="0" ixz="0" iyy="0.02" iyz="0" izz="0.005"/>
+      </inertial>
+    </link>
+    <joint name="${prefix}_crossmember_joint" type="fixed">
+      <parent link="base_link"/>
+      <child  link="${prefix}_crossmember"/>
+      <origin xyz="0 ${y} 0" rpy="0 0 0"/>
+    </joint>
+  </xacro:macro>
+
+  <xacro:crossmember prefix="left"  y="${track_width/2}"/>
+  <xacro:crossmember prefix="right" y="${-track_width/2}"/>
+
+  <!-- ══════════════════════════════════════════════════════════════
+       SPINE  (central raised box; legs and deck attach here)
+       ══════════════════════════════════════════════════════════════ -->
+  <link name="spine_link">
+    <visual>
+      <origin xyz="0 0 0" rpy="0 0 0"/>
+      <geometry> <box size="${spine_len} ${spine_wid} ${spine_h}"/> </geometry>
+      <material name="black"/>
+    </visual>
+    <collision>
+      <origin xyz="0 0 0" rpy="0 0 0"/>
+      <geometry> <box size="${spine_len} ${spine_wid} ${spine_h}"/> </geometry>
+    </collision>
+    <inertial>
+      <mass value="4.0"/>
+      <inertia ixx="0.08" ixy="0" ixz="0" iyy="0.08" iyz="0" izz="0.02"/>
+    </inertial>
+  </link>
+
+  <joint name="spine_joint" type="fixed">
+    <parent link="base_link"/>
+    <child  link="spine_link"/>
+    <origin xyz="0 0 ${spine_z}" rpy="0 0 0"/>
+  </joint>
+
+  <!-- ══════════════════════════════════════════════════════════════
+       LEGS  (A-frame struts, spine -> each wheel hub; visual only,
+       collision intentionally omitted since they're thin diagonal
+       rods and the spine/deck box already carries the body collision)
+
+       NOTE: xacro's expression evaluator here does not expose sqrt()
+       or atan2() (raises "undefined variable: sqrt" at parse time),
+       so leg_len/pitch are precomputed numerically below rather than
+       derived at xacro-parse time. They are still exact, not
+       approximated — computed from this file's own spine_z (0.475,
+       updated for the +30cm ground-clearance change: spine shrunk
+       0.30m shorter and its bottom raised 0.30m, moving the centre
+       from 0.325 -> 0.475), wheelbase (0.79) and track_width (0.70):
+         dx = ±wheelbase/2 = ±0.395, dy = ±track_width/2 = ±0.35,
+         dz = -spine_z = -0.475
+         leg_len = sqrt(dx²+dy²+dz²)      = 0.710035
+         pitch   = atan2(sqrt(dx²+dy²),dz) = 2.303633   (same all 4 corners)
+         yaw     = atan2(dy, dx)           = ±0.725069 (front) / ±2.416524 (rear)
+       If wheelbase, track_width, or spine_h are changed, these three
+       numbers must be recomputed (e.g. in a Python/REPL one-liner) and
+       updated here — they will NOT auto-update. -->
+  <xacro:property name="leg_len"   value="0.710035"/>
+  <xacro:property name="leg_pitch" value="2.303633"/>
+
+  <xacro:macro name="leg" params="prefix yaw">
+    <link name="${prefix}_leg">
+      <visual>
+        <origin xyz="0 0 ${leg_len/2}" rpy="0 0 0"/>
+        <geometry> <cylinder radius="${leg_radius}" length="${leg_len}"/> </geometry>
+        <material name="darkgrey"/>
+      </visual>
+      <inertial>
+        <mass value="0.6"/>
+        <inertia ixx="0.005" ixy="0" ixz="0" iyy="0.005" iyz="0" izz="0.001"/>
+      </inertial>
+    </link>
+
+    <joint name="${prefix}_leg_joint" type="fixed">
+      <parent link="spine_link"/>
+      <child  link="${prefix}_leg"/>
+      <origin xyz="0 0 0" rpy="0 ${leg_pitch} ${yaw}"/>
+    </joint>
+  </xacro:macro>
+
+  <!-- yaw values precomputed above: ±0.725069 (front corners),
+       ±2.416524 (rear corners) -->
+  <xacro:leg prefix="front_left"  yaw="0.725069"/>
+  <xacro:leg prefix="front_right" yaw="-0.725069"/>
+  <xacro:leg prefix="back_left"   yaw="2.416524"/>
+  <xacro:leg prefix="back_right"  yaw="-2.416524"/>
+
+  <!-- frame_box (under-deck battery/ESC housing) removed — it was the
+       lowest-hanging body mass between the legs and capped ground
+       clearance. Deck and spine now carry the body without it. -->
+
+  <!-- ══════════════════════════════════════════════════════════════
+       DECK  (flat plywood-look top box; top face sits at deck_height)
+       ══════════════════════════════════════════════════════════════ -->
+  <link name="deck_link">
+    <visual>
+      <origin xyz="0 0 0" rpy="0 0 0"/>
+      <geometry> <box size="${deck_len} ${deck_wid} ${deck_h_box}"/> </geometry>
+      <material name="ply"/>
+    </visual>
+    <collision>
+      <origin xyz="0 0 0" rpy="0 0 0"/>
+      <geometry> <box size="${deck_len} ${deck_wid} ${deck_h_box}"/> </geometry>
+    </collision>
+    <inertial>
+      <mass value="2.5"/>
+      <inertia ixx="0.05" ixy="0" ixz="0" iyy="0.05" iyz="0" izz="0.1"/>
+    </inertial>
+  </link>
+
+  <joint name="deck_joint" type="fixed">
+    <parent link="base_link"/>
+    <child  link="deck_link"/>
+    <origin xyz="0 0 ${deck_z}" rpy="0 0 0"/>
+  </joint>
+
+  <!-- ══════════════════════════════════════════════════════════════
+       MAST  (rear antenna rod)
+       ══════════════════════════════════════════════════════════════ -->
+  <link name="mast_link">
+    <visual>
+      <origin xyz="0 0 0" rpy="0 0 0"/>
+      <geometry> <cylinder radius="${mast_r}" length="${mast_h}"/> </geometry>
+      <material name="black"/>
+    </visual>
+    <inertial>
+      <mass value="0.05"/>
+      <inertia ixx="0.0005" ixy="0" ixz="0" iyy="0.0005" iyz="0" izz="0.0001"/>
+    </inertial>
+  </link>
+
+  <joint name="mast_joint" type="fixed">
+    <parent link="deck_link"/>
+    <child  link="mast_link"/>
+    <origin xyz="${mast_x} ${mast_y} ${deck_h_box/2 + mast_h/2}" rpy="0 0 0"/>
+  </joint>
+
+  <!-- ══════════════════════════════════════════════════════════════
+       CAMERA MOUNT  (user-specified zone: 0.64 m above wheel top,
+       0.39 m tall -> 0.86 m to 1.25 m above ground. Single mount
+       bracket placed at the zone midpoint, 1.055 m above ground,
+       on the mast.)
+       ══════════════════════════════════════════════════════════════ -->
+  <xacro:property name="cam_zone_bottom" value="${wheel_radius*2 + 0.64}"/>
+  <xacro:property name="cam_zone_top"    value="${cam_zone_bottom + 0.39}"/>
+  <xacro:property name="cam_mount_z"     value="${(cam_zone_bottom + cam_zone_top)/2}"/>
+
+  <link name="camera_link">
+    <visual>
+      <origin xyz="0 0 0" rpy="0 0 0"/>
+      <geometry> <box size="0.03 0.09 0.03"/> </geometry>
+      <material name="black"/>
+    </visual>
+    <inertial>
+      <mass value="0.1"/>
+      <inertia ixx="0.001" ixy="0" ixz="0" iyy="0.001" iyz="0" izz="0.001"/>
+    </inertial>
+  </link>
+
+  <!-- mounted directly off base_link at the absolute height computed
+       above, independent of mast/deck so the 0.86-1.25 m ground-height
+       spec holds regardless of other geometry edits -->
+  <joint name="camera_joint" type="fixed">
+    <parent link="base_link"/>
+    <child  link="camera_link"/>
+    <origin xyz="${deck_len/2 - 0.02} 0 ${cam_mount_z - wheel_radius}" rpy="0 0 0"/>
+  </joint>
+
+  <!-- ══════════════════════════════════════════════════════════════
+       GPS  (visual + sensor, mounted on mast top)
+       ══════════════════════════════════════════════════════════════ -->
+  <link name="gps_link">
+    <visual>
+      <geometry> <box size="0.04 0.04 0.015"/> </geometry>
+      <material name="black"/>
+    </visual>
+    <inertial>
+      <mass value="0.05"/>
+      <inertia ixx="0.0005" ixy="0" ixz="0" iyy="0.0005" iyz="0" izz="0.0005"/>
+    </inertial>
+  </link>
+
+  <joint name="gps_joint" type="fixed">
+    <parent link="mast_link"/>
+    <child  link="gps_link"/>
+    <origin xyz="0 0 ${mast_h/2 + 0.01}" rpy="0 0 0"/>
+  </joint>
+
+  <gazebo reference="gps_link">
+    <sensor name="gps_sensor" type="navsat">
+      <always_on>true</always_on>
+      <update_rate>10.0</update_rate>
+      <topic>gps</topic>
+      <gz_frame_id>gps_link</gz_frame_id>
+    </sensor>
+  </gazebo>
+
+  <!-- ══════════════════════════════════════════════════════════════
+       IMU
+       ══════════════════════════════════════════════════════════════ -->
+  <link name="imu_link">
+    <visual>
+      <geometry> <box size="0.02 0.02 0.02"/> </geometry>
+      <material name="black"/>
+    </visual>
+  </link>
+
+  <joint name="imu_joint" type="fixed">
+    <parent link="deck_link"/>
+    <child  link="imu_link"/>
+    <origin xyz="0 0 ${deck_h_box/2 + 0.01}" rpy="0 0 0"/>
+  </joint>
+
+  <gazebo reference="imu_link">
+    <sensor name="imu_sensor" type="imu">
+      <always_on>true</always_on>
+      <update_rate>100</update_rate>
+      <topic>imu</topic>
+      <gz_frame_id>imu_link</gz_frame_id>
+      <imu>
+        <angular_velocity/>
+        <linear_acceleration/>
+      </imu>
+    </sensor>
+  </gazebo>
+
+  <!-- ══════════════════════════════════════════════════════════════
+       LIDAR  (front of deck, optional)
+       ══════════════════════════════════════════════════════════════ -->
+  <xacro:arg name="use_lidar" default="false"/>
+
+  <xacro:if value="$(arg use_lidar)">
+    <link name="lidar_link">
+      <visual>
+        <geometry> <cylinder radius="0.04" length="0.05"/> </geometry>
+        <material name="black"/>
+      </visual>
+    </link>
+
+    <joint name="lidar_joint" type="fixed">
+      <parent link="deck_link"/>
+      <child  link="lidar_link"/>
+      <origin xyz="${deck_len/2 - 0.05} 0 ${deck_h_box/2 + 0.025}" rpy="0 0 0"/>
+    </joint>
+
+    <gazebo reference="lidar_link">
+      <sensor name="lidar" type="gpu_lidar">
+        <pose>0 0 0 0 0 0</pose>
+        <topic>scan</topic>
+        <gz_frame_id>lidar_link</gz_frame_id>
+        <update_rate>10</update_rate>
+        <visualize>false</visualize>
+        <lidar>
+          <scan>
+            <horizontal>
+              <samples>360</samples>
+              <min_angle>-3.14159</min_angle>
+              <max_angle> 3.14159</max_angle>
+            </horizontal>
+          </scan>
+          <range>
+            <min>0.4</min>
+            <max>20.0</max>
+          </range>
+        </lidar>
+      </sensor>
+    </gazebo>
+  </xacro:if>
+
+  <!-- ══════════════════════════════════════════════════════════════
+       DIFF DRIVE PLUGIN — copied verbatim (topics/params) from
+       robo_caatinga.urdf.xacro, which is verified working in this
+       Gazebo + ros_gz_bridge + Nav2 stack. Only wheel_separation
+       updated to this rover's track_width.
+       ══════════════════════════════════════════════════════════════ -->
+  <gazebo>
+    <plugin filename="gz-sim-diff-drive-system"
+            name="gz::sim::systems::DiffDrive">
+      <left_joint>front_left_wheel_joint</left_joint>
+      <left_joint>back_left_wheel_joint</left_joint>
+      <right_joint>front_right_wheel_joint</right_joint>
+      <right_joint>back_right_wheel_joint</right_joint>
+
+      <wheel_separation>${track_width}</wheel_separation>
+      <wheel_radius>${wheel_radius}</wheel_radius>
+
+      <max_linear_acceleration>0.43</max_linear_acceleration>
+      <max_angular_acceleration>1.0</max_angular_acceleration>
+
+      <!-- Leading slash forces global gz topic; without it Harmonic
+           scopes to /model/ifarmate/cmd_vel which the bridge does
+           not route (same fix as caatinga). -->
+      <topic>/cmd_vel</topic>
+      <odom_topic>/odom</odom_topic>
+      <tf_topic>/tf</tf_topic>
+
+      <odom_publish_frequency>50</odom_publish_frequency>
+      <frame_id>odom</frame_id>
+      <child_frame_id>base_footprint</child_frame_id>
+    </plugin>
+  </gazebo>
+
+  <!-- ══════════════════════════════════════════════════════════════
+       JOINT STATE PUBLISHER  — copied from caatinga
+       ══════════════════════════════════════════════════════════════ -->
+  <gazebo>
+    <plugin filename="gz-sim-joint-state-publisher-system"
+            name="gz::sim::systems::JointStatePublisher">
+      <topic>joint_states</topic>
+      <joint_name>front_left_wheel_joint</joint_name>
+      <joint_name>front_right_wheel_joint</joint_name>
+      <joint_name>back_left_wheel_joint</joint_name>
+      <joint_name>back_right_wheel_joint</joint_name>
+    </plugin>
+  </gazebo>
+
+  <!-- ══════════════════════════════════════════════════════════════
+       WORLD-LEVEL SENSOR / IMU / NAVSAT SYSTEM PLUGINS — copied
+       from caatinga
+       ══════════════════════════════════════════════════════════════ -->
+  <gazebo>
+    <plugin filename="gz-sim-sensors-system"
+            name="gz::sim::systems::Sensors">
+      <render_engine>ogre2</render_engine>
+    </plugin>
+  </gazebo>
+
+  <gazebo>
+    <plugin filename="gz-sim-imu-system"
+            name="gz::sim::systems::Imu"/>
+  </gazebo>
+
+  <gazebo>
+    <plugin filename="gz-sim-navsat-system"
+            name="gz::sim::systems::NavSat"/>
+  </gazebo>
+
+</robot>
