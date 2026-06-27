@@ -571,11 +571,20 @@ if __name__ == '__main__':
     # world ever moved; once the world is shifted, HOME and the hardcoded
     # spawn silently drift apart.
     spawn_topo_x, spawn_topo_y = find_spawn_node(nodes, rows)
-    spawn_world_x = round(spawn_topo_x + terrain_offset[0], 4)
-    spawn_world_y = round(spawn_topo_y + terrain_offset[1], 4)
-    print(f"  Spawn point (topo -> world): "
-          f"({spawn_topo_x}, {spawn_topo_y}) + offset {terrain_offset} "
-          f"= ({spawn_world_x}, {spawn_world_y})")
+    # NOTE: topo node coordinates are ALREADY in world/map frame — that's the
+    # entire point of a topo map. terrain_offset is the correction applied to
+    # Forest3D's own internally-generated LOCAL mesh coordinates (which are
+    # centred on the mesh's own origin) to shift the terrain INTO the topo
+    # frame. Adding terrain_offset to a topo node's coordinate double-shifts
+    # it: it moves a point that was already correctly placed, by an offset
+    # that was only ever meant to apply to the terrain mesh itself. Confirmed
+    # against real F2C-authored topo data: F2C_R1_IN at (7.373, -8.246) sits
+    # squarely inside the field's real row band; adding terrain_offset_cross
+    # (-5.696) pushed it to y=-13.942, ~3.25m past the generated terrain's
+    # actual south edge — i.e. off the mesh into open space.
+    spawn_world_x, spawn_world_y = round(spawn_topo_x, 4), round(spawn_topo_y, 4)
+    print(f"  Spawn point (topo node, used as-is — no terrain_offset applied): "
+          f"({spawn_world_x}, {spawn_world_y})")
 
     # density is only a global ceiling in Forest3D's placement loop. Default it
     # to the geometry-derived count so it never truncates the rows; honour an
