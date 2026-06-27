@@ -75,14 +75,31 @@ def load_topo(path):
 def find_spawn_node(nodes, rows):
     """Pick the topo node the robot should spawn at, in topo-frame coords.
 
-    Prefers a node literally named HOME (the cockpit's convention for the
-    robot's start pose). Falls back to the first row's entry/IN node if no
-    HOME node exists, so single-row or hand-authored maps without a HOME
-    node still get a sane spawn point instead of defaulting to (0,0).
+    Uses the FIRST node in the saved map — i.e. whichever node the user
+    placed first in the devkit_ui cockpit — rather than any specific name,
+    since hand-authored UI maps don't follow get_maize_topo.py's HL_S/HL_W/
+    HOME naming convention at all.
+
+    One exception: a node literally named HOME is skipped. get_maize_topo.py
+    (the bootstrap path that runs when no map has been authored yet) writes
+    HOME first in the file, hardcoded to (0.0, 0.0) regardless of where the
+    field actually is — every other node it writes (HL_S/HL_W, R{i}_IN/OUT)
+    is derived from the real crop GT data, but HOME isn't. Before
+    terrain_offset existed this didn't matter (world was never shifted, so
+    world (0,0) and HOME (0,0) coincided by luck); once the world is shifted
+    by terrain_offset — derived from that same row/headland bounding box —
+    adding it to HOME's unrelated fixed origin lands off the edge of the
+    generated terrain instead of on it. So: take the first node, unless it's
+    HOME, in which case take the next one (HL_S/HL_W for bootstrap maps,
+    still field-derived).
+
+    Falls back to the first row's entry/IN node if every node is HOME or the
+    map is otherwise unreachable this way (shouldn't normally happen).
     """
-    home = nodes.get('HOME')
-    if home is not None:
-        return home['x'], home['y']
+    for name, nd in nodes.items():
+        if name == 'HOME':
+            continue
+        return nd['x'], nd['y']
     if rows:
         return rows[0]['a']
     return 0.0, 0.0
@@ -556,7 +573,7 @@ if __name__ == '__main__':
     spawn_topo_x, spawn_topo_y = find_spawn_node(nodes, rows)
     spawn_world_x = round(spawn_topo_x + terrain_offset[0], 4)
     spawn_world_y = round(spawn_topo_y + terrain_offset[1], 4)
-    print(f"  Spawn point (topo HOME -> world): "
+    print(f"  Spawn point (topo -> world): "
           f"({spawn_topo_x}, {spawn_topo_y}) + offset {terrain_offset} "
           f"= ({spawn_world_x}, {spawn_world_y})")
 
