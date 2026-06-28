@@ -126,10 +126,10 @@
          <collision> is dropped by sdformat conversion on Harmonic. -->
     <gazebo reference="${prefix}_wheel">
       <mu>1.5</mu>
-      <mu2>1.5</mu2>
+      <mu2>0.3</mu2>
       <fdir1>1 0 0</fdir1>
       <slip1>0.0</slip1>
-      <slip2>0.0</slip2>
+      <slip2>0.3</slip2>
       <minDepth>0.001</minDepth>
       <kp>1e6</kp>
       <kd>1.0</kd>
