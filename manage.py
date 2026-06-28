@@ -239,6 +239,19 @@ class DevkitManager:
             # models/ground/texture at world-rebuild time.
             '-v', f'{self.root_dir}/uploads:/workspace/uploads',
         ]
+        # Live-mount the devkit source packages (the exact dirs the Dockerfile
+        # COPYs). The image builds with colcon --symlink-install, so install/
+        # symlinks resolve to these — Python/launch/world edits go live on the
+        # next container restart with no rebuild (C++/new entry points still
+        # need `colcon build --symlink-install --packages-select <pkg>` inside
+        # the container). NOT a blanket src/ mount: externals (ublox_dgnss,
+        # ros2graph_explorer, F2C) are git-cloned at build time and would be
+        # shadowed by empty/host dirs.
+        for pkg in ('devkit_driver', 'devkit_bringup',
+                    'devkit_ui', 'devkit_simulation'):
+            src = self.root_dir / 'src' / pkg
+            if src.is_dir():
+                cmd += ['-v', f'{src}:/workspace/src/{pkg}']
         if extra_flags:
             cmd += extra_flags
         cmd += [self.image_name, 'bash', '-c']
