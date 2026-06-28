@@ -5,7 +5,7 @@
         <link name="link">
             <collision name="collision">
                 <geometry>
-                    <mesh><uri>mesh/plant_collision.glb</uri><scale>0.7 0.7 0.7</scale></mesh>
+                    <mesh><uri>mesh/plant_collision.glb</uri><scale>0.01 0.01 0.01</scale></mesh>
                 </geometry>
             </collision>
             <visual name="visual">
