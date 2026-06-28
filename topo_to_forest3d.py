@@ -137,7 +137,8 @@ def extract_rows(nodes):
     return rows
 
 
-def compute_field_params(rows, headland_width, default_row_width, plant_spacing):
+def compute_field_params(rows, headland_width, default_row_width, plant_spacing,
+                          min_furrow_width=0.1):
     if len(rows) < 1:
         sys.exit("ERROR: need at least 1 row")
 
@@ -164,18 +165,34 @@ def compute_field_params(rows, headland_width, default_row_width, plant_spacing)
         gaps = [centres[i+1] - centres[i] for i in range(num_rows - 1)]
         spacing = sum(gaps) / len(gaps)
 
+    # min_furrow_width is the threshold that decides whether the 40%-of-
+    # spacing auto-correction kicks in below. Previously this was hardcoded
+    # to 0.1, conflating two different things: Forest3D's hard schema
+    # minimum (furrow_width >= 0.1, fixed, never changes — see the final
+    # clamp further down) vs. "how narrow a furrow is the caller actually
+    # willing to accept before we override their row_width choice". With
+    # only one value, there was no way to ask for "furrows as narrow as
+    # Forest3D allows" — pushing row_width up close to spacing to shrink the
+    # furrow just re-triggered the same 0.1 check and got silently widened
+    # back out to spacing*0.4, overriding the caller's intent every time.
     row_width = default_row_width
     if spacing > 0:
         furrow_width = spacing - row_width
-        if furrow_width < 0.1:
+        if furrow_width < min_furrow_width:
             furrow_width = spacing * 0.4
             row_width = spacing - furrow_width
     else:
         # Single row (or no measurable spacing): fall back to sane defaults.
-        furrow_width = 0.0
+        furrow_width = max(min_furrow_width, 0.1)
 
     # Clamp to Forest3D's crop_rows schema minimums so an unusual map can never
     # emit a config the generator rejects (row_width >= 0.2, furrow >= 0.1).
+    # This 0.1 is Forest3D's actual schema floor (Forest3DConfig's pydantic
+    # validator requires furrow_width >= 0.1) — distinct from min_furrow_width
+    # above, which is just the caller's preference for when to trust their
+    # own row_width vs. fall back to auto-correction. The schema floor always
+    # applies regardless of what the caller asked for, since going below it
+    # makes `forest3d generate` raise ValidationError and abort entirely.
     row_width = max(row_width, 0.2)
     furrow_width = max(furrow_width, 0.1)
 
@@ -228,7 +245,7 @@ def compute_field_params(rows, headland_width, default_row_width, plant_spacing)
         'field_width': round(max(field_width, 5.0), 2),
         'num_rows': num_rows,
         'row_width': round(row_width, 3),
-        'furrow_width': round(furrow_width, 0),
+        'furrow_width': round(furrow_width, 3),
         'headland_width': headland_width,
         'row_height': 0.15,
         'row_profile': 'rounded',
@@ -591,6 +608,19 @@ if __name__ == '__main__':
     ap.add_argument('--row-width', type=float, default=0.9,
                     help='Default crop row width (m) if spacing cannot be '
                          'measured from the data')
+    ap.add_argument('--min-furrow-width', type=float, default=0.1,
+                    help='Smallest furrow width (m) to accept before the '
+                         '40%%-of-spacing auto-correction kicks in. Defaults '
+                         "to Forest3D's own schema floor (0.1) — set "
+                         '--row-width close to your measured row spacing '
+                         'and leave this at 0.1 to make furrows (the gaps '
+                         'between raised beds) as narrow as Forest3D allows. '
+                         'Forest3D itself never accepts less than 0.1 '
+                         'regardless of this setting; passing 0.0 here just '
+                         'means "accept Forest3D\'s own minimum", not '
+                         '"disable furrows entirely" (furrows cannot be '
+                         'fully removed — 0.1m is the generator\'s hard '
+                         'floor).')
     ap.add_argument('--plant-spacing', type=float, default=1.2,
                     help='Spacing between plants along a row (m). Forest3D '
                          'places int(row_length / plant_spacing) plants per row.')
@@ -619,8 +649,16 @@ if __name__ == '__main__':
 
     print(f"Loaded {len(rows)} rows from {args.topo}")
 
+    # Forest3D's hard schema floor is 0.1 — clamp the requested minimum up to
+    # that so a caller who passes e.g. 0.0 (meaning "as narrow as possible")
+    # gets the actual achievable floor, rather than something that would
+    # still bounce off the inner clamp in compute_field_params for the wrong
+    # reason.
+    min_furrow_width = max(args.min_furrow_width, 0.1)
+
     params, gps_lat, gps_lon, plants_per_row, derived_density, terrain_offset = compute_field_params(
-        rows, args.headland, args.row_width, args.plant_spacing)
+        rows, args.headland, args.row_width, args.plant_spacing,
+        min_furrow_width=min_furrow_width)
 
     # Robot spawn point: the topo map's HOME node (or first row's IN node as
     # fallback), shifted by the same terrain_offset that's about to be baked
