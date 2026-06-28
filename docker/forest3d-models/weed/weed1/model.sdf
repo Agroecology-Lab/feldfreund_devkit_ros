@@ -1,0 +1,18 @@
+<?xml version="1.0" ?>
+<sdf version="1.8">
+    <model name="weed1">
+        <static>true</static>
+        <link name="link">
+            <collision name="collision">
+                <geometry>
+                    <mesh><uri>mesh/weed1_collision.glb</uri><scale>0.01 0.01 0.01</scale></mesh>
+                </geometry>
+            </collision>
+            <visual name="visual">
+                <geometry>
+                    <mesh><uri>mesh/weed1.glb</uri><scale>0.4 0.4 0.4</scale></mesh>
+                </geometry>
+            </visual>
+        </link>
+    </model>
+</sdf>
