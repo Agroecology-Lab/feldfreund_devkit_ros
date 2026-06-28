@@ -480,6 +480,66 @@ def patch_world_model_poses(world_path, terrain_offset):
           f"({dx:.4f}, {dy:.4f}) to align Forest3D world with topo nav frame")
 
 
+def cull_crops_outside_field(world_path, rows, tol):
+    """Delete crop models outside their row's authored IN->OUT span.
+
+    Forest3D plants every row the full rectangular field_length (no per-row
+    length support), so on irregular real fields it fabricates crops past the
+    boundary. Runs after patch_world_model_poses (crops already in topo frame):
+    snap each crop to nearest row by cross-axis, drop it if its along-axis coord
+    is outside [min(IN,OUT), max(IN,OUT)] +/- tol. Trims plants only; the
+    terrain mesh stays a full rectangle. Crop models = uri model://crop/...
+    """
+    import xml.etree.ElementTree as _ET
+
+    world_path = Path(world_path)
+    if not world_path.exists():
+        print(f"WARNING: {world_path} not found — skipping crop cull",
+              file=sys.stderr)
+        return
+
+    mean_dx = sum(abs(r['b'][0] - r['a'][0]) for r in rows) / len(rows)
+    mean_dy = sum(abs(r['b'][1] - r['a'][1]) for r in rows) / len(rows)
+    row_axis, cross_axis = (0, 1) if mean_dx >= mean_dy else (1, 0)
+
+    bands = [((r['a'][cross_axis] + r['b'][cross_axis]) / 2.0,
+              min(r['a'][row_axis], r['b'][row_axis]),
+              max(r['a'][row_axis], r['b'][row_axis])) for r in rows]
+
+    try:
+        root = _ET.parse(world_path).getroot()
+    except _ET.ParseError as exc:
+        print(f"WARNING: cannot parse {world_path} — skipping cull: {exc}",
+              file=sys.stderr)
+        return
+
+    world_elem = root.find("world") or root
+    crops = removed = 0
+    for include in list(world_elem.findall("include")):
+        if not (include.findtext("uri") or "").startswith("model://crop/"):
+            continue
+        crops += 1
+        parts = (include.findtext("pose") or "").split()
+        if len(parts) < 2:
+            continue
+        pos = (float(parts[0]), float(parts[1]))
+        along, cross = pos[row_axis], pos[cross_axis]
+        _, lo, hi = min(bands, key=lambda b: abs(b[0] - cross))
+        if along < lo - tol or along > hi + tol:
+            world_elem.remove(include)
+            removed += 1
+
+    if crops == 0:
+        print(f"WARNING: no model://crop/ includes in {world_path} — nothing "
+              "culled; verify crop category. ", file=sys.stderr)
+        return
+
+    world_path.write_text('<?xml version="1.0" ?>\n'
+                          + _ET.tostring(root, encoding="unicode"))
+    print(f"Culled {removed}/{crops} crop(s) outside authored row spans "
+          f"(tol={tol:.2f}m)")
+
+
 def write_spawn_pose(x, y, z, output_path):
     """Write the robot spawn pose so sim.launch.py can read it at startup.
 
@@ -642,5 +702,9 @@ if __name__ == '__main__':
         # (old approach) leaves crops stranded at origin.
         if args.world_out:
             patch_world_model_poses(args.world_out, terrain_offset)
+
+        # Step 5: trim crops to each row's real IN->OUT span (irregular fields).
+        if args.world_out:
+            cull_crops_outside_field(args.world_out, rows, args.plant_spacing / 2)
 
         print("Done.")
