@@ -231,14 +231,12 @@ _SVG_W, _SVG_H = 900, 480
 _MARGIN, _NODE_R = 56, 17
 
 
-def _build_svg(nodes: dict, selected: Optional[str], current: Optional[str]) -> str:
-    if not nodes:
-        return (f'<svg width="100%" viewBox="0 0 {_SVG_W} {_SVG_H}" '
-                f'style="background:#f6f8fa;border-radius:4px;border:1px solid #d0d7de">'
-                f'<text x="{_SVG_W//2}" y="{_SVG_H//2}" text-anchor="middle" '
-                f'fill="#8c959f" font-family="Courier New" font-size="13">No map loaded</text>'
-                f'</svg>')
+def _node_transform(nodes: dict):
+    """World->screen transform (tx, ty) + extents (dx, dy) for the node bbox.
 
+    Shared by _build_svg and _build_robot_svg so both layers map coordinates
+    identically.
+    """
     xs = [n['x'] for n in nodes.values()]
     ys = [n['y'] for n in nodes.values()]
     dx = (max(xs) - min(xs)) or 1.0
@@ -249,6 +247,41 @@ def _build_svg(nodes: dict, selected: Optional[str], current: Optional[str]) -> 
         return _MARGIN + (x - x_min) / dx * (_SVG_W - 2 * _MARGIN)
     def ty(y):
         return _SVG_H - _MARGIN - (y - y_min) / dy * (_SVG_H - 2 * _MARGIN)
+    return tx, ty, dx, dy
+
+
+def _build_robot_svg(nodes: dict, robot: Optional[tuple]) -> str:
+    """Transparent overlay SVG with only the live robot marker (map frame).
+
+    Kept separate from _build_svg so robot movement updates this layer alone,
+    never replacing the clickable node DOM (which would drop its click handlers).
+    """
+    empty = (f'<svg width="100%" viewBox="0 0 {_SVG_W} {_SVG_H}" '
+             f'xmlns="http://www.w3.org/2000/svg"></svg>')
+    if not nodes or robot is None:
+        return empty
+    tx, ty, dx, dy = _node_transform(nodes)
+    rx, ry, ryaw = robot
+    mx, my = tx(rx), ty(ry)
+    al = 0.07 * max(dx, dy)
+    ex, ey = tx(rx + al * math.cos(ryaw)), ty(ry + al * math.sin(ryaw))
+    return (f'<svg width="100%" viewBox="0 0 {_SVG_W} {_SVG_H}" '
+            f'xmlns="http://www.w3.org/2000/svg">'
+            f'<line x1="{mx:.1f}" y1="{my:.1f}" x2="{ex:.1f}" y2="{ey:.1f}" '
+            f'stroke="#cf222e" stroke-width="3" stroke-linecap="round"/>'
+            f'<circle cx="{mx:.1f}" cy="{my:.1f}" r="7" fill="#cf222e" '
+            f'stroke="#ffffff" stroke-width="2"/></svg>')
+
+
+def _build_svg(nodes: dict, selected: Optional[str], current: Optional[str]) -> str:
+    if not nodes:
+        return (f'<svg width="100%" viewBox="0 0 {_SVG_W} {_SVG_H}" '
+                f'style="background:#f6f8fa;border-radius:4px;border:1px solid #d0d7de">'
+                f'<text x="{_SVG_W//2}" y="{_SVG_H//2}" text-anchor="middle" '
+                f'fill="#8c959f" font-family="Courier New" font-size="13">No map loaded</text>'
+                f'</svg>')
+
+    tx, ty, dx, dy = _node_transform(nodes)
 
     parts: list[str] = [f'<rect width="{_SVG_W}" height="{_SVG_H}" fill="#f6f8fa" rx="4"/>']
 
@@ -690,6 +723,16 @@ class NiceGuiNode(Node):
         """
         if not self._fusion_odom_seen:
             self.latest_odom = msg
+
+    def _robot_pose(self) -> Optional[tuple]:
+        """(x, y, yaw) of the robot in map frame, or None if no odom yet."""
+        od = self.latest_odom
+        if od is None:
+            return None
+        p, q = od.pose.pose.position, od.pose.pose.orientation
+        yaw = math.atan2(2 * (q.w * q.z + q.x * q.y),
+                         1 - 2 * (q.y * q.y + q.z * q.z))
+        return (p.x, p.y, yaw)
 
     # ── map callback ──────────────────────────────────────────────────────────
 
@@ -1627,7 +1670,18 @@ class NiceGuiNode(Node):
 
                     with ui.card().classes('flex-1').style('padding:12px;min-width:0'):
                         ui.html('<div class="sec-label mb-2">Node Map</div>')
-                        map_html = ui.html(_build_svg(self.topo_nodes, None, None))
+                        # Node map + robot marker overlay (same viewBox, so they
+                        # align). Overlay is pointer-events:none so clicks reach
+                        # the nodes; it updates on movement without rebuilding
+                        # the clickable node DOM.
+                        with ui.element('div').classes('relative w-full'):
+                            map_html = ui.html(
+                                _build_svg(self.topo_nodes, None, None)
+                            ).classes('w-full')
+                            robot_html = ui.html(
+                                _build_robot_svg(self.topo_nodes, None)
+                            ).classes('absolute top-0 left-0 w-full').style(
+                                'pointer-events:none')
 
                 with ui.row().classes('w-full gap-3 items-start'):
 
@@ -1794,18 +1848,27 @@ class NiceGuiNode(Node):
                 'color:#cf222e' if self.track_status.startswith('ERROR') else
                 'color:#1a7f37' if running else 'color:#57606a')
 
+            rp = self._robot_pose()
+            rp_key = None if rp is None else (round(rp[0], 1), round(rp[1], 1),
+                                              round(rp[2], 2))
             snap = {'sel': self.topo_selected, 'cur': self.topo_current,
                     'stat': self.topo_nav_status, 'nav': self.topo_navigating,
-                    'nodes': id(self.topo_nodes)}
+                    'nodes': id(self.topo_nodes), 'robot': rp_key}
             changed = {k for k, v in snap.items() if _prev.get(k) != v}
             if not changed:
                 return
             _prev.update(snap)
 
+            if changed & {'robot', 'nodes'}:
+                robot_html.set_content(_build_robot_svg(self.topo_nodes, rp))
+
             if changed & {'sel', 'cur', 'nodes'}:
                 map_html.set_content(
-                    _build_svg(self.topo_nodes, self.topo_selected, self.topo_current))
+                    _build_svg(self.topo_nodes, self.topo_selected,
+                               self.topo_current))
                 inject_click_js()
+
+            if changed & {'sel', 'nodes'}:
                 node_col.clear()
                 with node_col:
                     for nname in sorted(self.topo_nodes):
