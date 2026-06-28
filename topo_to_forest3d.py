@@ -570,7 +570,14 @@ def write_spawn_pose(x, y, z, output_path):
     print(f"Wrote spawn pose ({x}, {y}, {z}) to {output_path}")
 
 
-def write_forest3d_yaml(params, gps_lat, gps_lon, output_path, density_crop, model_path):
+def write_forest3d_yaml(params, gps_lat, gps_lon, output_path, density_crop,
+                        model_path, density_weed=0):
+    density = {'crop': density_crop}
+    # Forest3D's crop_rows places a category only if it has a density entry
+    # (placement does density_config.get(category, 0)). The weed/ models are
+    # ClusteredPlacement, anchored near crops — omit/zero to get a clean field.
+    if density_weed:
+        density['weed'] = density_weed
     config = {
         'terrain': {
             'type': 'crop_rows',
@@ -578,9 +585,7 @@ def write_forest3d_yaml(params, gps_lat, gps_lon, output_path, density_crop, mod
             'material_name': 'Terrain/Soil',
             'crop_rows': params,
         },
-        'density': {
-            'crop': density_crop,
-        },
+        'density': density,
         'paths': {},
     }
     if model_path:
@@ -630,6 +635,10 @@ if __name__ == '__main__':
                          'cap never clips the geometry; pass a value to override.')
     ap.add_argument('--models-path', type=str, default=None,
                     help='Path to Forest3D models directory')
+    ap.add_argument('--weed-density', type=int, default=None,
+                    help='Number of weed models (weed/ category) to scatter, '
+                         'clustered near crops. Defaults to ~40%% of the crop '
+                         'density; 0 disables weeds for a clean field.')
     ap.add_argument('--generate', action='store_true',
                     help='Also run forest3d generate after writing config')
     ap.add_argument('--world-out', default=None,
@@ -690,8 +699,14 @@ if __name__ == '__main__':
     density = args.density if args.density is not None else derived_density
     print(f"  Plants/row: {plants_per_row}  ->  density cap: {density}")
 
+    # Weeds cluster near crops; default to ~65% of the crop count for a visibly
+    # weedy field (above Forest3D's built-in default of 50). Pass 0 to disable.
+    weed_density = (args.weed_density if args.weed_density is not None
+                    else int(density * 0.65))
+    print(f"  Weed density: {weed_density}")
+
     write_forest3d_yaml(params, gps_lat, gps_lon, args.out, density,
-                        args.models_path)
+                        args.models_path, weed_density)
     write_spawn_pose(spawn_world_x, spawn_world_y, args.spawn_z, args.spawn_out)
 
     if args.generate:
@@ -721,9 +736,13 @@ if __name__ == '__main__':
         if not seeded:
             patch_ground_soil_colour(base_dir)
 
-        # Step 2: Place crop models on the terrain.
+        # Step 2: Place crop + weed models. Density via CLI -d, NOT the yaml:
+        # Forest3D's Density schema has no 'weed' field, so a weed count in
+        # forest3d.yaml is dropped and its default (50) used. The -d path honours
+        # arbitrary keys, so it's the only way to control weeds (and set weed=0).
         gen_cmd = [*base_cmd, 'generate', '-t', 'crop_rows',
-                   '-b', str(base_dir)]
+                   '-b', str(base_dir),
+                   '-d', json.dumps({'crop': density, 'weed': weed_density})]
         if args.world_out:
             gen_cmd += ['-o', args.world_out]
         print(f"Running: {' '.join(gen_cmd)}")
