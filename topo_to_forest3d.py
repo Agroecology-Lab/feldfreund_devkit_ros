@@ -228,7 +228,7 @@ def compute_field_params(rows, headland_width, default_row_width, plant_spacing)
         'field_width': round(max(field_width, 5.0), 2),
         'num_rows': num_rows,
         'row_width': round(row_width, 3),
-        'furrow_width': round(furrow_width, 3),
+        'furrow_width': round(furrow_width, 0),
         'headland_width': headland_width,
         'row_height': 0.15,
         'row_profile': 'rounded',
