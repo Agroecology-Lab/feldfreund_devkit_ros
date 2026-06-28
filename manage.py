@@ -252,6 +252,15 @@ class DevkitManager:
             src = self.root_dir / 'src' / pkg
             if src.is_dir():
                 cmd += ['-v', f'{src}:/workspace/src/{pkg}']
+        # Live-mount the static Forest3D asset categories so model.sdf/mesh edits
+        # (scales, swaps) go live on relaunch with no image rebuild. Only crop/
+        # and weed/ — NOT all of models/: ground/ is generated into the image at
+        # world-build time, and bind-mounting it would write the generated
+        # terrain back into the repo. Read-only since these are pure assets.
+        for cat in ('crop', 'weed'):
+            asset = self.root_dir / 'docker' / 'forest3d-models' / cat
+            if asset.is_dir():
+                cmd += ['-v', f'{asset}:/workspace/models/{cat}:ro']
         if extra_flags:
             cmd += extra_flags
         cmd += [self.image_name, 'bash', '-c']
