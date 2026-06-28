@@ -467,8 +467,6 @@
            scopes to /model/ifarmate/cmd_vel which the bridge does
            not route (same fix as caatinga). -->
       <topic>/cmd_vel</topic>
-      <odom_topic>/odom</odom_topic>
-      <tf_topic>/tf</tf_topic>
       <!-- DiffDrive DRIVES the robot but its integrated odom drifts under
            wheel slip/blockage. Sink its odom+tf to unused topics; real
            /odom + odom->base_footprint come from OdometryPublisher below
