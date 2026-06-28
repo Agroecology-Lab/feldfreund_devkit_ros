@@ -56,6 +56,19 @@
   gz_type_name: gz.msgs.Model
   direction: GZ_TO_ROS
 
+# Camera sensor (<topic>camera</topic>): image on gz /camera, info on /camera_info.
+- ros_topic_name: /camera/image_raw
+  gz_topic_name: /camera
+  ros_type_name: sensor_msgs/msg/Image
+  gz_type_name: gz.msgs.Image
+  direction: GZ_TO_ROS
+
+- ros_topic_name: /camera/camera_info
+  gz_topic_name: /camera_info
+  ros_type_name: sensor_msgs/msg/CameraInfo
+  gz_type_name: gz.msgs.CameraInfo
+  direction: GZ_TO_ROS
+
 - ros_topic_name: /clock
   gz_topic_name: /clock
   ros_type_name: rosgraph_msgs/msg/Clock
