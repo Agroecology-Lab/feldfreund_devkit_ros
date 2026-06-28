@@ -467,12 +467,38 @@
            scopes to /model/ifarmate/cmd_vel which the bridge does
            not route (same fix as caatinga). -->
       <topic>/cmd_vel</topic>
-      <odom_topic>/odom</odom_topic>
-      <tf_topic>/tf</tf_topic>
+      <!-- DiffDrive DRIVES the robot but its integrated odom drifts under
+           wheel slip/blockage. Sink its odom+tf to unused topics; real
+           /odom + odom->base_footprint come from OdometryPublisher below
+           (ground-truth world pose). -->
+      <odom_topic>/_diffdrive_odom_unused</odom_topic>
+      <tf_topic>/_diffdrive_tf_unused</tf_topic>
 
       <odom_publish_frequency>50</odom_publish_frequency>
       <frame_id>odom</frame_id>
       <child_frame_id>base_footprint</child_frame_id>
+    </plugin>
+  </gazebo>
+
+  <!-- ══════════════════════════════════════════════════════════════
+       GROUND-TRUTH ODOMETRY (gz-sim8 / Harmonic)
+       Publishes /odom + odom->base_footprint from the model's REAL
+       simulator pose, so odom never drifts under wheel slip/blockage.
+       OdometryPublisher reports pose in the WORLD frame (verified: a
+       model spawned at (5,3) publishes odom (5,3), not 0). Gazebo world
+       == map/topo frame and map->odom is identity, so odom == the
+       robot's true map pose — drift-free, no EKF. Wire-compatible with
+       ros_gz_bridge.yaml (gz /odom + /tf).
+       ══════════════════════════════════════════════════════════════ -->
+  <gazebo>
+    <plugin filename="gz-sim-odometry-publisher-system"
+            name="gz::sim::systems::OdometryPublisher">
+      <odom_frame>odom</odom_frame>
+      <robot_base_frame>base_footprint</robot_base_frame>
+      <odom_topic>/odom</odom_topic>
+      <tf_topic>/tf</tf_topic>
+      <dimensions>3</dimensions>
+      <odom_publish_frequency>50</odom_publish_frequency>
     </plugin>
   </gazebo>
 
