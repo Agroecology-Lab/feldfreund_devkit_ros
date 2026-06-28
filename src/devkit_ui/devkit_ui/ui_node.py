@@ -1796,14 +1796,19 @@ class NiceGuiNode(Node):
         ui.on('topo_node_clicked', on_node_clicked)
 
         def inject_click_js() -> None:
+            # Event delegation: a single document-level listener (attached once,
+            # guarded) that resolves clicks to the nearest .topo-node. Survives
+            # map redraws — unlike per-element onclick, which gets wiped every
+            # time the SVG is rebuilt (on current-node change), leaving the
+            # nodes unclickable.
             ui.run_javascript("""
-                setTimeout(() => {
-                    document.querySelectorAll('.topo-node').forEach(el => {
-                        el.onclick = function() {
-                            emitEvent('topo_node_clicked', {node: this.dataset.node});
-                        };
+                if (!window.__topoDelegated) {
+                    window.__topoDelegated = true;
+                    document.addEventListener('click', (e) => {
+                        const el = e.target.closest('.topo-node');
+                        if (el) emitEvent('topo_node_clicked', {node: el.dataset.node});
                     });
-                }, 150);
+                }
             """)
 
         _prev: dict = {}
