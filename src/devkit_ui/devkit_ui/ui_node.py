@@ -3247,6 +3247,62 @@ class NiceGuiNode(Node):
                     )
                 _spawn_lbl = ui.label('').classes('text-xs font-mono').style('color:#57606a')
 
+                # ── Sowbot Row Follow (sim) ──────────────────────────────
+                # Launches neo.launch.py in sim mode: subscribes to the
+                # Gazebo-bridged /camera/image_raw instead of opening a
+                # V4L2 device, runs the TSM detector, and publishes
+                # /cmd_vel via crop_row_node. limbic_row_follow_node
+                # (started by sim_nav.launch.py) calls /row_follow/enable
+                # on this process when topo nav reaches an _IN node.
+                ui.separator().classes('w-full my-1')
+                _neo_proc: list = [None]
+                _neo_lbl = ui.label('').classes('text-xs font-mono').style('color:#57606a')
+
+                def _start_neo():
+                    if _neo_proc[0] is not None and _neo_proc[0].poll() is None:
+                        _neo_lbl.set_text('already running')
+                        return
+                    try:
+                        _neo_proc[0] = subprocess.Popen(
+                            [
+                                'ros2', 'launch', 'devkit_bringup', 'neo.launch.py',
+                                'use_camera:=false',
+                                'detector:=tsm',
+                                'image_topic:=/camera/image_raw',
+                            ],
+                            stdout=open('/tmp/neo_sim.log', 'w'),
+                            stderr=subprocess.STDOUT,
+                            env=os.environ.copy(),
+                            start_new_session=True,
+                        )
+                        _neo_lbl.set_text(f'running — pid {_neo_proc[0].pid} · log: /tmp/neo_sim.log')
+                        _neo_lbl.style('color:#1a7f37')
+                    except Exception as exc:
+                        _neo_lbl.set_text(f'ERROR: {exc}')
+                        _neo_lbl.style('color:#cf222e')
+
+                def _stop_neo():
+                    if _neo_proc[0] is None:
+                        _neo_lbl.set_text('not running')
+                        return
+                    try:
+                        pgid = os.getpgid(_neo_proc[0].pid)
+                        os.killpg(pgid, signal.SIGTERM)
+                        _neo_proc[0].wait(timeout=5)
+                    except subprocess.TimeoutExpired:
+                        os.killpg(pgid, signal.SIGKILL)
+                        _neo_proc[0].wait(timeout=2)
+                    except Exception:
+                        pass
+                    _neo_proc[0] = None
+                    _neo_lbl.set_text('stopped')
+                    _neo_lbl.style('color:#57606a')
+
+                with ui.row().classes('items-center gap-2 flex-wrap'):
+                    ui.html('<span class=\"sec-label\" style=\"white-space:nowrap\">Sowbot Row Follow</span>')
+                    ui.button('Start', on_click=_start_neo).props('color=positive no-caps').classes('px-4')
+                    ui.button('Stop',  on_click=_stop_neo).props('color=negative outline no-caps').classes('px-4')
+
                 # ── Soil texture import ──────────────────────────────────
                 # Import a soil asset folder (zipped): its image maps are
                 # harvested into /workspace/uploads (persisted across image
