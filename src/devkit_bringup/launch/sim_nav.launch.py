@@ -54,6 +54,8 @@ from ament_index_python.packages import get_package_share_directory
 from launch import LaunchDescription
 from launch.actions import TimerAction
 from launch_ros.actions import Node
+from launch.substitutions import PathJoinSubstitution
+from launch_ros.substitutions import FindPackageShare
 
 
 def generate_launch_description():
@@ -167,6 +169,35 @@ def generate_launch_description():
         ),
     ])
 
+    # ── limbic_row_follow action server (t+4s) ────────────────────────────────
+    # Provides /limbic_row_follow so topo nav can hand off to the vision
+    # pipeline on limbic_row_follow edges. Gated in devkit.launch.py to
+    # real hardware only (comment said Neo's /row_follow/enable wouldn't
+    # exist in sim — it does when neo.launch.py is running). Start at the
+    # same time as navigation2 so the action server is ready before any
+    # goal arrives. Subscribes to /aoc/heartbeat/neo_vision and calls
+    # /row_follow/enable, both published by crop_row_node (neo.launch.py).
+    row_follow_params = PathJoinSubstitution(
+        [FindPackageShare('sowbot_row_follow'), 'config', 'crop_row_params.yaml']
+    )
+    limbic_row_follow = TimerAction(period=4.0, actions=[
+        Node(
+            package='sowbot_row_follow',
+            executable='limbic_row_follow',
+            name='limbic_row_follow',
+            output='screen',
+            parameters=[
+                row_follow_params,
+                {
+                    'row_follow_handover_distance': 1.0,
+                    'heartbeat_timeout_s': 3.0,
+                    'enable_service_timeout_s': 2.0,
+                    'monitor_rate_hz': 10.0,
+                },
+            ],
+        ),
+    ])
+
     # ── topological_map_visualiser (t+5s) ─────────────────────────────────────
     visualiser = TimerAction(period=5.0, actions=[
         Node(
@@ -187,5 +218,6 @@ def generate_launch_description():
         map_manager,
         localisation,
         navigation,
+        limbic_row_follow,
         visualiser,
     ])
