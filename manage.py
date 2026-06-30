@@ -36,6 +36,34 @@ class DevkitManager:
         subprocess.run(['docker', 'stop', self.container_name], capture_output=True)
         sys.exit(0)
 
+    def pull_caatinga(self):
+        """git pull caatingarobotics inside the running container, then
+        colcon rebuild only the caatinga packages. No image rebuild needed
+        because the workspace uses --symlink-install; pure Python changes
+        are live immediately, but a colcon pass is still needed for new
+        entry points or any C++ changes."""
+        CAATINGA_PKGS = [
+            'caatinga_nav',
+            'caatinga_vision',
+            'sowbot_row_follow',
+        ]
+        script = (
+            "set -e && "
+            "cd /workspace/src/caatingarobotics && git pull && "
+            "source /opt/ros/jazzy/setup.bash && "
+            "source /workspace/install/setup.bash && "
+            f"colcon build --symlink-install "
+            f"--packages-select {' '.join(CAATINGA_PKGS)}"
+        )
+        self._log("Pulling caatingarobotics and rebuilding packages...")
+        result = subprocess.run(
+            ['docker', 'exec', '-it', self.container_name, 'bash', '-c', script]
+        )
+        if result.returncode != 0:
+            self._log("pull-caatinga failed.", "ERROR")
+            sys.exit(1)
+        self._log("pull-caatinga done.")
+
     def build(self, full_clean: bool = False, sim: bool = False, pull_external: bool = False):
         """Builds the Docker image.
 
@@ -454,6 +482,8 @@ if __name__ == '__main__':
         # build +pull  -> also re-clone external repos (Stage 8)
         # build +sim   -> combinable with either of the above
         manager.build(full_clean=False, sim=sim, pull_external=pull_external)
+    elif action == 'pull-caatinga':
+        manager.pull_caatinga()
     elif action == 'full-build':
         # full-build -> --no-cache, drops everything (local + external + apt/pip)
         manager.build(full_clean=True, sim=sim)
