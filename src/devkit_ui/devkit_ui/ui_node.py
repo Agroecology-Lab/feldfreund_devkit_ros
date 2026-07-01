@@ -3159,8 +3159,8 @@ class NiceGuiNode(Node):
                                'GZ_SIM_RESOURCE_PATH': '/workspace/models' + (':' + os.environ['GZ_SIM_RESOURCE_PATH'] if os.environ.get('GZ_SIM_RESOURCE_PATH') else '')}
                         _gazebo_proc[0] = subprocess.Popen(
                             ['gz', 'sim', '-r', f'{_AGRO_PKG}/worlds/maize.world'],
-                            stdout=open('/tmp/gazebo_world.log', 'w'), stderr=subprocess.STDOUT,
-                            env=env, start_new_session=True, encoding="utf-8")
+                            stdout=open('/tmp/gazebo_world.log', 'w', encoding="utf-8"), stderr=subprocess.STDOUT,
+                            env=env, start_new_session=True)
                         _gazebo_lbl.set_text(f'world launched — pid {_gazebo_proc[0].pid}')
                         _gazebo_lbl.style('color:#1a7f37')
                     except Exception as exc:
@@ -3229,8 +3229,8 @@ class NiceGuiNode(Node):
                                f'-p use_sim_time:=true -p config_file:={bridge_config} & '
                                f'{nav2_launch_cmd}')
                         _spawn_proc[0] = subprocess.Popen(['/bin/bash', '-c', cmd],
-                            stdout=open('/tmp/gazebo_spawn.log', 'w'), stderr=subprocess.STDOUT,
-                            start_new_session=True, encoding="utf-8")
+                            stdout=open('/tmp/gazebo_spawn.log', 'w', encoding="utf-8"), stderr=subprocess.STDOUT,
+                            start_new_session=True)
                         _spawn_lbl.set_text(
                             f'spawning {_robot_model["xacro"]} + Nav2 — pid {_spawn_proc[0].pid}')
                         _spawn_lbl.style('color:#1a7f37')
