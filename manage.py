@@ -6,7 +6,6 @@ import subprocess
 import sys
 import time
 from pathlib import Path
-from typing import Dict, List
 
 # The Limbic <-> Neo direct crossover-Ethernet link. A host is treated as
 # "on the robot" only if it owns one of these exact addresses; otherwise DDS
@@ -33,7 +32,7 @@ class DevkitManager:
 
     def _handle_exit(self, signum, frame):
         self._log("Shutdown signal received. Stopping container...", "WARN")
-        subprocess.run(['docker', 'stop', self.container_name], capture_output=True)
+        subprocess.run(['docker', 'stop', self.container_name], capture_output=True, check= False)
         sys.exit(0)
 
     def pull_caatinga(self):
@@ -57,7 +56,7 @@ class DevkitManager:
         )
         self._log("Pulling caatingarobotics and rebuilding packages...")
         result = subprocess.run(
-            ['docker', 'exec', '-it', self.container_name, 'bash', '-c', script]
+            ['docker', 'exec', '-it', self.container_name, 'bash', '-c', script], check=False
         )
         if result.returncode != 0:
             self._log("pull-caatinga failed.", "ERROR")
@@ -93,18 +92,18 @@ class DevkitManager:
             build_cmd += ['--build-arg', 'INSTALL_SIM=true']
 
         env = {**os.environ, 'DOCKER_BUILDKIT': '1'}
-        if subprocess.run(build_cmd, env=env).returncode != 0:
+        if subprocess.run(build_cmd, env=env, check=False).returncode != 0:
             self._log("Build failed.", "ERROR")
             sys.exit(1)
 
-    def _get_env_config(self) -> Dict[str, str]:
+    def _get_env_config(self) -> dict[str, str]:
         env_file = self.root_dir / '.env'
         if not env_file.exists():
             return {}
         return {k.strip(): v.strip() for line in env_file.read_text().splitlines()
                 if '=' in line and not line.startswith('#') for k, v in [line.split('=', 1)]}
 
-    def _find_ublox_interfaces(self) -> List[str]:
+    def _find_ublox_interfaces(self) -> list[str]:
         """Returns sysfs interface names for bound ublox cdc_acm devices."""
         ifaces = []
         cdc_path = Path('/sys/bus/usb/drivers/cdc_acm')
@@ -125,27 +124,27 @@ class DevkitManager:
                 pass
         return ifaces
 
-    def _cdc_acm_bind(self, ifaces: List[str]):
+    def _cdc_acm_bind(self, ifaces: list[str]):
         for iface in ifaces:
             subprocess.run(
                 ['sudo', 'sh', '-c', f'echo "{iface}" > /sys/bus/usb/drivers/cdc_acm/bind'],
-                stderr=subprocess.DEVNULL)
+                stderr=subprocess.DEVNULL, check=False)
 
-    def _cdc_acm_unbind(self, ifaces: List[str]):
+    def _cdc_acm_unbind(self, ifaces: list[str]):
         for iface in ifaces:
             subprocess.run(
                 ['sudo', 'sh', '-c', f'echo "{iface}" > /sys/bus/usb/drivers/cdc_acm/unbind'],
-                stderr=subprocess.DEVNULL)
+                stderr=subprocess.DEVNULL, check=False)
 
     def _usb_reset_f9p(self, usb_path: str):
         """Hard-resets F9P to clear stale libusb state."""
         if not usb_path or usb_path == 'virtual':
             return
-        if subprocess.run(['which', 'usbreset'], capture_output=True).returncode != 0:
+        if subprocess.run(['which', 'usbreset'], capture_output=True, check=False).returncode != 0:
             self._log("usbreset not found. Install with: sudo apt install usbutils", "WARN")
             return
         self._log(f"USB reset of F9P at {usb_path}...")
-        result = subprocess.run(['sudo', 'usbreset', usb_path], capture_output=True, text=True)
+        result = subprocess.run(['sudo', 'usbreset', usb_path], capture_output=True, text=True, check=False)
         if result.returncode == 0:
             self._log("F9P USB reset complete.")
             time.sleep(1.0)
@@ -160,7 +159,7 @@ class DevkitManager:
         """
         try:
             result = subprocess.run(['ip', '-4', '-o', 'addr', 'show'],
-                                    capture_output=True, text=True)
+                                    capture_output=True, text=True, check=False)
             if result.returncode != 0:
                 return None
             for line in result.stdout.splitlines():
@@ -205,7 +204,7 @@ class DevkitManager:
             "</Discovery></Domain></CycloneDDS>"
         )
 
-    def _cyclonedds_uri(self, cfg: Dict[str, str], is_sim: bool) -> str:
+    def _cyclonedds_uri(self, cfg: dict[str, str], is_sim: bool) -> str:
         """Picks the right CycloneDDS config for where we're actually running."""
         if is_sim:
             self._log("Sim mode: CycloneDDS on loopback (local-only DDS).")
@@ -225,10 +224,10 @@ class DevkitManager:
                   "CycloneDDS falling back to loopback (local-only DDS).", "WARN")
         return self._loopback_dds_uri()
 
-    def _gpu_render_flags(self) -> List[str]:
+    def _gpu_render_flags(self) -> list[str]:
         # NVIDIA: --gpus. Intel/AMD: /dev/dri (mounted via /dev). Else llvmpipe.
         if shutil.which('nvidia-smi') and subprocess.run(
-                ['nvidia-smi'], capture_output=True).returncode == 0:
+                ['nvidia-smi'], capture_output=True, check=False).returncode == 0:
             self._log("NVIDIA GPU — hardware rendering.", "INFO")
             return ['--gpus', 'all',
                     '--env', 'NVIDIA_VISIBLE_DEVICES=all',
@@ -242,7 +241,7 @@ class DevkitManager:
                 '--env', 'MESA_LOADER_DRIVER_OVERRIDE=llvmpipe']
 
     def _base_docker_cmd(self, env_file: Path, cyclonedds_uri: str,
-                         extra_flags: List[str] = None) -> List[str]:
+                         extra_flags: list[str] | None = None) -> list[str]:
         """Common docker run flags shared by all launch modes.
 
         extra_flags lets a mode add its own volumes/env vars (e.g. limbic-only
@@ -301,7 +300,7 @@ class DevkitManager:
             "if [ -f /workspace/install/setup.bash ]; then source /workspace/install/setup.bash; fi"
         )
 
-    def run(self, extra_args: List[str]):
+    def run(self, extra_args: list[str]):
         """Runs the limbic ROS 2 stack within Docker."""
         env_file = self.root_dir / '.env'
         usb_devices_path = Path('/sys/bus/usb/devices')
@@ -331,7 +330,7 @@ class DevkitManager:
             # Restore ownership of .env to the actual user
             real_user = os.environ.get('SUDO_USER') or os.environ.get('USER') or os.getlogin()
             if env_file.exists():
-                subprocess.run(['sudo', 'chown', f'{real_user}:', str(env_file)], capture_output=True)
+                subprocess.run(['sudo', 'chown', f'{real_user}:', str(env_file)], capture_output=True, check=False)
                 self._log(f"Restored {env_file.name} ownership to {real_user}")
 
             # Unbind so ublox_dgnss can claim the device via libusb
@@ -429,7 +428,7 @@ class DevkitManager:
         )
 
         if shutil.which('xhost'):
-            subprocess.run(['xhost', '+local:docker'], capture_output=True)
+            subprocess.run(['xhost', '+local:docker'], capture_output=True, check=False)
         (self.root_dir / 'maps').mkdir(exist_ok=True)
 
         # Limbic-only flags: topological map env + get_maize_topo.py mount.
@@ -439,12 +438,12 @@ class DevkitManager:
             '-v', f'{self.root_dir}/topo_to_forest3d.py:/workspace/topo_to_forest3d.py:ro',
         ]
         cyclonedds_uri = self._cyclonedds_uri(cfg, is_sim == 'true')
-        docker_cmd = self._base_docker_cmd(env_file, cyclonedds_uri, limbic_flags) + [ros_command]
+        docker_cmd = [*self._base_docker_cmd(env_file, cyclonedds_uri, limbic_flags), ros_command]
 
         self._log(f"Runtime active. Sim: {is_sim.upper()}")
-        subprocess.run(docker_cmd)
+        subprocess.run(docker_cmd, check=False)
 
-    def run_neo(self, extra_args: List[str]):
+    def run_neo(self, extra_args: list[str]):
         """Runs the Neo camera/row-follow stack within Docker.
 
         Intentionally minimal — no world generation, no GPS, no MCU wakeup.
@@ -460,15 +459,15 @@ class DevkitManager:
         )
 
         if shutil.which('xhost'):
-            subprocess.run(['xhost', '+local:docker'], capture_output=True)
+            subprocess.run(['xhost', '+local:docker'], capture_output=True, check=False)
 
         # Neo is a hardware stack: peer-to-peer DDS when on the crossover link,
         # loopback fallback when run standalone on a dev box.
         cyclonedds_uri = self._cyclonedds_uri(cfg, is_sim=False)
-        docker_cmd = self._base_docker_cmd(env_file, cyclonedds_uri) + [ros_command]
+        docker_cmd = [*self._base_docker_cmd(env_file, cyclonedds_uri), ros_command]
 
         self._log("Neo runtime active.")
-        subprocess.run(docker_cmd)
+        subprocess.run(docker_cmd, check=False)
 
 
 if __name__ == '__main__':
@@ -492,7 +491,7 @@ if __name__ == '__main__':
     elif action == 'neo-tsm':
         # Same Neo stack, Triangle Scan Method detector. detector:=tsm is
         # prepended so an explicit detector:= on the command line still wins.
-        manager.run_neo(['detector:=tsm'] + sys.argv[2:])
+        manager.run_neo(['detector:=tsm', *sys.argv[2:]])
     else:
         # 'up' or bare invocation: pass remaining args (or all argv[1:] if not 'up')
         manager.run(sys.argv[2:] if action == 'up' else sys.argv[1:])
