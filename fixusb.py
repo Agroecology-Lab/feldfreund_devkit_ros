@@ -1,10 +1,11 @@
 #!/usr/bin/env python3
 import os
+import platform
 import re
 import subprocess
-import platform
-import serial.tools.list_ports
 from pathlib import Path
+
+import serial.tools.list_ports
 
 # Official Hardware IDs
 UBLOX_VID = 0x1546  # u-blox AG (F9P)

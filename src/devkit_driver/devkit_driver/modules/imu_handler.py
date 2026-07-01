@@ -16,7 +16,6 @@ from rclpy.node import Node
 from sensor_msgs.msg import Imu
 from std_msgs.msg import Header
 
-
 # BNO085 noise figures from the Bosch datasheet.
 # Gyroscope white noise density: ~0.014 °/s/√Hz → ≈ 2.4e-4 rad/s/√Hz
 # At 50 Hz bandwidth: σ ≈ 2.4e-4 * √50 ≈ 1.7e-3 rad/s  → variance ≈ 2.9e-6

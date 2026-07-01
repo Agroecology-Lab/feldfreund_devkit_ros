@@ -1,12 +1,12 @@
 #!/usr/bin/env python3
 import os
+import shutil
+import signal
 import subprocess
 import sys
-import signal
 import time
-import shutil
 from pathlib import Path
-from typing import List, Dict
+from typing import Dict, List
 
 # The Limbic <-> Neo direct crossover-Ethernet link. A host is treated as
 # "on the robot" only if it owns one of these exact addresses; otherwise DDS

@@ -1,9 +1,9 @@
 #!/usr/bin/env python3
-import os
-import subprocess
-import re
-import sys
 import curses
+import os
+import re
+import subprocess
+import sys
 
 VERSION = "7.0-SOWBOT"
 

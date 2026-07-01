@@ -27,10 +27,11 @@ dual-F9P + RTK so fusioncore receives only one heading source.
 """
 import math
 from typing import Optional
+
 import rclpy
 from rclpy.node import Node
-from ublox_ubx_msgs.msg import UBXNavPVT  # pylint: disable=import-error
 from sensor_msgs.msg import Imu
+from ublox_ubx_msgs.msg import UBXNavPVT  # pylint: disable=import-error
 
 # Below this ground speed (mm/s), CoG heading is too noisy to trust as fresh.
 # 0.5 m/s ≈ slow walking pace; tune per platform if your robot creeps slower.

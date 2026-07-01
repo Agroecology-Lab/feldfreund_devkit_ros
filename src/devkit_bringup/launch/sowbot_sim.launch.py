@@ -58,7 +58,6 @@ from launch.launch_description_sources import PythonLaunchDescriptionSource
 from launch.substitutions import LaunchConfiguration
 from launch_ros.actions import Node
 
-
 # ---------------------------------------------------------------------------
 # Nav2 nodes — always use_sim_time=True (Gazebo is already running by the
 # time these are called)

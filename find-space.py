@@ -2,6 +2,7 @@ import os
 import shutil
 import sys
 
+
 def get_size(path):
     """Calculate size of file or directory in bytes."""
     if os.path.islink(path):

@@ -4,9 +4,11 @@ get_maize_topo.py — generate topo map from virtual_maize_field gt_map.csv
 Usage:
   python3 get_maize_topo.py --csv <gt_map.csv> --out <path> --name <name> --rows <N>
 """
-import argparse, csv, sys
-from pathlib import Path
+import argparse
+import csv
+import sys
 from datetime import datetime
+from pathlib import Path
 
 
 def load_csv(path):
