@@ -125,7 +125,7 @@
     <!-- Friction in <gazebo reference> — inline <surface> in URDF
          <collision> is dropped by sdformat conversion on Harmonic. -->
     <gazebo reference="${prefix}_wheel">
-      <mu>1.5</mu>
+      <mu>2.0</mu>
       <mu2>0.3</mu2>
       <fdir1>1 0 0</fdir1>
       <slip1>0.0</slip1>
