@@ -273,7 +273,7 @@ class ObstacleManager:
                 }
                 desc = f'({len(points_ll)} pts)'
 
-            self._obstacles = [*self._obstacles, obs]
+            self._obstacles = (*self._obstacles, obs)
             self._version  += 1
             self._sync_node()
 
