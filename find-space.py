@@ -1,6 +1,5 @@
 import os
 import shutil
-import sys
 
 
 def get_size(path):
@@ -10,7 +9,7 @@ def get_size(path):
     try:
         if os.path.isfile(path):
             return os.path.getsize(path)
-        
+
         total_size = 0
         with os.scandir(path) as it:
             for entry in it:
@@ -38,7 +37,7 @@ def scan_path(target_path, limit=12):
     print(f"\n🔍 Detailed Scan: {target_path}")
     print(f"{'Folder/File':<35} | {'Size':<10}")
     print("-" * 50)
-    
+
     items = []
     try:
         with os.scandir(target_path) as it:
@@ -62,7 +61,7 @@ if __name__ == "__main__":
     # Specific targets for Sam's ThinkPad
     if os.getuid() != 0:
         print("⚠️  Run as 'sudo' to accurately scan /var/lib/docker")
-    
+
     scan_path("/var")
     scan_path("/var/lib")
     if os.path.exists("/var/lib/docker"):
