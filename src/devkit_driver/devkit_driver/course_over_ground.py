@@ -26,7 +26,6 @@ publishes 0 messages with no baseline). Disable this shim when upgrading to
 dual-F9P + RTK so fusioncore receives only one heading source.
 """
 import math
-from typing import Optional
 
 import rclpy
 from rclpy.node import Node
@@ -70,7 +69,7 @@ class CourseOverGround(Node):
             UBXNavPVT, '/rover/ubx_nav_pvt',
             self._cb, 10)
 
-        self._last_good: Optional[Imu] = None
+        self._last_good: Imu | None = None
         self._last_good_t: float = 0.0
         self._pub_count    = 0
         self._stale_count  = 0
