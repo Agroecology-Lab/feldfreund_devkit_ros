@@ -82,6 +82,27 @@ def generate_launch_description():
         output='screen',
     )
 
+    # ── /odom -> /odometry/global relay ───────────────────────────────────────
+    # limbic_row_follow_node subscribes to /odometry/global (the fusioncore
+    # topic name, used on real hardware). fusioncore never runs in sim
+    # (only wired up in devkit.launch.py / ublox_single.launch.py), so without
+    # this relay limbic_row_follow's Phase 1 handover-distance check never
+    # receives a pose and can never fire -- row-following itself still works
+    # fine (crop_row_node steers off the camera image alone, no odometry
+    # needed), but the robot never hands back to nav2 at row end. Same
+    # nav_msgs/Odometry type both ends, so a plain relay (no republish) is
+    # sufficient -- this is not a substitute for real sensor fusion, just
+    # enough for the sim's DiffDrive odometry to reach the one consumer that
+    # needs a /odometry/global pose feed.
+    odom_global_relay = Node(
+        package='topic_tools',
+        executable='relay',
+        name='odom_global_relay',
+        arguments=['/odom', '/odometry/global'],
+        parameters=[sim_time],
+        output='screen',
+    )
+
     # ── Bootstrap odom -> base_footprint (static, wall-time) ──────────────────
     # robot_state_publisher (Gazebo layer) normally provides this.  Without
     # it, localisation2's TF listener can never resolve map->base_link and
@@ -205,6 +226,7 @@ def generate_launch_description():
 
     return LaunchDescription([
         odom_relay,
+        odom_global_relay,
         map_to_odom,
         odom_to_base_footprint,
         base_footprint_to_base_link,
