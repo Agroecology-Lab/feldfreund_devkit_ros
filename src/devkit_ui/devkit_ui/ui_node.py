@@ -3059,7 +3059,7 @@ class NiceGuiNode(Node):
                         env = {**_SIM_ENV, 'DISPLAY': ':99'}
                         # Log to a file (not DEVNULL) so a crashed launch is
                         # diagnosable — tail /tmp/gazebo_sim.log.
-                        _gz_log = open('/tmp/gazebo_sim.log', 'w')
+                        _gz_log = open('/tmp/gazebo_sim.log', 'w',encoding="utf-8")
                         _gazebo_proc[0] = subprocess.Popen(
                             _sim_cmd(),
                             stdout=_gz_log, stderr=subprocess.STDOUT,
@@ -3160,7 +3160,7 @@ class NiceGuiNode(Node):
                         _gazebo_proc[0] = subprocess.Popen(
                             ['gz', 'sim', '-r', f'{_AGRO_PKG}/worlds/maize.world'],
                             stdout=open('/tmp/gazebo_world.log', 'w'), stderr=subprocess.STDOUT,
-                            env=env, start_new_session=True)
+                            env=env, start_new_session=True, encoding="utf-8")
                         _gazebo_lbl.set_text(f'world launched — pid {_gazebo_proc[0].pid}')
                         _gazebo_lbl.style('color:#1a7f37')
                     except Exception as exc:
@@ -3230,7 +3230,7 @@ class NiceGuiNode(Node):
                                f'{nav2_launch_cmd}')
                         _spawn_proc[0] = subprocess.Popen(['/bin/bash', '-c', cmd],
                             stdout=open('/tmp/gazebo_spawn.log', 'w'), stderr=subprocess.STDOUT,
-                            start_new_session=True)
+                            start_new_session=True, encoding="utf-8")
                         _spawn_lbl.set_text(
                             f'spawning {_robot_model["xacro"]} + Nav2 — pid {_spawn_proc[0].pid}')
                         _spawn_lbl.style('color:#1a7f37')
@@ -3279,7 +3279,7 @@ class NiceGuiNode(Node):
                                 'detector:=tsm',
                                 'image_topic:=/camera/image_raw',
                             ],
-                            stdout=open('/tmp/neo_sim.log', 'w'),
+                            stdout=open('/tmp/neo_sim.log', 'w', encoding="utf-8"),
                             stderr=subprocess.STDOUT,
                             env=os.environ.copy(),
                             start_new_session=True,
