@@ -12,14 +12,15 @@ def get_env_config():
     config = {"GPS": "NOT_SET", "GPS1": "NOT_SET", "MCU": "NOT_SET", "IS_JETSON": "false"}
     env_path = ".env"
     if os.path.exists(env_path):
-        with open(env_path, "r") as f:
+        with open(env_path) as f:
             content = f.read()
             for key, pat in [("GPS",  r"GPS_PORT_ROVER=(.*)"),
                               ("GPS1", r"GPS_PORT_ROVER1=(.*)"),
                               ("MCU",  r"MCU_PORT=(.*)"),
                               ("IS_JETSON", r"IS_JETSON=(.*)")]:
                 m = re.search(pat, content)
-                if m: config[key] = m.group(1).strip()
+                if m:
+                    config[key] = m.group(1).strip()
     return config
 
 # Nodes actually present in devkit.launch.py
@@ -106,7 +107,8 @@ def draw(stdscr):
         row += 1
 
         # Hardware ports
-        stdscr.addstr(row, 0, " HARDWARE", curses.A_UNDERLINE); row += 1
+        stdscr.addstr(row, 0, " HARDWARE", curses.A_UNDERLINE)
+        row += 1
         for label, key in [("Rover GPS", "GPS"), ("Base GPS", "GPS1"), ("MCU", "MCU")]:
             port = cfg[key]
             virtual = "virtual" in port.lower()
@@ -117,7 +119,8 @@ def draw(stdscr):
         row += 1
 
         # Node health
-        stdscr.addstr(row, 0, " NODES", curses.A_UNDERLINE); row += 1
+        stdscr.addstr(row, 0, " NODES", curses.A_UNDERLINE)
+        row += 1
         for node, desc in EXPECTED_NODES:
             exists = node in nodes_list
             status = "ACTIVE " if exists else "OFFLINE"
@@ -127,7 +130,8 @@ def draw(stdscr):
         row += 1
 
         # Topic health
-        stdscr.addstr(row, 0, " GPS PIPELINE", curses.A_UNDERLINE); row += 1
+        stdscr.addstr(row, 0, " GPS PIPELINE", curses.A_UNDERLINE)
+        row += 1
         for label, topic in TARGET_TOPICS.items():
             exists = topic in topics_list
             status = "FLOWING" if exists else "SILENT "
@@ -137,7 +141,8 @@ def draw(stdscr):
         row += 1
 
         # GPS fix quality (sampled inline — takes ~3s on first render, then cached)
-        stdscr.addstr(row, 0, " GPS FIX QUALITY", curses.A_UNDERLINE); row += 1
+        stdscr.addstr(row, 0, " GPS FIX QUALITY", curses.A_UNDERLINE)
+        row += 1
         fix_label, fix_col = _sample_fix_quality(run_cmd)
         base_present = "virtual" not in cfg.get("GPS1", "virtual").lower()
         heading_note = "dual-antenna READY" if base_present else "single F9P — heading needs base"
@@ -232,4 +237,4 @@ if __name__ == "__main__":
         except KeyboardInterrupt:
             print("\n  (interrupted)")
     else:
-        print(f"\n  Tip: run './agbot-diagnostic.py full' to sample every topic.")
+        print("\n  Tip: run './agbot-diagnostic.py full' to sample every topic.")
