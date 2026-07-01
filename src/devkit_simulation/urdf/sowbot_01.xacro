@@ -468,6 +468,64 @@
     rpy="0 0.2618 ${pi}"/>
 
   <!-- ══════════════════════════════════════════════════════════════
+       ROW-FOLLOW CAMERA — identical to ifarmate.urdf.xacro's
+       camera_link/camera_sensor (same name, topic, FOV, tilt, and
+       absolute mount height above ground), so crop_row_params.yaml's
+       camera_height_m/camera_tilt_deg (1.055 m / -20 deg) and the
+       image_topic wiring apply unchanged on this platform too.
+
+       Mounted directly off base_link (not mast/pods), same rationale
+       as ifarmate: height spec holds regardless of other geometry.
+       base_link sits at base_link_z (=drive_radius) above ground here,
+       vs wheel_radius on ifarmate — z offset below is adjusted for
+       that so absolute height above ground still comes out to 1.055 m.
+       ══════════════════════════════════════════════════════════════ -->
+  <link name="camera_link">
+    <visual>
+      <origin xyz="0 0 0" rpy="0 0 0"/>
+      <geometry> <box size="0.03 0.09 0.03"/> </geometry>
+      <material name="black"/>
+    </visual>
+    <inertial>
+      <mass value="0.1"/>
+      <inertia ixx="0.001" ixy="0" ixz="0" iyy="0.001" iyz="0" izz="0.001"/>
+    </inertial>
+  </link>
+
+  <joint name="camera_joint" type="fixed">
+    <parent link="base_link"/>
+    <child  link="camera_link"/>
+    <origin xyz="${pod_len/2 - 0.02} 0 ${1.055 - base_link_z}" rpy="0 0 0"/>
+  </joint>
+
+  <!-- Gazebo camera sensor — publishes on /camera/image_raw (gz topic),
+       bridged to ROS via ros_gz_bridge.yaml. Pitched down 20° (rpy "0 0.35 0"),
+       same as ifarmate. use_camera:=false must be passed to neo.launch.py so
+       it subscribes to this topic rather than trying to open a V4L2 device. -->
+  <gazebo reference="camera_link">
+    <sensor name="camera_sensor" type="camera">
+      <always_on>true</always_on>
+      <update_rate>30</update_rate>
+      <topic>camera</topic>
+      <gz_frame_id>camera_link</gz_frame_id>
+      <pose>0 0 0 0 0.35 0</pose>
+      <camera>
+        <horizontal_fov>1.047</horizontal_fov>
+        <image>
+          <width>640</width>
+          <height>480</height>
+          <format>R8G8B8</format>
+        </image>
+        <clip>
+          <near>0.1</near>
+          <far>100</far>
+        </clip>
+      </camera>
+    </sensor>
+  </gazebo>
+
+
+  <!-- ══════════════════════════════════════════════════════════════
        TRACKED VEHICLE PLUGIN  (gz-sim8 / Harmonic)
        TrackedVehicle handles cmd_vel → belt surface velocity.
        TrackController per side sets the actual belt speed.
