@@ -50,7 +50,7 @@ Publications
 
 import rclpy
 from rclpy.node import Node
-from rclpy.qos import QoSProfile, ReliabilityPolicy, DurabilityPolicy
+from rclpy.qos import DurabilityPolicy, QoSProfile, ReliabilityPolicy
 from sensor_msgs.msg import NavSatFix, NavSatStatus
 from ublox_ubx_msgs.msg import UBXNavPVT  # pylint: disable=import-error
 

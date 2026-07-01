@@ -1,4 +1,5 @@
 import os
+
 from ament_index_python.packages import get_package_share_directory
 from launch import LaunchDescription
 from launch.actions import (
@@ -9,9 +10,9 @@ from launch.actions import (
     SetEnvironmentVariable,
     TimerAction,
 )
+from launch.conditions import IfCondition
 from launch.launch_description_sources import PythonLaunchDescriptionSource
 from launch.substitutions import LaunchConfiguration, PythonExpression
-from launch.conditions import IfCondition
 from launch_ros.actions import Node
 from launch_ros.parameter_descriptions import ParameterValue
 
@@ -58,7 +59,7 @@ def _nav2_nodes(params_file, use_sim_time):
             package='nav2_controller',
             executable='controller_server',
             name='controller_server',
-            remappings=remappings + [('cmd_vel', 'cmd_vel_nav')],
+            remappings=[*remappings, ('cmd_vel', 'cmd_vel_nav')],
             output='screen',
             parameters=[{'use_sim_time': use_sim_time_param}, params_file],
             arguments=['--ros-args', '--log-level', 'info'],
@@ -85,7 +86,7 @@ def _nav2_nodes(params_file, use_sim_time):
             package='nav2_behaviors',
             executable='behavior_server',
             name='behavior_server',
-            remappings=remappings + [('cmd_vel', 'cmd_vel_nav')],
+            remappings=[*remappings, ('cmd_vel', 'cmd_vel_nav')],
             output='screen',
             parameters=[{'use_sim_time': use_sim_time_param}, params_file],
             arguments=['--ros-args', '--log-level', 'info'],
@@ -106,7 +107,7 @@ def _nav2_nodes(params_file, use_sim_time):
             package='nav2_velocity_smoother',
             executable='velocity_smoother',
             name='velocity_smoother',
-            remappings=remappings + [('cmd_vel', 'cmd_vel_nav'), ('cmd_vel_smoothed', 'cmd_vel')],
+            remappings=[*remappings, ('cmd_vel', 'cmd_vel_nav'), ('cmd_vel_smoothed', 'cmd_vel')],
             output='screen',
             parameters=[{'use_sim_time': use_sim_time_param}, params_file],
             arguments=['--ros-args', '--log-level', 'info'],
@@ -611,4 +612,4 @@ def generate_launch_description():
         ),
 
         # ── Topological Navigation ───────────────────────────────────────────
-    ] + _topo_nav_nodes(tmap2_file, sim, sim_condition, devkit_bringup_pkg))
+    *_topo_nav_nodes(tmap2_file, sim, sim_condition, devkit_bringup_pkg)])

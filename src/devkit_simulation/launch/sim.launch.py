@@ -1,15 +1,17 @@
 import os
-from launch_ros.actions import Node
-from launch import LaunchDescription
-from launch_ros.parameter_descriptions import ParameterValue
-from launch.substitutions import LaunchConfiguration, Command
+
 from ament_index_python.packages import get_package_share_directory
+from launch import LaunchDescription
 from launch.actions import (
-    DeclareLaunchArgument, ExecuteProcess,
-    RegisterEventHandler, TimerAction,
+    DeclareLaunchArgument,
+    ExecuteProcess,
+    RegisterEventHandler,
+    TimerAction,
 )
 from launch.event_handlers import OnProcessExit
-from launch.substitutions import PathJoinSubstitution
+from launch.substitutions import Command, LaunchConfiguration, PathJoinSubstitution
+from launch_ros.actions import Node
+from launch_ros.parameter_descriptions import ParameterValue
 
 GZ_BIN = "/opt/ros/jazzy/opt/gz_tools_vendor/bin/gz"
 
@@ -95,7 +97,7 @@ def generate_launch_description():
                 'echo "[spawn] spawning agro_robot"; '
                 f'_URDF="${{DEVKIT_URDF:-sowbot_01.xacro}}"; '
                 f'echo "[spawn] using URDF: {urdf_dir}/$_URDF"; '
-                # Spawn pose comes from topo_to_forest3d.py's HOME-node + 
+                # Spawn pose comes from topo_to_forest3d.py's HOME-node +
                 # terrain_offset calculation, not a hardcoded origin — the
                 # world's terrain/crops are shifted by terrain_offset, so a
                 # fixed (0,0) spawn drifts off the topo HOME position once

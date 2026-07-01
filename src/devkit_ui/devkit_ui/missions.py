@@ -80,8 +80,7 @@ import queue
 import re
 import threading
 from dataclasses import dataclass
-from datetime import datetime, timedelta, timezone
-from typing import Optional
+from datetime import datetime, timedelta
 
 import yaml
 
@@ -91,7 +90,7 @@ class ActionDef:
     """Definition of a mission action (drive, weed, etc.)."""
     label: str
     icon: str
-    tool_topic: Optional[str] = None
+    tool_topic: str | None = None
     param_schema: tuple = ()  # Optional parameter definitions for the action
 
 # ── Constants ────────────────────────────────────────────────────────────────
@@ -117,7 +116,7 @@ ACTIONS: dict[str, ActionDef] = {
 
 
 def action_ros_msgs(action_key: str,
-                    action_params: Optional[dict],  # pylint: disable=unused-argument
+                    action_params: dict | None,  # pylint: disable=unused-argument
                     enable: bool) -> list[tuple[str, object]]:
     """Map an action + params to the (topic, value) pairs to publish.
 
@@ -147,14 +146,14 @@ def action_ros_msgs(action_key: str,
 # ── Pure helpers (module-level, easy to test) ────────────────────────────────
 
 def _now_utc() -> datetime:
-    return datetime.now(timezone.utc)
+    return datetime.now(datetime.UTC)
 
 
 def _now_utc_str() -> str:
     return _now_utc().strftime(_TS_FMT)
 
 
-def _parse_ts(s: Optional[str]) -> Optional[datetime]:
+def _parse_ts(s: str | None) -> datetime | None:
     """Parse a stored timestamp back to UTC datetime. Returns None on
     missing or malformed input — callers treat that as 'never ran'.
 
@@ -164,7 +163,7 @@ def _parse_ts(s: Optional[str]) -> Optional[datetime]:
         return None
     for fmt in (_TS_FMT, _TS_FMT_LEGACY):
         try:
-            return datetime.strptime(s, fmt).replace(tzinfo=timezone.utc)
+            return datetime.strptime(s, fmt).replace(tzinfo=datetime.UTC)
         except ValueError:
             pass
     return None
@@ -199,7 +198,7 @@ def _is_due(mission: dict, now: datetime) -> bool:
     return (now - last_at) >= interval
 
 
-def _coerce_record(raw: object, path: str) -> Optional[dict]:
+def _coerce_record(raw: object, path: str) -> dict | None:
     """Validate and normalise a record loaded from YAML.
 
     Returns a dict with all expected fields present, or None if the
@@ -254,7 +253,7 @@ def _coerce_record(raw: object, path: str) -> Optional[dict]:
 def validate_mission(name: str,
                      rows: list,
                      action: str,
-                     repeat_every_hours: Optional[int]) -> Optional[str]:
+                     repeat_every_hours: int | None) -> str | None:
     """Return an error string, or None if OK.
 
     Expects name to already be cleaned (uppercase, only [A-Z0-9_]).
@@ -337,10 +336,10 @@ class MissionStore:
     def add(self, *,
             rows: list,
             action: str,
-            action_params: Optional[dict] = None,
+            action_params: dict | None = None,
             name: str = '',
-            repeat_every_hours: Optional[int] = None,
-            active: bool = True) -> Optional[str]:
+            repeat_every_hours: int | None = None,
+            active: bool = True) -> str | None:
         """Add a mission. Returns its allocated id, or None on failure.
         Status carries the reason either way."""
         # Clean name before validation so validate_mission sees the final form.
@@ -374,7 +373,7 @@ class MissionStore:
                 'last_run_at':        None,
                 'last_run_success':   None,
             }
-            self._missions = self._missions + (mission,)
+            self._missions = (*self._missions, mission)
             self._version += 1
             self._sync_node()
             snapshot = list(self._missions)
@@ -535,7 +534,7 @@ class MissionStore:
                 out.append((m['id'], r, action, params))
         return out
 
-    def next_due_in_hours(self, mid: str) -> Optional[float]:
+    def next_due_in_hours(self, mid: str) -> float | None:
         """For the UI chip. Returns one of:
 
             DUE_NOW    (0.0)   active, never run yet
@@ -570,7 +569,7 @@ class MissionStore:
         delta_s = (last_at + interval - _now_utc()).total_seconds()
         return max(DUE_NOW, delta_s / 3600.0)
 
-    def find(self, mid: str) -> Optional[dict]:
+    def find(self, mid: str) -> dict | None:
         """Lock-free single-mission lookup by id. Returns the dict from
         the current snapshot — treat as read-only."""
         for m in self._missions:
@@ -578,7 +577,7 @@ class MissionStore:
                 return m
         return None
 
-    def find_by_name(self, name: str) -> Optional[dict]:
+    def find_by_name(self, name: str) -> dict | None:
         """Lock-free lookup by operator name. Returns the first match.
         Useful for collision checks before add() (e.g. the UI_RUN record
         the executor creates to anchor repeat intervals)."""

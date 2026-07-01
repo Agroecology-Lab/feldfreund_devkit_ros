@@ -45,14 +45,13 @@ import math
 import os
 import re
 import threading
-from datetime import datetime, timezone
-from typing import Callable, Optional
+from collections.abc import Callable
+from datetime import datetime
 
 import yaml
 from geometry_msgs.msg import Point32, PolygonStamped
 from nicegui import ui
-from rclpy.qos import (DurabilityPolicy, HistoryPolicy,
-                       QoSProfile, ReliabilityPolicy)
+from rclpy.qos import DurabilityPolicy, HistoryPolicy, QoSProfile, ReliabilityPolicy
 
 # ── Constants ────────────────────────────────────────────────────────────────
 
@@ -136,7 +135,7 @@ def obstacles_to_rings_ll(
 
 
 def validate_obstacle(kind: str, lat, lon, radius_m,
-                      points_ll) -> Optional[str]:
+                      points_ll) ->str | None:
     """Validate add() inputs. Returns an error string or None.
 
     Module-level so tests don't have to instantiate ObstacleManager.
@@ -188,7 +187,7 @@ class ObstacleManager:
         # _last_anchor tracks whether we've ever successfully published.
         # Used by the cold-start timer to fire exactly once when GPS+odom
         # first become available, then never again (timer cancels itself).
-        self._last_anchor: Optional[tuple] = None
+        self._last_anchor: tuple | None = None
         self._anchor_timer                 = None
 
     # ── lifecycle ─────────────────────────────────────────────────────────
@@ -220,11 +219,11 @@ class ObstacleManager:
     # ── public API ────────────────────────────────────────────────────────
 
     def add(self, kind: str, *,
-            lat: Optional[float] = None,
-            lon: Optional[float] = None,
+            lat: float | None = None,
+            lon: float | None = None,
             radius_m: float = 0.5,
-            points_ll: Optional[list] = None,
-            name: str = '') -> Optional[str]:
+            points_ll: list | None = None,
+            name: str = '') ->str | None:
         """Add a circle or polygon obstacle. Returns the allocated name on
         success, None on failure (status carries the reason either way)."""
 
@@ -235,7 +234,7 @@ class ObstacleManager:
 
         clean = _NAME_CLEAN.sub(
             '', (name or '').strip().upper().replace(' ', '_'))
-        timestamp = datetime.now(timezone.utc).strftime('%d-%m-%Y_%H-%M-%S')
+        timestamp = datetime.now(datetime.UTC).strftime('%d-%m-%Y_%H-%M-%S')
 
         # Lock covers name allocation + tuple replacement + version bump.
         # Disk write and publish happen after release, in a thread.
@@ -274,7 +273,7 @@ class ObstacleManager:
                 }
                 desc = f'({len(points_ll)} pts)'
 
-            self._obstacles = self._obstacles + (obs,)
+            self._obstacles = (*self._obstacles, obs)
             self._version  += 1
             self._sync_node()
 
@@ -372,7 +371,7 @@ class ObstacleManager:
 
     # ── publishing ────────────────────────────────────────────────────────
 
-    def _current_anchor(self) -> Optional[tuple]:
+    def _current_anchor(self) -> tuple | None:
         """(map_x, map_y, lat, lon) for projecting obstacles into the map
         frame. Returns None if either odom or GPS is missing/degenerate."""
         if self._node is None:

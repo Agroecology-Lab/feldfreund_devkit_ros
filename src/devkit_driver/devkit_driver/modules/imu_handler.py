@@ -16,7 +16,6 @@ from rclpy.node import Node
 from sensor_msgs.msg import Imu
 from std_msgs.msg import Header
 
-
 # BNO085 noise figures from the Bosch datasheet.
 # Gyroscope white noise density: ~0.014 °/s/√Hz → ≈ 2.4e-4 rad/s/√Hz
 # At 50 Hz bandwidth: σ ≈ 2.4e-4 * √50 ≈ 1.7e-3 rad/s  → variance ≈ 2.9e-6
@@ -82,7 +81,7 @@ class ImuHandler:
         """Called by the feldfreund_devkit event loop each time new IMU data arrives."""
         try:
             msg = self._build_message()
-        except Exception as exc:  # noqa: BLE001
+        except Exception as exc:
             self.log.warning(f'ImuHandler: could not build Imu message: {exc}')
             return
         self._pub.publish(msg)

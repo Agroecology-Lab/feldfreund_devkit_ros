@@ -16,10 +16,11 @@ NAV-RELPOSNED heading is True North referenced, degrees × 1e-5.
 ROS convention: ENU yaw.  NED → ENU: yaw_ENU = π/2 - heading_NED_rad
 """
 import math
+
 import rclpy
 from rclpy.node import Node
-from ublox_ubx_msgs.msg import UBXNavRelPosNED  # pylint: disable=import-error
 from sensor_msgs.msg import Imu
+from ublox_ubx_msgs.msg import UBXNavRelPosNED  # pylint: disable=import-error
 
 # Minimum antenna separation in metres — below this the heading geometry is unreliable
 _MIN_BASELINE_M = 0.3

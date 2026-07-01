@@ -1,20 +1,27 @@
 #!/usr/bin/env python3
 
+import logging
+import os
 import threading
 from pathlib import Path
-import os
-import logging
 
 import rclpy
+from ament_index_python.packages import get_package_share_directory
 from feldfreund_devkit import FeldfreundHardware, FeldfreundSimulation, System, api
 from feldfreund_devkit.config import config_from_file
 from nicegui import app, ui, ui_run
 from rclpy.executors import ExternalShutdownException
 from rclpy.node import Node
-from ament_index_python.packages import get_package_share_directory
 
-from devkit_driver.modules import (BMSHandler, BumperHandler, EStopHandler,
-                                   ImuHandler, OdomHandler, RobotBrainHandler, TwistHandler)
+from devkit_driver.modules import (
+    BMSHandler,
+    BumperHandler,
+    EStopHandler,
+    ImuHandler,
+    OdomHandler,
+    RobotBrainHandler,
+    TwistHandler,
+)
 
 
 class DevkitDriver(Node):
@@ -75,7 +82,7 @@ def on_startup() -> None:
     # Priority 3: Relative path from script (host-side execution fallback)
     if not config_path.exists():
         config_path = Path(__file__).parents[3] / 'devkit_bringup/config/feldfreund.py'
-    
+
     logging.basicConfig(level=logging.INFO, format="%(levelname)s: %(message)s")
     log = logging.getLogger("devkit_driver.startup")
 

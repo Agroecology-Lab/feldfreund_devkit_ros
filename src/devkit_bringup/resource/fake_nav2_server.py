@@ -25,20 +25,17 @@ import threading
 import time
 
 import rclpy
-from rclpy.action import ActionServer, CancelResponse, GoalResponse
-from rclpy.callback_groups import ReentrantCallbackGroup
-from rclpy.executors import MultiThreadedExecutor
-from rclpy.node import Node
-
 from geometry_msgs.msg import Pose, PoseStamped
 from nav2_msgs.action import (
     FollowWaypoints,
     NavigateThroughPoses,
     NavigateToPose,
 )
-
+from rclpy.action import ActionServer, CancelResponse, GoalResponse
+from rclpy.callback_groups import ReentrantCallbackGroup
+from rclpy.executors import MultiThreadedExecutor
+from rclpy.node import Node
 from rosgraph_msgs.msg import Clock
-
 from topological_nav_simulator.virtual_robot import (
     VirtualRobot,
     _euler_from_quaternion,

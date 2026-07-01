@@ -1,10 +1,11 @@
 #!/usr/bin/env python3
 import os
+import platform
 import re
 import subprocess
-import platform
-import serial.tools.list_ports
 from pathlib import Path
+
+import serial.tools.list_ports
 
 # Official Hardware IDs
 UBLOX_VID = 0x1546  # u-blox AG (F9P)
@@ -25,7 +26,7 @@ def get_existing_safety_ack():
     env_path = Path('.env')
     if not env_path.exists():
         return 'false'
-    with open(env_path, 'r') as f:
+    with open(env_path) as f:
         for line in f:
             if line.startswith('SOWBOT_SAFETY_ACK='):
                 return line.strip().split('=')[1].lower()
@@ -69,10 +70,10 @@ def sanitize_hardware(port, baud):
         return
     print(f'Sanitizing {port} at {baud}...')
     try:
-        subprocess.run(['sudo', 'fuser', '-k', port], stderr=subprocess.DEVNULL)
-        subprocess.run(['sudo', 'setserial', port, 'low_latency'], stderr=subprocess.DEVNULL)
-        subprocess.run(['sudo', 'stty', '-F', port, baud, 'raw', '-echo'], stderr=subprocess.DEVNULL)
-        subprocess.run(['sudo', 'chmod', '666', port], stderr=subprocess.DEVNULL)
+        subprocess.run(['sudo', 'fuser', '-k', port], stderr=subprocess.DEVNULL, check=False)
+        subprocess.run(['sudo', 'setserial', port, 'low_latency'], stderr=subprocess.DEVNULL, check=False)
+        subprocess.run(['sudo', 'stty', '-F', port, baud, 'raw', '-echo'], stderr=subprocess.DEVNULL, check=False)
+        subprocess.run(['sudo', 'chmod', '666', port], stderr=subprocess.DEVNULL, check=False)
     except Exception as e:
         print(f'Warning during sanitization of {port}: {e}')
 
@@ -84,14 +85,14 @@ def find_usb_bus_path(vid: int) -> str:
     Returns 'virtual' if not found.
     """
     try:
-        result = subprocess.run(['lsusb'], capture_output=True, text=True)
+        result = subprocess.run(['lsusb'], capture_output=True, text=True, check=False)
         vid_hex = f'{vid:04x}'
         for line in result.stdout.splitlines():
             if vid_hex in line.lower():
                 m = re.match(r'Bus (\d+) Device (\d+)', line)
                 if m:
                     path = f'/dev/bus/usb/{m.group(1)}/{m.group(2)}'
-                    subprocess.run(['sudo', 'chmod', '666', path], stderr=subprocess.DEVNULL)
+                    subprocess.run(['sudo', 'chmod', '666', path], stderr=subprocess.DEVNULL, check=False)
                     return path
     except Exception as e:
         print(f'Warning: USB bus path detection failed: {e}')
@@ -135,7 +136,7 @@ def detect_camera() -> tuple[str, str]:
     try:
         result = subprocess.run(
             ['v4l2-ctl', '--list-devices'],
-            capture_output=True, text=True, timeout=5)
+            capture_output=True, text=True, timeout=5, check=False)
         output = result.stdout
 
         current_is_hi = False
@@ -301,7 +302,8 @@ def scan_and_export():
             ['ping', '-c', '1', '-W', '1', AXIS_IP],
             stdout=subprocess.DEVNULL,
             stderr=subprocess.DEVNULL,
-            timeout=2
+            timeout=2,
+            check=False
         ).returncode == 0 else 'false'
     except (subprocess.TimeoutExpired, OSError):
         axis_cam = 'false'
@@ -331,7 +333,7 @@ def scan_and_export():
         existing_ntrip = os.environ.get('NTRIP_ENABLED', 'false')
         f.write(f'NTRIP_ENABLED={existing_ntrip}\n')
 
-    print(f'\nConfiguration Exported to .env')
+    print('\nConfiguration Exported to .env')
     print(f'Safety Ack: {safety_ack} | MCU: {mcu_p}')
     print(f'Rover:  {r_port}  usb={r_usb_path}  serial={r_serial or "none"}  type={r_type}')
     print(f'Rover1: {r1_port}  usb={r1_usb_path}  serial={r1_serial or "none"}  type={r1_type}')

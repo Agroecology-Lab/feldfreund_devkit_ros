@@ -2,9 +2,9 @@
 import math
 import time
 
+import rclpy
 from geometry_msgs.msg import PoseStamped
 from nav2_simple_commander.robot_navigator import BasicNavigator, TaskResult
-import rclpy
 
 """
 SCRIPT DE MISSÃO AGRÍCOLA - ROTA GRAVADA (CORRIGIDO)
