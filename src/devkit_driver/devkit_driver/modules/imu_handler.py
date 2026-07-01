@@ -81,7 +81,7 @@ class ImuHandler:
         """Called by the feldfreund_devkit event loop each time new IMU data arrives."""
         try:
             msg = self._build_message()
-        except Exception as exc:  # noqa: BLE001
+        except Exception as exc:
             self.log.warning(f'ImuHandler: could not build Imu message: {exc}')
             return
         self._pub.publish(msg)

@@ -16,11 +16,9 @@ generates raised beds (crop rows) with furrows between — the driving lanes.
 
 import argparse
 import json
-import math
 import subprocess
 import sys
 from pathlib import Path
-from typing import Optional
 
 try:
     import yaml

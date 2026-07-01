@@ -97,7 +97,7 @@ def generate_launch_description():
                 'echo "[spawn] spawning agro_robot"; '
                 f'_URDF="${{DEVKIT_URDF:-sowbot_01.xacro}}"; '
                 f'echo "[spawn] using URDF: {urdf_dir}/$_URDF"; '
-                # Spawn pose comes from topo_to_forest3d.py's HOME-node + 
+                # Spawn pose comes from topo_to_forest3d.py's HOME-node +
                 # terrain_offset calculation, not a hardcoded origin — the
                 # world's terrain/crops are shifted by terrain_offset, so a
                 # fixed (0,0) spawn drifts off the topo HOME position once

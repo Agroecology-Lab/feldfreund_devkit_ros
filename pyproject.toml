@@ -92,6 +92,7 @@ ignore = [
     "PLR0913", # too many arguments
     "PLR0915", # too many statements
     "PLR2004", # magic value comparison
+    "PLC0415", # import should be at top of file
 ]
 
 [tool.pytest.ini_options]
