@@ -83,6 +83,8 @@ fixable = [
 ]
 ignore = [
     "RUF001", # string contains ambiguous char
+    "RUF002", # docstring contains ambiguous char
+    "RUF003", # comment contains ambiguous char
     "E501", # line too long
     "B024", # abstract base class without abstract methods
     "PLR0911", # too many return statements
