@@ -625,7 +625,21 @@ class NiceGuiNode(Node):
         )
         self._fusion_odom_seen: bool = False
 
+        # Position covariance (diagonal xx) threshold below which a
+        # /fusion/odom message is trusted enough to take over from ground
+        # truth. fusioncore publishes early, low-confidence estimates before
+        # heading validates / lever arm resolves (e.g. covariance still huge,
+        # origin at 0,0) — latching onto the FIRST message unconditionally
+        # (previous behaviour) froze the UI marker on a garbage pose forever,
+        # since /odom stops updating latest_odom the instant any /fusion/odom
+        # message arrives. Now we keep tracking /odom until fusion's own
+        # reported covariance says it's actually trustworthy.
+        _FUSION_COV_TRUST_THRESHOLD = 1.0  # m^2 — matches fusioncore_sim.yaml's loosened floor
+
         def _store_fusion_odom(m: Odometry) -> None:
+            cov_xx = m.pose.covariance[0]
+            if cov_xx <= 0.0 or cov_xx > _FUSION_COV_TRUST_THRESHOLD:
+                return  # not trustworthy yet — let /odom keep driving the marker
             self._fusion_odom_seen = True
             self.latest_odom = m
 
@@ -633,11 +647,10 @@ class NiceGuiNode(Node):
         self.create_subscription(Odometry, '/odom',
                                  self._odom_fallback, _ODOM_QOS)
 
-        # In sim mode, /fusion/odom is never published (no EKF) and /odom only
-        # arrives once the Gazebo bridge is up.  fake_nav2_server publishes
-        # /odometry/global at 30 Hz from boot, giving the UI a live pose for
-        # drop_topo_node before Gazebo is launched.  On real hardware this topic
-        # is absent so the subscription is a silent no-op.
+        # /odometry/global is fed by a relay of /fusion/odom in sim (see
+        # sim_nav.launch.py) — same trust gating applies via _odom_fallback's
+        # self._fusion_odom_seen check, so it won't overwrite a good pose with
+        # a stale/uninitialized one either.
         self.create_subscription(Odometry, '/odometry/global',
                                  self._odom_fallback, _ODOM_QOS)
 
