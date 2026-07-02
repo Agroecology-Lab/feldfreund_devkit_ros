@@ -22,6 +22,8 @@
   ros_type_name: nav_msgs/msg/Odometry
   gz_type_name: gz.msgs.Odometry
   direction: GZ_TO_ROS
+  publisher_qos:
+    reliability: reliable
 
 # NOTE: no gz /tf bridge entry. The ghost DiffDrive plugin no longer has
 # <tf_topic> — fusioncore is the sole publisher of odom->base_link, direct
