@@ -1,0 +1,74 @@
+# config/fusioncore_sim.yaml
+# FusionCore UKF — Gazebo sim variant.
+#
+# Differences from config/fusioncore.yaml (real hardware):
+#   - gnss.heading_topic left empty: no dual-antenna in sim, yaw comes from
+#     the IMU sensor plugin alone.
+#   - min_fix_type lowered: gz-sim-navsat-system has no RTK concept, every
+#     fix looks like plain GPS (fix_type=1). min_fix_type=4 would reject
+#     every fix and the filter would run on wheel odom + IMU only, forever.
+#   - noise floors set to a conservative non-zero default. gz-sim's
+#     gps_sensor/imu_sensor in sowbot_01.xacro currently have NO <noise>
+#     block at all (checked directly) — sim GNSS/IMU are noiseless. These
+#     floors exist so the UKF doesn't treat sim fixes as exact and so the
+#     filter behaves sanely once noise is eventually added to the sensors.
+#     Do not copy these values back onto the real robot config, and revisit
+#     once <noise> blocks are added to gps_sensor/imu_sensor.
+#
+# Topics /gnss/fix, /odom/wheels are hardcoded in fusioncore (see
+# fusioncore.yaml header) and are provided in sim by ros_gz_bridge.yaml
+# (/gnss/fix, /imu/data) plus the /odom -> /odom/wheels relay in
+# sim_nav.launch.py.
+
+fusioncore:
+  ros__parameters:
+
+    base_frame:   base_link
+    odom_frame:   odom
+    publish_rate: 30.0
+
+    publish.force_2d: true
+
+    # ── GNSS ──────────────────────────────────────────────────────────────────
+    # No dual-antenna in sim — leave blank, yaw comes from IMU only.
+    gnss.heading_topic: ""
+
+    # gz-sim-navsat-system reports plain GPS (fix_type=1) — never RTK.
+    # min_fix_type=1 accepts it; the real robot's min_fix_type=4 would
+    # silently reject every fix in sim and starve the filter of GNSS updates.
+    gnss.min_fix_type: 1
+
+    # Looser than real-hardware 9.49. Sim GNSS is currently noiseless (see
+    # header), so this mainly guards against startup transients, not real
+    # sensor outliers — revisit once gps_sensor gets a <noise> block.
+    outlier_threshold_gnss: 16.27
+
+    encoder.nhc_vy_sigma: 3.0
+
+    # Non-zero floor only — sim GNSS is noiseless (see header), real value
+    # would be near-0 which the UKF shouldn't be told to trust literally.
+    gnss.base_noise_xy: 1.0
+    gnss.base_noise_z:  2.0
+
+    # No heading measurement in sim (see gnss.heading_topic above), so this
+    # fallback is unused — left at the real-hardware default for parity.
+    gnss.heading_noise: 0.017
+
+    gnss.lever_arm_x: 0.0
+    gnss.lever_arm_y: 0.0
+    gnss.lever_arm_z: 0.0
+
+    # ── Wheel odometry ─────────────────────────────────────────────────────────
+    encoder.vel_noise: 0.05
+    encoder.yaw_noise: 0.02
+
+    # ── ZUPT ──────────────────────────────────────────────────────────────────
+    zupt.enabled:            true
+    zupt.velocity_threshold: 0.02
+    zupt.angular_threshold:  0.02
+
+    # ── IMU — gz-sim-imu-system on imu_link, bridged to /imu/data ─────────────
+    imu.gyro_noise:   0.005
+    imu.accel_noise:  0.1
+    imu.frame_id:     imu_link
+    imu.has_magnetometer: true
