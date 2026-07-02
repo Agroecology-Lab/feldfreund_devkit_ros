@@ -25,6 +25,16 @@ fake_nav2_server is removed.  It was providing:
   3. /clock  — not needed; topo nav runs with use_sim_time=False so it
      does not need a /clock source.
 
+fusioncore is now live in sim (previously ground-truth /odom was just
+relayed straight to /odometry/global as a stand-in — see git history).
+The ghost DiffDrive plugin in sowbot_01.xacro no longer publishes TF;
+fusioncore is the sole publisher of odom->base_link, fed by /gnss/fix
+and /imu/data (bridged) and /odom/wheels (relayed from ground-truth
+/odom below, for encoder input only — this relay does NOT touch TF
+anymore). Brought up via lifecycle configure/activate through the
+launch event bus rather than `ros2 lifecycle set`, same pattern as
+github.com/manankharwar/fusioncore/tree/main/fusioncore_gazebo.
+
 TF tree at boot (before Gazebo starts)
 ---------------------------------------
   map --[static, wall-time]--> odom --[static]--> base_footprint
@@ -33,16 +43,24 @@ TF tree at boot (before Gazebo starts)
                                                         |
                                                    base_link
 
-Once Gazebo starts, robot_state_publisher publishes the real dynamic
-odom->base_footprint->base_link chain; TF2 uses the most recent
-transform so the dynamic one supersedes the static bootstraps
-automatically.
+Once Gazebo + fusioncore start, fusioncore publishes the real dynamic
+odom->base_link chain; TF2 uses the most recent transform so the
+dynamic one supersedes the static bootstraps automatically.
+
+NOTE: the base_footprint->base_link static bootstrap below and
+fusioncore's dynamic odom->base_link publish both end at base_link
+with different parents (base_footprint vs odom) — pre-existing from
+when DiffDrive owned this edge, not introduced by the fusioncore
+change. Only matters during the boot window before fusioncore is
+active; TF2 tolerates the redundant edge but it's worth collapsing
+properly at some point.
 
 Startup sequencing
 ------------------
 t+0s   map_manager2 starts, publishes topo map
 t+2s   localisation2 starts, waits for map, then listens for TF
 t+4s   navigation2 starts, waits for localisation
+t+4s   fusioncore configure -> activate (lifecycle)
 t+5s   topological_map_visualiser starts
 UI     user presses Start Sim -> sowbot_sim.launch.py starts Gazebo +
        ros_gz_bridge + Nav2 (all with use_sim_time=True, /clock already live)
@@ -52,10 +70,14 @@ import os
 
 from ament_index_python.packages import get_package_share_directory
 from launch import LaunchDescription
-from launch.actions import TimerAction
+from launch.actions import EmitEvent, RegisterEventHandler, TimerAction
+from launch.events import matches_action
 from launch.substitutions import PathJoinSubstitution
-from launch_ros.actions import Node
+from launch_ros.actions import LifecycleNode, Node
+from launch_ros.event_handlers import OnStateTransition
+from launch_ros.events.lifecycle import ChangeState
 from launch_ros.substitutions import FindPackageShare
+from lifecycle_msgs.msg import Transition
 
 
 def generate_launch_description():
@@ -82,26 +104,59 @@ def generate_launch_description():
         output='screen',
     )
 
-    # ── /odom -> /odometry/global relay ───────────────────────────────────────
-    # limbic_row_follow_node subscribes to /odometry/global (the fusioncore
-    # topic name, used on real hardware). fusioncore never runs in sim
-    # (only wired up in devkit.launch.py / ublox_single.launch.py), so without
-    # this relay limbic_row_follow's Phase 1 handover-distance check never
-    # receives a pose and can never fire -- row-following itself still works
-    # fine (crop_row_node steers off the camera image alone, no odometry
-    # needed), but the robot never hands back to nav2 at row end. Same
-    # nav_msgs/Odometry type both ends, so a plain relay (no republish) is
-    # sufficient -- this is not a substitute for real sensor fusion, just
-    # enough for the sim's DiffDrive odometry to reach the one consumer that
-    # needs a /odometry/global pose feed.
-    odom_global_relay = Node(
-        package='topic_tools',
-        executable='relay',
-        name='odom_global_relay',
-        arguments=['/odom', '/odometry/global'],
-        parameters=[sim_time],
-        output='screen',
+    # ── fusioncore (UKF localisation) ──────────────────────────────────────────
+    # Sole publisher of odom->base_link in sim (ghost DiffDrive plugin in
+    # sowbot_01.xacro no longer has <tf_topic>). Publishes /fusion/odom;
+    # limbic_row_follow_node subscribes to /odometry/global, so a plain
+    # relay maps one onto the other (same nav_msgs/Odometry type both ends).
+    # Fed by /gnss/fix, /imu/data (bridged from Gazebo sensors) and
+    # /odom/wheels (relay of ground-truth /odom below, encoder input only —
+    # this does NOT feed TF, fusioncore owns that).
+    fusioncore_params = PathJoinSubstitution(
+        [FindPackageShare('devkit_bringup'), 'config', 'fusioncore_sim.yaml']
     )
+    fusioncore_node = LifecycleNode(
+        package='fusioncore_ros',
+        executable='fusioncore_node',
+        name='fusioncore',
+        namespace='',
+        output='screen',
+        parameters=[fusioncore_params, sim_time],
+    )
+
+    # Configure -> activate through the launch event bus rather than
+    # `ros2 lifecycle set`, same pattern as
+    # github.com/manankharwar/fusioncore/tree/main/fusioncore_gazebo
+    # (avoids node-discovery flakiness with an external CLI call).
+    fusioncore_configure = EmitEvent(event=ChangeState(
+        lifecycle_node_matcher=matches_action(fusioncore_node),
+        transition_id=Transition.TRANSITION_CONFIGURE,
+    ))
+    fusioncore_activate_on_configured = RegisterEventHandler(OnStateTransition(
+        target_lifecycle_node=fusioncore_node,
+        goal_state='inactive',
+        entities=[EmitEvent(event=ChangeState(
+            lifecycle_node_matcher=matches_action(fusioncore_node),
+            transition_id=Transition.TRANSITION_ACTIVATE,
+        ))],
+    ))
+
+    fusioncore_bringup = TimerAction(period=4.0, actions=[
+        fusioncore_node,
+        fusioncore_activate_on_configured,
+        fusioncore_configure,
+    ])
+
+    fusion_to_global_relay = TimerAction(period=4.0, actions=[
+        Node(
+            package='topic_tools',
+            executable='relay',
+            name='fusion_odom_global_relay',
+            arguments=['/fusion/odom', '/odometry/global'],
+            parameters=[sim_time],
+            output='screen',
+        ),
+    ])
 
     # ── Bootstrap odom -> base_footprint (static, wall-time) ──────────────────
     # robot_state_publisher (Gazebo layer) normally provides this.  Without
@@ -226,7 +281,8 @@ def generate_launch_description():
 
     return LaunchDescription([
         odom_relay,
-        odom_global_relay,
+        fusioncore_bringup,
+        fusion_to_global_relay,
         map_to_odom,
         odom_to_base_footprint,
         base_footprint_to_base_link,
