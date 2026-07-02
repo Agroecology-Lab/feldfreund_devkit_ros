@@ -634,12 +634,31 @@ class NiceGuiNode(Node):
         # since /odom stops updating latest_odom the instant any /fusion/odom
         # message arrives. Now we keep tracking /odom until fusion's own
         # reported covariance says it's actually trustworthy.
+        #
+        # Covariance alone is not enough: a UKF anchored to a degenerate GNSS
+        # origin (e.g. the world had no <spherical_coordinates>, so every fix
+        # was frozen at lat=0/lon=0) can report LOW covariance while dead
+        # reckoning off pure IMU+encoder with zero real GNSS correction —
+        # confidently wrong, not uncertain. Low covariance only means "the
+        # filter is internally consistent", not "the filter is right". So
+        # also require a real GNSS fix within the last few seconds
+        # (self._last_real_gps_t, set in store_gps and already used to gate
+        # the fake-fix shim) before trusting /fusion/odom at all. This is
+        # belt-and-suspenders on top of fixing the actual root cause (missing
+        # spherical_coordinates in the generated world) — it stops the UI
+        # from silently re-trusting a confidently-wrong fusion pose if that
+        # world-georeference patch ever regresses again.
         _FUSION_COV_TRUST_THRESHOLD = 1.0  # m^2 — matches fusioncore_sim.yaml's loosened floor
+        _FUSION_GNSS_STALENESS_LIMIT = 5.0  # s — real /gnss/fix must be this fresh
 
         def _store_fusion_odom(m: Odometry) -> None:
             cov_xx = m.pose.covariance[0]
             if cov_xx <= 0.0 or cov_xx > _FUSION_COV_TRUST_THRESHOLD:
                 return  # not trustworthy yet — let /odom keep driving the marker
+            now = self.get_clock().now().nanoseconds * 1e-9
+            if now - self._last_real_gps_t > _FUSION_GNSS_STALENESS_LIMIT:
+                return  # low covariance but no recent real GNSS correction —
+                        # confidently wrong, not confidently right
             self._fusion_odom_seen = True
             self.latest_odom = m
 
