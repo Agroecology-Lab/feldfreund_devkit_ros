@@ -58,6 +58,15 @@ fusioncore:
     gnss.lever_arm_y: 0.0
     gnss.lever_arm_z: 0.0
 
+    # TF frame of the GPS antenna, used to resolve the lever arm above.
+    # sowbot_01.xacro / ifarmate.urdf.xacro both name this link "gps_link"
+    # (gz_frame_id gps_link on the navsat sensor). This param was never set
+    # here, so fusioncore fell back to its own internal default ("gps"),
+    # which doesn't exist in the TF tree — lever-arm resolution silently
+    # failed. Matches imu.frame_id below being set explicitly rather than
+    # left to default.
+    gnss.frame_id: gps_link
+
     # ── Wheel odometry ─────────────────────────────────────────────────────────
     encoder.vel_noise: 0.05
     encoder.yaw_noise: 0.02
