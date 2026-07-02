@@ -23,14 +23,9 @@
   gz_type_name: gz.msgs.Odometry
   direction: GZ_TO_ROS
 
-# DiffDrive has <tf_topic>/tf</tf_topic> (absolute) so it stays on the global /tf.
-- ros_topic_name: /tf
-  gz_topic_name: /tf
-  ros_type_name: tf2_msgs/msg/TFMessage
-  gz_type_name: gz.msgs.Pose_V
-  direction: GZ_TO_ROS
-  publisher_qos:
-    reliability: reliable
+# NOTE: no gz /tf bridge entry. The ghost DiffDrive plugin no longer has
+# <tf_topic> — fusioncore is the sole publisher of odom->base_link, direct
+# on the ROS side. Bridging a dead gz /tf topic here would just be inert.
 
 - ros_topic_name: /scan
   gz_topic_name: /scan
@@ -38,13 +33,13 @@
   gz_type_name: gz.msgs.LaserScan
   direction: GZ_TO_ROS
 
-- ros_topic_name: /imu
+- ros_topic_name: /imu/data
   gz_topic_name: /imu
   ros_type_name: sensor_msgs/msg/Imu
   gz_type_name: gz.msgs.IMU
   direction: GZ_TO_ROS
 
-- ros_topic_name: /gps/fix
+- ros_topic_name: /gnss/fix
   gz_topic_name: /gps
   ros_type_name: sensor_msgs/msg/NavSatFix
   gz_type_name: gz.msgs.NavSat
