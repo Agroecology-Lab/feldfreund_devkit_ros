@@ -16,6 +16,7 @@ generates raised beds (crop rows) with furrows between — the driving lanes.
 
 import argparse
 import json
+import re
 import subprocess
 import sys
 from pathlib import Path
@@ -437,6 +438,67 @@ def patch_world_physics_engine(world_path):
           file=sys.stderr)
 
 
+def patch_world_spherical_coordinates(world_path, gps_lat, gps_lon):
+    """Insert a <spherical_coordinates> block so gz-sim-navsat-system has a
+    real WGS84 datum to report fixes against.
+
+    Forest3D's world template has no <spherical_coordinates> tag at all.
+    Without one, gz-sim-navsat-system falls back to its hardcoded default
+    origin (lat=0, lon=0) — every fix it publishes is then a frozen,
+    degenerate point at (0,0) regardless of where the robot actually is in
+    the world, which is exactly the constant-distance-from-reference
+    rejection fusioncore's outlier gate has been logging. Forest3D
+    regenerates the world from scratch on every run (same reason
+    patch_world_physics_engine must run every time), so this has to run
+    every time too, not just once.
+
+    Uses the same GPS datum the topo map was anchored to (gps_lat/gps_lon
+    extracted from the topo nodes) so the world's georeference and the
+    topo nav frame agree — if the map was saved against ui_node.py's sim
+    fake-fix datum, that's the same point we tell Gazebo the world sits on.
+    """
+    world_path = Path(world_path)
+    if not world_path.exists():
+        print(f"WARNING: {world_path} not found — skipping spherical "
+              "coordinates patch", file=sys.stderr)
+        return
+    if gps_lat is None or gps_lon is None:
+        print("WARNING: no GPS origin found in topo map — skipping "
+              "spherical coordinates patch. gz-sim-navsat-system will "
+              "default to (0,0) and every /gnss/fix will be rejected as "
+              "out of range.", file=sys.stderr)
+        return
+
+    world_text = world_path.read_text()
+    if '<spherical_coordinates>' in world_text:
+        print(f"{world_path} already has <spherical_coordinates> — nothing to patch")
+        return
+
+    match = re.search(r'(<world\s+name="[^"]*"[^>]*>)', world_text)
+    if not match:
+        print(f"WARNING: no <world name=...> tag found in {world_path}; "
+              "Forest3D may have changed its template — leaving as-is. "
+              "gz-sim-navsat-system will default to (0,0). Verify manually.",
+              file=sys.stderr)
+        return
+
+    block = (
+        '\n    <spherical_coordinates>\n'
+        '      <surface_model>EARTH_WGS84</surface_model>\n'
+        '      <world_frame_orientation>ENU</world_frame_orientation>\n'
+        f'      <latitude_deg>{gps_lat:.8f}</latitude_deg>\n'
+        f'      <longitude_deg>{gps_lon:.8f}</longitude_deg>\n'
+        '      <elevation>0</elevation>\n'
+        '      <heading_deg>0</heading_deg>\n'
+        '    </spherical_coordinates>'
+    )
+    patched = world_text[:match.end()] + block + world_text[match.end():]
+    world_path.write_text(patched)
+    print(f"Patched {world_path}: <spherical_coordinates> datum "
+          f"({gps_lat:.6f}, {gps_lon:.6f}) -> gz-sim-navsat-system will "
+          "now report real fixes instead of a frozen (0,0)")
+
+
 def patch_world_model_poses(world_path, terrain_offset):
     """Shift ALL spawned models by terrain_offset so the Forest3D world aligns
     with the topo nav coordinate frame.
@@ -753,6 +815,12 @@ if __name__ == '__main__':
         # track drive needs DART (see patch_world_physics_engine docstring).
         if args.world_out:
             patch_world_physics_engine(args.world_out)
+
+        # Step 3.5: Forest3D's world template has no georeference at all —
+        # without it gz-sim-navsat-system reports every fix frozen at (0,0)
+        # (see patch_world_spherical_coordinates docstring).
+        if args.world_out:
+            patch_world_spherical_coordinates(args.world_out, gps_lat, gps_lon)
 
         # Step 4: shift ALL models (terrain + every crop_N) so the Forest3D
         # world aligns with the topo nav coordinate frame.  Terrain and crops
