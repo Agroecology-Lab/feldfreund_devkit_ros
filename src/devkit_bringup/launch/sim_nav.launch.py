@@ -70,11 +70,10 @@ import os
 
 from ament_index_python.packages import get_package_share_directory
 from launch import LaunchDescription
-from launch.actions import EmitEvent, RegisterEventHandler, TimerAction
+from launch.actions import EmitEvent, TimerAction
 from launch.events import matches_action
 from launch.substitutions import PathJoinSubstitution
 from launch_ros.actions import LifecycleNode, Node
-from launch_ros.event_handlers import OnStateTransition
 from launch_ros.events.lifecycle import ChangeState
 from launch_ros.substitutions import FindPackageShare
 from lifecycle_msgs.msg import Transition
@@ -124,26 +123,19 @@ def generate_launch_description():
         parameters=[fusioncore_params, sim_time],
     )
 
-    # Configure -> activate through the launch event bus rather than
-    # `ros2 lifecycle set`, same pattern as
-    # github.com/manankharwar/fusioncore/tree/main/fusioncore_gazebo
-    # (avoids node-discovery flakiness with an external CLI call).
+    # Configure only — fusioncore_node has its own autostart (confirmed via
+    # log: "Autostart enabled: activating in 200ms") that activates itself
+    # once configured. An external EmitEvent(ACTIVATE) here raced it and
+    # produced "No transition matching 3 found for current state active"
+    # (harmless but noisy — the node was already active by the time our
+    # event arrived). Configure is enough; let autostart do the rest.
     fusioncore_configure = EmitEvent(event=ChangeState(
         lifecycle_node_matcher=matches_action(fusioncore_node),
         transition_id=Transition.TRANSITION_CONFIGURE,
     ))
-    fusioncore_activate_on_configured = RegisterEventHandler(OnStateTransition(
-        target_lifecycle_node=fusioncore_node,
-        goal_state='inactive',
-        entities=[EmitEvent(event=ChangeState(
-            lifecycle_node_matcher=matches_action(fusioncore_node),
-            transition_id=Transition.TRANSITION_ACTIVATE,
-        ))],
-    ))
 
     fusioncore_bringup = TimerAction(period=4.0, actions=[
         fusioncore_node,
-        fusioncore_activate_on_configured,
         fusioncore_configure,
     ])
 
