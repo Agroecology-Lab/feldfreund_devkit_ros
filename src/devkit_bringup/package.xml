@@ -5,7 +5,7 @@
   <version>0.0.1</version>
   <description>Bringup launch files and configuration for the Feldfreund DevKit ROS2 package</description>
   <maintainer email="ros@zauberzeug.de">Zauberzeug GmbH</maintainer>
-  <license>proprietary</license>
+  <license>MIT</license>
 
   <buildtool_depend>ament_cmake</buildtool_depend>
 
@@ -14,6 +14,8 @@
   <exec_depend>septentrio_gnss_driver</exec_depend>
   <exec_depend>devkit_driver</exec_depend>
   <exec_depend>tf2_ros</exec_depend>
+  <exec_depend>fusioncore_ros</exec_depend>
+  <exec_depend>lifecycle_msgs</exec_depend>
 
   <test_depend>ament_lint_auto</test_depend>
   <test_depend>ament_lint_common</test_depend>
