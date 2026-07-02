@@ -576,8 +576,16 @@
        TrackedVehicle/TrackController above own actual motion;
        this DiffDrive instance is wired to a dead cmd_vel topic so it
        NEVER drives the robot — it only integrates left/right drive
-       joint velocities into odometry + odom->base_link TF, matching
-       the unscoped /odom gz topic that ros_gz_bridge.yaml expects.
+       joint velocities into odometry, matching the unscoped /odom
+       gz topic that ros_gz_bridge.yaml expects.
+
+       TF: deliberately NOT publishing tf_topic here. fusioncore is
+       the sole publisher of odom->base_link (fed by bridged
+       /gnss/fix, /imu/data, /odom/wheels — the latter is this
+       plugin's /odom topic, relayed). Ground-truth /odom stays
+       available as a plain topic for error analysis / RTK-outage
+       testing; it just doesn't touch TF anymore. Two odom->base_link
+       broadcasters (this + fusioncore) would silently race.
        ══════════════════════════════════════════════════════════════ -->
   <gazebo>
     <plugin filename="gz-sim-diff-drive-system"
@@ -592,7 +600,6 @@
       <topic>_unused_diffdrive_cmd_vel</topic>
 
       <odom_topic>odom</odom_topic>
-      <tf_topic>/tf</tf_topic>
       <frame_id>odom</frame_id>
       <child_frame_id>base_link</child_frame_id>
       <odom_publish_frequency>50</odom_publish_frequency>
