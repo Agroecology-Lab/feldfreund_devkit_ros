@@ -51,9 +51,11 @@ from launch.actions import (
     DeclareLaunchArgument,
     ExecuteProcess,
     IncludeLaunchDescription,
+    RegisterEventHandler,
     SetEnvironmentVariable,
     TimerAction,
 )
+from launch.event_handlers import OnProcessExit
 from launch.launch_description_sources import PythonLaunchDescriptionSource
 from launch.substitutions import LaunchConfiguration
 from launch_ros.actions import Node
@@ -266,6 +268,24 @@ def generate_launch_description():
         output='screen',
     )
 
+    # sim_launch was previously a plain top-level action, started at the same
+    # instant as preflight_pkill (ros2 launch runs top-level actions
+    # concurrently, not in list order — the numbered docstring above was
+    # aspirational, not enforced). preflight_pkill's `pkill -f "gz sim"` then
+    # raced the freshly-started `gz sim -r ...` process from sim_launch and
+    # could kill it seconds after it started — gz_sim exits, spawn_robot
+    # (still in its "waiting for gz sim" loop) gets torn down with it, no
+    # entity ever spawns, and every TF/costmap error downstream (Nav2 seeing
+    # two unconnected trees, etc.) is fallout from that, not an independent
+    # bug. Gate sim_launch on preflight_pkill's exit so the kill always
+    # finishes before Gazebo starts.
+    start_sim_after_preflight = RegisterEventHandler(
+        OnProcessExit(
+            target_action=preflight_pkill,
+            on_exit=[sim_launch],
+        )
+    )
+
     # Bridge watchdog: revive parameter_bridge if it dies (e.g. gz restart).
     bridge_watchdog = ExecuteProcess(
         cmd=[
@@ -343,7 +363,7 @@ def generate_launch_description():
         y_arg,
         z_arg,
         preflight_pkill,
-        sim_launch,
+        start_sim_after_preflight,
         bridge_watchdog,
         nav2,
         nav2_lifecycle,
