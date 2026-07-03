@@ -262,8 +262,31 @@ def generate_launch_description():
     # servers competing for the same action name. See nav2_only.launch.py's
     # module docstring for the full rationale (this mirrors that file's
     # kill_fake_nav2 step for the other UI entry point).
+    # BUG FIXED HERE: pkill -f matches a process's FULL command line, not just
+    # the target program name. The old version's `pkill -f "gz sim"` ran
+    # inside `/bin/bash -c 'pkill -f "gz sim" || true; ...'` — and that bash
+    # invocation's own command line contains the literal substring "gz sim"
+    # (embedded in the script text passed to -c). So the very first pkill
+    # call matched its own parent shell and SIGTERM'd it before the other
+    # three pkill calls (ros_gz_sim, parameter_bridge, fake_nav2_server) ever
+    # ran. This is why preflight_pkill has died with exit code -15 on every
+    # single launch, every time — self-inflicted, not an external kill.
+    # Net effect: cleanup of stale processes from a prior (possibly
+    # SIGKILL'd) session never actually happened, which can leave a leftover
+    # gz sim / parameter_bridge / fake_nav2_server around to race or conflict
+    # with the new session (duplicate /clock-like publishers, stale DDS
+    # participants, etc.).
+    #
+    # Fix: bracket one character of each pattern (e.g. "[g]z sim" instead of
+    # "gz sim"). As a regex this still matches the literal string "gz sim" in
+    # a TARGET process's command line, but it no longer matches pkill's own
+    # invocation text (which contains "[g]z sim", not "gz sim").
     preflight_pkill = ExecuteProcess(
-        cmd=['/bin/bash', '-c', 'pkill -f "gz sim" || true; pkill -f ros_gz_sim || true; pkill -f parameter_bridge || true; pkill -f fake_nav2_server || true'],
+        cmd=['/bin/bash', '-c',
+             'pkill -f "[g]z sim" || true; '
+             'pkill -f "[r]os_gz_sim" || true; '
+             'pkill -f "[p]arameter_bridge" || true; '
+             'pkill -f "[f]ake_nav2_server" || true'],
         name='preflight_pkill',
         output='screen',
     )
@@ -365,8 +388,8 @@ def generate_launch_description():
             '  fi; '
             'done; '
             'ros2 lifecycle set /odom_to_base_footprint_static shutdown 2>/dev/null; '
-            'pkill -f "static_transform_publisher.*odom base_footprint" || true; '
-            'pkill -f "static_transform_publisher.*base_footprint base_link" || true; '
+            'pkill -f "static_transform_publishe[r].*odom base_footprint" || true; '
+            'pkill -f "static_transform_publishe[r].*base_footprint base_link" || true; '
             'echo "[bootstrap_tf_killer] killed odom->base_footprint and base_footprint->base_link static publishers after ${elapsed}s wait for real /odom data"',
         ],
         name='kill_bootstrap_tfs',
