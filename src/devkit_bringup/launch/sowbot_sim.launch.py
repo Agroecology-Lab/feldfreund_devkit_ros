@@ -330,28 +330,47 @@ def generate_launch_description():
     )
 
     # Kill the wall-time bootstrap TF publishers from sim_nav.launch.py once
-    # Nav2 is up.  These were needed for topo nav localisation before Gazebo
-    # started, but after the bridge is live their wall-time stamps look ancient
-    # to Nav2's sim-time costmap (transform_tolerance=0.3s), causing
-    # "Costmap timed out waiting for update" and zero cmd_vel output.
-    # odom->base_footprint is now covered by the DiffDrive bridge on /tf;
-    # base_footprint->base_link is covered by robot_state_publisher (50 Hz).
-    # map->odom is left alone — it has no dynamic replacement.
-    kill_bootstrap_tfs = TimerAction(
-        period=16.0,
-        actions=[
-            ExecuteProcess(
-                cmd=[
-                    '/bin/bash', '-c',
-                    'ros2 lifecycle set /odom_to_base_footprint_static shutdown 2>/dev/null; '
-                    'pkill -f "static_transform_publisher.*odom base_footprint" || true; '
-                    'pkill -f "static_transform_publisher.*base_footprint base_link" || true; '
-                    'echo "[bootstrap_tf_killer] killed odom->base_footprint and base_footprint->base_link static publishers"',
-                ],
-                name='kill_bootstrap_tfs',
-                output='screen',
-            ),
+    # a REAL odom->base_footprint source is actually live.  These were needed
+    # for topo nav localisation before Gazebo started, but after the bridge
+    # is live their wall-time stamps look ancient to Nav2's sim-time costmap
+    # (transform_tolerance=0.3s), causing "Costmap timed out waiting for
+    # update" and zero cmd_vel output.
+    #
+    # This was previously a fixed TimerAction(period=16.0), measured from
+    # generate_launch_description() being called — i.e. from before
+    # preflight_pkill even ran, NOT from when sim_launch (gz sim + spawn +
+    # bridge) actually started. spawn_robot/parameter_bridge routinely don't
+    # finish until t+35-40s (gz sim startup + 30s GUI-init wait in
+    # spawn_robot + bridge creation), so the fixed timer killed the bootstrap
+    # statics 20+ seconds before any real replacement existed. Result: a
+    # dead gap with NO odom->base_footprint publisher at all -> "Could not
+    # find a connection between 'odom' and 'base_footprint' ... two or more
+    # unconnected trees" (exactly the error seen in controller_server logs).
+    #
+    # Fix: poll for real /odom data (proof the DiffDrive bridge is actually
+    # forwarding gz Odometry, not just that the bridge node/topic exists)
+    # before killing anything. odom->base_footprint is then continuously
+    # covered by the DiffDrive bridge on /tf; base_footprint->base_link is
+    # covered by robot_state_publisher (50 Hz, comes up independently of
+    # spawn timing). map->odom is left alone — it has no dynamic replacement.
+    kill_bootstrap_tfs = ExecuteProcess(
+        cmd=[
+            '/bin/bash', '-c',
+            'elapsed=0; timeout_s=90; '
+            'until timeout 2 ros2 topic echo /odom --once >/dev/null 2>&1; do '
+            '  elapsed=$((elapsed+2)); '
+            '  if [ "$elapsed" -ge "$timeout_s" ]; then '
+            '    echo "[bootstrap_tf_killer] WARNING: no /odom data after ${timeout_s}s, killing statics anyway to avoid wedging forever"; '
+            '    break; '
+            '  fi; '
+            'done; '
+            'ros2 lifecycle set /odom_to_base_footprint_static shutdown 2>/dev/null; '
+            'pkill -f "static_transform_publisher.*odom base_footprint" || true; '
+            'pkill -f "static_transform_publisher.*base_footprint base_link" || true; '
+            'echo "[bootstrap_tf_killer] killed odom->base_footprint and base_footprint->base_link static publishers after ${elapsed}s wait for real /odom data"',
         ],
+        name='kill_bootstrap_tfs',
+        output='screen',
     )
 
     return LaunchDescription([
