@@ -3153,21 +3153,26 @@ class NiceGuiNode(Node):
                     try:
                         _gazebo_lbl.set_text('rebuilding world from map…')
                         _gazebo_lbl.style('color:#57606a')
+                        # Get plant placement values (cm → m conversion)
+                        spacing_m = float(plant_spacing.value or 80) / 100.0
+                        row_w_m = float(row_width_input.value or 80) / 100.0
                         r = subprocess.run(
                             ['python3', '/workspace/topo_to_forest3d.py',
                              '--topo', _MAP_FILE,
                              '--out', '/workspace/forest3d.yaml',
                              '--generate',
                              '--world-out', _WORLD_FILE,
-                             '--models-path', '/workspace/models'],
-                            capture_output=True, text=True, timeout=120, check= False
+                             '--models-path', '/workspace/models',
+                             '--plant-spacing', str(spacing_m),
+                             '--row-width', str(row_w_m)],
+                            capture_output=True, text=True, timeout=120, check=False
                         )
                         if r.returncode != 0:
                             err = (r.stderr or r.stdout or 'unknown error').strip()
                             _gazebo_lbl.set_text(f'rebuild failed: {err[-200:]}')
                             _gazebo_lbl.style('color:#cf222e')
                             return
-                        summary = 'world rebuilt'
+                        summary = f'world rebuilt (spacing={spacing_m:.2f}m, row={row_w_m:.2f}m)'
                         _gazebo_lbl.set_text(f'{summary} — relaunch to view')
                         _gazebo_lbl.style('color:#1a7f37')
                     except subprocess.TimeoutExpired:
@@ -3269,6 +3274,228 @@ class NiceGuiNode(Node):
                     except Exception as exc:
                         _spawn_lbl.set_text(f'ERROR: {exc}')
                         _spawn_lbl.style('color:#cf222e')
+
+                # ── Plant Placement Controls ─────────────────────────────
+                # Configure plant spacing, row width, and model before
+                # rebuilding. Values are stored locally; --plant-spacing and
+                # --row-width are passed to topo_to_forest3d.py on rebuild.
+                # Scale is UI-only pending Khalid's backend implementation.
+                _CROP_MODELS_DIR = Path('/workspace/models/crop')
+
+                def _refresh_crop_models():
+                    """List valid crop model subfolders (must have model.sdf)."""
+                    models = []
+                    if _CROP_MODELS_DIR.exists():
+                        for d in sorted(_CROP_MODELS_DIR.iterdir()):
+                            if d.is_dir() and (d / 'model.sdf').exists():
+                                models.append(d.name)
+                    return models if models else ['plant']
+
+                ui.separator().classes('w-full my-2')
+                ui.html('<span class="sec-label">Plant Placement</span>')
+
+                # Row 1: Plant Spacing | Row Width
+                with ui.row().classes('w-full gap-4 mt-1'):
+                    with ui.column().classes('flex-1 gap-0'):
+                        ui.html('<div class="sec-label">Plant Spacing</div>')
+                        plant_spacing = ui.number(
+                            value=80, min=10, max=300, step=5, precision=0,
+                            suffix='cm'
+                        ).classes('w-full')
+                    with ui.column().classes('flex-1 gap-0'):
+                        ui.html('<div class="sec-label">Row width</div>')
+                        row_width_input = ui.number(
+                            value=80, min=20, max=300, step=5, precision=0,
+                            suffix='cm'
+                        ).classes('w-full')
+
+                spacing_warn_lbl = ui.label('').classes('text-xs').style('color:#9a6700')
+
+                def _check_spacing_warning():
+                    rw = float(row_width_input.value or 80)
+                    ps = float(plant_spacing.value or 80)
+                    if rw >= ps:
+                        spacing_warn_lbl.set_text('Warning: row width >= plant spacing')
+                    else:
+                        spacing_warn_lbl.set_text('')
+
+                row_width_input.on('update:model-value', lambda e: _check_spacing_warning())
+                plant_spacing.on('update:model-value', lambda e: _check_spacing_warning())
+
+                # Row 2: Scale | Model selector
+                with ui.row().classes('w-full gap-4 mt-1'):
+                    with ui.column().classes('flex-1 gap-0'):
+                        ui.html('<div class="sec-label">Scale</div>')
+                        plant_scale = ui.number(
+                            value=100, min=5, max=300, step=5, precision=0,
+                            suffix='%'
+                        ).classes('w-full')
+                        ui.label('Not yet wired').classes('text-xs').style('color:#8c959f')
+                    with ui.column().classes('flex-1 gap-0'):
+                        ui.html('<div class="sec-label">Model</div>')
+                        plant_model = ui.select(
+                            options=_refresh_crop_models(),
+                            value=_refresh_crop_models()[0] if _refresh_crop_models() else None
+                        ).classes('w-full')
+
+                # Upload section
+                ui.html('<div class="sec-label mt-2">Upload new model</div>')
+                _visual_mesh_data: dict = {'name': None, 'data': None}
+                _collision_mesh_data: dict = {'name': None, 'data': None}
+                _plant_upload_lbl = ui.label('').classes('text-xs font-mono').style(
+                    'color:#57606a')
+
+                model_name_input = ui.input(
+                    label='Model name',
+                    placeholder='my_plant',
+                ).classes('w-40')
+
+                async def _handle_visual_upload(e):
+                    try:
+                        if hasattr(e, 'file'):
+                            data = await e.file.read()
+                            fname = e.file.name if hasattr(e.file, 'name') else 'visual.glb'
+                        else:
+                            data = e.content.read()
+                            fname = getattr(e, 'name', 'visual.glb')
+                    except Exception as exc:
+                        _plant_upload_lbl.set_text(f'upload failed: {exc}')
+                        _plant_upload_lbl.style('color:#cf222e')
+                        return
+                    # Validate size (50MB cap)
+                    if len(data) > 50 * 1024 * 1024:
+                        _plant_upload_lbl.set_text('file too large (max 50MB)')
+                        _plant_upload_lbl.style('color:#cf222e')
+                        return
+                    _visual_mesh_data['name'] = fname
+                    _visual_mesh_data['data'] = data
+                    _plant_upload_lbl.set_text(f'visual: {fname} ({len(data)//1024}KB)')
+                    _plant_upload_lbl.style('color:#1a7f37')
+
+                async def _handle_collision_upload(e):
+                    try:
+                        if hasattr(e, 'file'):
+                            data = await e.file.read()
+                            fname = e.file.name if hasattr(e.file, 'name') else 'collision.glb'
+                        else:
+                            data = e.content.read()
+                            fname = getattr(e, 'name', 'collision.glb')
+                    except Exception as exc:
+                        _plant_upload_lbl.set_text(f'collision upload failed: {exc}')
+                        _plant_upload_lbl.style('color:#cf222e')
+                        return
+                    if len(data) > 50 * 1024 * 1024:
+                        _plant_upload_lbl.set_text('collision file too large (max 50MB)')
+                        _plant_upload_lbl.style('color:#cf222e')
+                        return
+                    _collision_mesh_data['name'] = fname
+                    _collision_mesh_data['data'] = data
+                    _plant_upload_lbl.set_text(
+                        f'visual: {_visual_mesh_data["name"] or "—"}, '
+                        f'collision: {fname}')
+                    _plant_upload_lbl.style('color:#1a7f37')
+
+                async def _create_plant_model():
+                    import re
+                    name = (model_name_input.value or '').strip()
+                    if not name:
+                        _plant_upload_lbl.set_text('enter a model name')
+                        _plant_upload_lbl.style('color:#cf222e')
+                        return
+                    if not re.match(r'^[a-zA-Z0-9_]+$', name):
+                        _plant_upload_lbl.set_text('name must be alphanumeric + underscore')
+                        _plant_upload_lbl.style('color:#cf222e')
+                        return
+                    model_dir = _CROP_MODELS_DIR / name
+                    if model_dir.exists():
+                        _plant_upload_lbl.set_text(f'model "{name}" already exists')
+                        _plant_upload_lbl.style('color:#cf222e')
+                        return
+                    if _visual_mesh_data['data'] is None:
+                        _plant_upload_lbl.set_text('upload a visual mesh first')
+                        _plant_upload_lbl.style('color:#cf222e')
+                        return
+                    try:
+                        mesh_dir = model_dir / 'mesh'
+                        mesh_dir.mkdir(parents=True, exist_ok=True)
+                        # Write visual mesh
+                        visual_fname = f'{name}.glb'
+                        with open(mesh_dir / visual_fname, 'wb') as f:
+                            f.write(_visual_mesh_data['data'])
+                        # Write collision mesh (or reuse visual)
+                        if _collision_mesh_data['data'] is not None:
+                            collision_fname = f'{name}_collision.glb'
+                            with open(mesh_dir / collision_fname, 'wb') as f:
+                                f.write(_collision_mesh_data['data'])
+                        else:
+                            collision_fname = visual_fname
+                        # Write model.config
+                        model_config = f'''<?xml version="1.0"?>
+<model>
+    <name>{name}</name>
+    <version>1.0</version>
+    <sdf version="1.8">model.sdf</sdf>
+    <author>
+        <name>User Upload</name>
+    </author>
+    <description>{name} plant model</description>
+</model>
+'''
+                        with open(model_dir / 'model.config', 'w') as f:
+                            f.write(model_config)
+                        # Write model.sdf
+                        model_sdf = f'''<?xml version="1.0" ?>
+<sdf version="1.8">
+    <model name="{name}">
+        <static>true</static>
+        <link name="link">
+            <collision name="collision">
+                <geometry>
+                    <mesh><uri>mesh/{collision_fname}</uri><scale>1 1 1</scale></mesh>
+                </geometry>
+            </collision>
+            <visual name="visual">
+                <geometry>
+                    <mesh><uri>mesh/{visual_fname}</uri><scale>1 1 1</scale></mesh>
+                </geometry>
+            </visual>
+        </link>
+    </model>
+</sdf>
+'''
+                        with open(model_dir / 'model.sdf', 'w') as f:
+                            f.write(model_sdf)
+                        # Refresh dropdown
+                        new_models = _refresh_crop_models()
+                        plant_model.options = new_models
+                        plant_model.value = name
+                        # Clear upload state
+                        _visual_mesh_data['name'] = None
+                        _visual_mesh_data['data'] = None
+                        _collision_mesh_data['name'] = None
+                        _collision_mesh_data['data'] = None
+                        model_name_input.value = ''
+                        _plant_upload_lbl.set_text(f'model "{name}" created')
+                        _plant_upload_lbl.style('color:#1a7f37')
+                    except Exception as exc:
+                        _plant_upload_lbl.set_text(f'failed: {exc}')
+                        _plant_upload_lbl.style('color:#cf222e')
+
+                with ui.row().classes('items-center gap-2 flex-wrap'):
+                    ui.upload(
+                        label='Visual mesh (.glb/.gltf) *',
+                        auto_upload=True,
+                        on_upload=_handle_visual_upload,
+                    ).props('accept=.glb,.gltf').classes('max-w-xs')
+                    ui.upload(
+                        label='Collision mesh (optional)',
+                        auto_upload=True,
+                        on_upload=_handle_collision_upload,
+                    ).props('accept=.glb,.gltf').classes('max-w-xs')
+                    ui.button('Create Model', on_click=_create_plant_model).props(
+                        'color=primary no-caps').classes('px-4')
+
+                ui.separator().classes('w-full my-2')
 
                 with ui.row().classes('items-center gap-2 flex-wrap'):
                     ui.button('Launch World', on_click=_launch_world).props('color=positive no-caps').classes('px-4')
