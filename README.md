@@ -78,6 +78,23 @@ This repo may contain traces of LLM slop, We've done our best to mitigate this. 
 
 ## Quick Start
 
+### 0. Install dependencies
+
+#### Linux 
+[Docker](https://docs.docker.com/engine/install/)
+
+```sudo apt install python3-serial```
+
+#### Mac
+[Docker](https://docs.docker.com/engine/install/)
+
+& See notes below
+
+#### Windows?
+[Docker](https://docs.docker.com/engine/install/)
+
+Untested
+
 ### 1. Clone the Repository
 Open a terminal on your host machine and download the workspace:
 ```bash
