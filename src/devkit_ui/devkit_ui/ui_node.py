@@ -1240,6 +1240,12 @@ class NiceGuiNode(Node):
         # so rows land at the local odom origin like get_maize_topo.py output.
         if self._is_sim and self._f2c_origin_ll is not None:
             anchor_lat, anchor_lon = self._f2c_origin_ll
+        elif self._is_sim:
+            self.f2c_save_status = (
+                'ERROR: no F2C field origin in memory (re-run "Plan Rows" '
+                'first) — saving now would anchor rows to the sim GPS '
+                'datum instead of the field, offsetting every node.')
+            return
         else:
             anchor_lat = self.latest_gps.latitude
             anchor_lon = self.latest_gps.longitude
