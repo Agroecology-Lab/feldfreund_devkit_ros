@@ -16,7 +16,7 @@ import sys
 import threading
 import time
 import zipfile
-from datetime import datetime
+from datetime import datetime, timezone
 from itertools import pairwise
 from pathlib import Path
 
@@ -920,7 +920,7 @@ class NiceGuiNode(Node):
                         'gps_hdop': None}
 
         row_meta: dict = {'row_id': row_id, 'row_role': row_role or 'entry'} if is_row else {}
-        timestamp = datetime.now(datetime.UTC).strftime('%d-%m-%Y_%H-%M-%S')
+        timestamp = datetime.now(timezone.utc).strftime('%d-%m-%Y_%H-%M-%S')
         node_meta_disk = {'map': map_name, 'node': name, 'pointset': map_name}
         node_meta_ui   = {**node_meta_disk, 'dropped_by': 'webui',
                           'timestamp': timestamp, **gps_meta, **row_meta}
@@ -990,7 +990,7 @@ class NiceGuiNode(Node):
                     self.get_logger().warn(f'Node {name} already in file — skipping write')
                     return
 
-                _ts = datetime.now(datetime.UTC).strftime('%d-%m-%Y_%H-%M-%S')
+                _ts = datetime.now(timezone.utc).strftime('%d-%m-%Y_%H-%M-%S')
                 if 'meta' not in file_doc:
                     file_doc['meta'] = {}
                 file_doc['meta']['last_updated'] = _ts
@@ -1130,7 +1130,7 @@ class NiceGuiNode(Node):
                 # requires: meta.last_updated and pointset.
                 # Older map files (and our own archive/clear output) may omit
                 # them, causing switch_topological_map → validate() to reject.
-                _ts = datetime.now(datetime.UTC).strftime('%d-%m-%Y_%H-%M-%S')
+                _ts = datetime.now(timezone.utc).strftime('%d-%m-%Y_%H-%M-%S')
                 if 'meta' not in file_doc:
                     file_doc['meta'] = {}
                 file_doc['meta']['last_updated'] = _ts
@@ -1253,7 +1253,7 @@ class NiceGuiNode(Node):
 
         map_name  = self._topo_doc.get('name', 'mixed_test_map')
         nav_frame = self._topo_doc.get('transformation', {}).get('topo_frame_id', 'map')
-        timestamp = datetime.now(datetime.UTC).strftime('%d-%m-%Y_%H-%M-%S')
+        timestamp = datetime.now(timezone.utc).strftime('%d-%m-%Y_%H-%M-%S')
 
         connect_to = (self.topo_current
                       if self.topo_current not in ('—', 'none', 'None', '', None)
@@ -2788,7 +2788,7 @@ class NiceGuiNode(Node):
             # doc with no action config and every edge fails with
             # "No action config for 'NavigateToPose'".
             empty_doc = {
-                'meta':           {'last_updated': datetime.now(datetime.UTC).strftime('%d-%m-%Y_%H-%M-%S')},
+                'meta':           {'last_updated': datetime.now(timezone.utc).strftime('%d-%m-%Y_%H-%M-%S')},
                 'name':           map_name,
                 'metric_map':     self._topo_doc.get('metric_map', map_name),
                 'pointset':       map_name,
