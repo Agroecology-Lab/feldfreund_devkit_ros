@@ -16,6 +16,7 @@ generates raised beds (crop rows) with furrows between — the driving lanes.
 
 import argparse
 import json
+import math
 import re
 import subprocess
 import sys
@@ -124,14 +125,26 @@ def extract_rows(nodes):
         if in_nd is None or out_nd is None:
             print(f"  skip row {rid}: need both IN and OUT", file=sys.stderr)
             continue
-        gps_lat = in_nd.get('gps_lat') or out_nd.get('gps_lat')
-        gps_lon = in_nd.get('gps_lon') or out_nd.get('gps_lon')
+        # Track which node's (x, y) the GPS fix actually belongs to — needed
+        # to later back-solve the lat/lon of topo-frame (0, 0), since a GPS
+        # tag is only meaningful together with the local coordinate it was
+        # recorded at (see compute_field_params' gps origin back-solve).
+        if in_nd.get('gps_lat') is not None:
+            gps_lat, gps_lon = in_nd['gps_lat'], in_nd['gps_lon']
+            gps_x, gps_y = in_nd['x'], in_nd['y']
+        elif out_nd.get('gps_lat') is not None:
+            gps_lat, gps_lon = out_nd['gps_lat'], out_nd['gps_lon']
+            gps_x, gps_y = out_nd['x'], out_nd['y']
+        else:
+            gps_lat = gps_lon = gps_x = gps_y = None
         rows.append({
             'rid': rid,
             'a': (in_nd['x'], in_nd['y']),
             'b': (out_nd['x'], out_nd['y']),
             'gps_lat': gps_lat,
             'gps_lon': gps_lon,
+            'gps_x': gps_x,
+            'gps_y': gps_y,
         })
     return rows
 
@@ -210,9 +223,34 @@ def compute_field_params(rows, headland_width, default_row_width, plant_spacing,
     plants_per_row = max(1, int(row_length / plant_spacing))
     derived_density = num_rows * plants_per_row
 
-    # GPS origin (use first row with GPS data, or None).
-    gps_lat = next((r['gps_lat'] for r in rows if r['gps_lat'] is not None), None)
-    gps_lon = next((r['gps_lon'] for r in rows if r['gps_lon'] is not None), None)
+    # GPS origin: the lat/lon of topo-frame local (0, 0) — NOT the raw GPS
+    # tag off whichever row happened to have one first.
+    #
+    # A GPS tag on a topo node (e.g. F2C_R1_IN) is the fix recorded AT THAT
+    # NODE's (x, y), which is generally nowhere near (0, 0) — topo node
+    # coordinates are already in the world/map frame (see find_spawn_node's
+    # docstring), so (0, 0) is a specific point out in the field, not
+    # "wherever the first GPS-tagged node happens to be".
+    #
+    # gz-sim-navsat-system's <spherical_coordinates> block declares
+    # "local (0,0,0) = this lat/lon" — so what it needs is the geodetic
+    # position of the ORIGIN, back-solved from a known (lat, lon) <-> (x, y)
+    # pair using a flat-earth approximation (fine at field scale, <1km):
+    #   1 deg latitude  ~= 111320 m
+    #   1 deg longitude ~= 111320 * cos(latitude) m
+    # The known point sits at local (gps_x, gps_y) relative to the origin,
+    # so the origin sits at local (-gps_x, -gps_y) relative to the known
+    # point — convert that offset to degrees and add it to the known fix.
+    gps_ref = next(((r['gps_lat'], r['gps_lon'], r['gps_x'], r['gps_y'])
+                     for r in rows if r['gps_lat'] is not None), None)
+    if gps_ref is not None:
+        ref_lat, ref_lon, ref_x, ref_y = gps_ref
+        m_per_deg_lat = 111320.0
+        m_per_deg_lon = 111320.0 * math.cos(math.radians(ref_lat))
+        gps_lat = ref_lat - (ref_y / m_per_deg_lat)
+        gps_lon = ref_lon - (ref_x / m_per_deg_lon) if m_per_deg_lon else ref_lon
+    else:
+        gps_lat = gps_lon = None
 
     # Resolution must be fine enough that CropRowTerrain's half_row_idx >= 1
     # (i.e. the row profile covers at least one cell on each side of centre).
@@ -452,10 +490,16 @@ def patch_world_spherical_coordinates(world_path, gps_lat, gps_lon):
     patch_world_physics_engine must run every time), so this has to run
     every time too, not just once.
 
-    Uses the same GPS datum the topo map was anchored to (gps_lat/gps_lon
-    extracted from the topo nodes) so the world's georeference and the
-    topo nav frame agree — if the map was saved against ui_node.py's sim
-    fake-fix datum, that's the same point we tell Gazebo the world sits on.
+    gps_lat/gps_lon must be the geodetic position of topo-frame local
+    (0, 0) — i.e. already back-solved by compute_field_params from a
+    topo node's own (lat, lon, x, y), NOT a raw node GPS tag passed
+    through unchanged. A node's own fix corresponds to that node's (x, y),
+    which is generally nowhere near (0, 0); declaring it as the origin
+    datum directly shifts the whole georeference by that node's offset,
+    which previously showed up as the robot appearing to spawn in the
+    wrong place relative to the map once anything (fusioncore's UKF,
+    robot_localization, etc.) converted a GPS fix back to local ENU using
+    this datum.
     """
     world_path = Path(world_path)
     if not world_path.exists():
