@@ -44,10 +44,18 @@ from rclpy.qos import (
     QoSProfile,
     ReliabilityPolicy,
 )
+from rclpy.time import Time
 from sensor_msgs.msg import BatteryState, NavSatFix, NavSatStatus
 from shapely.geometry import LineString, MultiLineString, Polygon
 from shapely.ops import unary_union
 from std_msgs.msg import Bool, Empty, Float64, String
+from tf2_ros import (
+    ConnectivityException,
+    ExtrapolationException,
+    LookupException,
+)
+from tf2_ros.buffer import Buffer
+from tf2_ros.transform_listener import TransformListener
 
 # MISSION: store owns missions.yaml, scheduling, and run recording.
 from devkit_ui.missions import ACTIONS, MissionStore, action_ros_msgs
@@ -233,6 +241,7 @@ def _demo_nodes() -> dict[str, dict]:
 
 _SVG_W, _SVG_H = 900, 480
 _MARGIN, _NODE_R = 56, 17
+_TF_STALENESS_LIMIT = 2.0  # s — map->base_link older than this: don't draw it
 
 
 def _node_transform(nodes: dict):
@@ -666,6 +675,17 @@ class NiceGuiNode(Node):
         self.create_subscription(Odometry, '/odom',
                                  self._odom_fallback, _ODOM_QOS)
 
+        # TF: _robot_pose() needs the actual map->base_link transform, not a
+        # raw odom-frame pose. odom frame origin is wherever the robot
+        # started dead-reckoning (spawn point in sim) — it does NOT coincide
+        # with map (0,0), so plotting raw /odom against topo_nodes (map
+        # frame) puts the marker off wherever it actually is, potentially
+        # off-canvas entirely. Buffer/listener give us a real map->base_link
+        # lookup regardless of whether map->odom is a static bootstrap
+        # transform (sim) or a live localisation output (real hardware).
+        self._tf_buffer = Buffer()
+        self._tf_listener = TransformListener(self._tf_buffer, self)
+
         # /odometry/global is fed by a relay of /fusion/odom in sim (see
         # sim_nav.launch.py) — same trust gating applies via _odom_fallback's
         # self._fusion_odom_seen check, so it won't overwrite a good pose with
@@ -766,11 +786,28 @@ class NiceGuiNode(Node):
             self.latest_odom = msg
 
     def _robot_pose(self) -> tuple | None:
-        """(x, y, yaw) of the robot in map frame, or None if no odom yet."""
-        od = self.latest_odom
-        if od is None:
+        """(x, y, yaw) of the robot in map frame, or None if unavailable.
+
+        Real map->base_link TF lookup, not raw /odom — odom's origin is the
+        robot's dead-reckoning start point (spawn in sim), not map (0,0), so
+        using it raw plots the marker off by the full map->odom offset.
+
+        Liveness and staleness are both checked against the TF result itself
+        (not latest_odom, which this no longer reads) so the marker tracks
+        the actual thing being drawn: if /odom dies but TF is still fresh,
+        keep showing it; if TF stalls, blank it even if /odom is still
+        ticking.
+        """
+        try:
+            t = self._tf_buffer.lookup_transform(
+                'map', 'base_link', Time())
+        except (LookupException, ConnectivityException, ExtrapolationException):
             return None
-        p, q = od.pose.pose.position, od.pose.pose.orientation
+        stamp = t.header.stamp.sec + t.header.stamp.nanosec * 1e-9
+        now = self.get_clock().now().nanoseconds * 1e-9
+        if now - stamp > _TF_STALENESS_LIMIT:
+            return None
+        p, q = t.transform.translation, t.transform.rotation
         yaw = math.atan2(2 * (q.w * q.z + q.x * q.y),
                          1 - 2 * (q.y * q.y + q.z * q.z))
         return (p.x, p.y, yaw)
