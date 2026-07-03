@@ -596,13 +596,16 @@ class NiceGuiNode(Node):
         )
         self.create_subscription(NavSatFix,    '/gnss/fix',           self.store_gps,                  _SENSOR_QOS)
 
-        # Sim GPS shim: Gazebo doesn't publish /gnss/fix, but saving a topo map
-        # hard-requires a finite, non-zero fix (see save path) to anchor nodes
-        # to a datum. In sim we publish a fake fix at the field datum. The sim
-        # flag is the authoritative signal, plumbed from manage.py's is_sim
-        # through devkit.launch.py -> ui.launch.py, so we never race a real GPS
-        # on hardware. The India datum matches the leaflet centre / F2C fallback
-        # used elsewhere in this UI.
+        # Sim GPS shim: saving a topo map hard-requires a finite, non-zero fix
+        # (see save path) to anchor nodes to a datum, and at cold start
+        # nothing has published one yet. Gazebo's real navsat sensor IS
+        # bridged onto /gnss/fix (ros_gz_bridge.yaml), so this shim is a
+        # fallback that yields to it once seen (_last_real_gps_t), not the
+        # only sim source — don't assume this is the fix fusioncore anchors
+        # on. The sim flag is the authoritative signal, plumbed from
+        # manage.py's is_sim through devkit.launch.py -> ui.launch.py, so we
+        # never publish this on hardware. The India datum matches the
+        # leaflet centre / F2C fallback used elsewhere in this UI.
         self.declare_parameter('sim', False)
         self._is_sim = bool(self.get_parameter('sim').value)
         self._FAKE_GPS_LAT = 9.045094
@@ -3749,13 +3752,28 @@ class NiceGuiNode(Node):
 
     def _publish_fake_gps(self) -> None:
         """Publish a fix at the field datum (sim only — timer isn't created
-        on hardware). If a real fix unexpectedly appears on /gnss/fix (e.g. a
-        real GPS attached during a sim launch), yield to it rather than
-        corrupt the stream.
+        on hardware). Fallback only: ros_gz_bridge bridges Gazebo's real
+        navsat sensor onto this same topic, so a real fix is the expected
+        normal case. Before publishing, checks get_publishers_info_by_topic
+        for /gnss/fix and backs off if anyone else is already advertised —
+        this beats a fixed startup delay because it reacts to the bridge's
+        actual state, not a guessed spin-up time. Still not airtight: DDS
+        discovery itself has latency, so a bridge that starts publishing in
+        the same discovery window we check could still be missed once.
         """
         now = self.get_clock().now().nanoseconds * 1e-9
         if now - self._last_real_gps_t < 20.0:
             return  # a real fix was seen recently; don't interfere
+        # Check who else is actually publishing /gnss/fix right now, rather
+        # than guessing how long the bridge takes to start. If the bridge
+        # (or anything else) is already advertised as a publisher, it will
+        # win any real race — don't add our fix into the mix at all.
+        others = [
+            p for p in self.get_publishers_info_by_topic('/gnss/fix')
+            if p.node_name != self.get_name()
+        ]
+        if others:
+            return  # a real publisher is live; let it be the sole source
         msg = NavSatFix()
         msg.header.stamp = self.get_clock().now().to_msg()
         msg.header.frame_id = 'gps'
