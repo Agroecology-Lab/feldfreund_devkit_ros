@@ -83,7 +83,7 @@ nodes:
         z: 0.0
     properties:
       xy_goal_tolerance: 0.1
-      yaw_goal_tolerance: 0.05
+      yaw_goal_tolerance: 0.3
       dropped_by: webui_f2c
       timestamp: 03-07-2026_22-31-43
       gps_lat: 9.0455101
@@ -127,7 +127,7 @@ nodes:
         z: 0.0
     properties:
       xy_goal_tolerance: 0.1
-      yaw_goal_tolerance: 0.05
+      yaw_goal_tolerance: 0.3
       dropped_by: webui_f2c
       timestamp: 03-07-2026_22-31-43
       gps_lat: 9.0455101
@@ -166,7 +166,7 @@ nodes:
         z: 0.0
     properties:
       xy_goal_tolerance: 0.1
-      yaw_goal_tolerance: 0.05
+      yaw_goal_tolerance: 0.3
       dropped_by: webui_f2c
       timestamp: 03-07-2026_22-31-43
       gps_lat: 9.0455209
@@ -205,7 +205,7 @@ nodes:
         z: 0.0
     properties:
       xy_goal_tolerance: 0.1
-      yaw_goal_tolerance: 0.05
+      yaw_goal_tolerance: 0.3
       dropped_by: webui_f2c
       timestamp: 03-07-2026_22-31-43
       gps_lat: 9.0455209
@@ -244,7 +244,7 @@ nodes:
         z: 0.0
     properties:
       xy_goal_tolerance: 0.1
-      yaw_goal_tolerance: 0.05
+      yaw_goal_tolerance: 0.3
       dropped_by: webui_f2c
       timestamp: 03-07-2026_22-31-43
       gps_lat: 9.0455317
@@ -283,7 +283,7 @@ nodes:
         z: 0.0
     properties:
       xy_goal_tolerance: 0.1
-      yaw_goal_tolerance: 0.05
+      yaw_goal_tolerance: 0.3
       dropped_by: webui_f2c
       timestamp: 03-07-2026_22-31-43
       gps_lat: 9.0455317
@@ -322,7 +322,7 @@ nodes:
         z: 0.0
     properties:
       xy_goal_tolerance: 0.1
-      yaw_goal_tolerance: 0.05
+      yaw_goal_tolerance: 0.3
       dropped_by: webui_f2c
       timestamp: 03-07-2026_22-31-43
       gps_lat: 9.0455425
@@ -361,7 +361,7 @@ nodes:
         z: 0.0
     properties:
       xy_goal_tolerance: 0.1
-      yaw_goal_tolerance: 0.05
+      yaw_goal_tolerance: 0.3
       dropped_by: webui_f2c
       timestamp: 03-07-2026_22-31-43
       gps_lat: 9.0455425
@@ -400,7 +400,7 @@ nodes:
         z: 0.0
     properties:
       xy_goal_tolerance: 0.1
-      yaw_goal_tolerance: 0.05
+      yaw_goal_tolerance: 0.3
       dropped_by: webui_f2c
       timestamp: 03-07-2026_22-31-43
       gps_lat: 9.0455533
@@ -436,7 +436,7 @@ nodes:
         z: 0.0
     properties:
       xy_goal_tolerance: 0.1
-      yaw_goal_tolerance: 0.05
+      yaw_goal_tolerance: 0.3
       dropped_by: webui_f2c
       timestamp: 03-07-2026_22-31-43
       gps_lat: 9.0455533
