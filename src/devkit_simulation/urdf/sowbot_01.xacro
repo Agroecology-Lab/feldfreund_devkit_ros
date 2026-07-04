@@ -175,6 +175,21 @@
   <xacro:track prefix="left"  y=" ${track_half}" axis_y=" 1"/>
   <xacro:track prefix="right" y="-${track_half}" axis_y="-1"/>
 
+  <!-- Native <collision><surface><friction> above is silently dropped on
+       URDF->SDF conversion (Gazebo Harmonic) — without this, tracks have
+       zero ground friction and spin in place. This is the form that
+       actually survives conversion. -->
+  <gazebo reference="left_track_link">
+    <mu1>0.7</mu1>
+    <mu2>150</mu2>
+    <fdir1>0 1 0</fdir1>
+  </gazebo>
+  <gazebo reference="right_track_link">
+    <mu1>0.7</mu1>
+    <mu2>150</mu2>
+    <fdir1>0 1 0</fdir1>
+  </gazebo>
+
   <!-- ══════════════════════════════════════════════════════════════
        SIDE BODY PODS  (two boxes above the tracks — the split body)
        ══════════════════════════════════════════════════════════════ -->
@@ -579,13 +594,15 @@
        joint velocities into odometry, matching the unscoped /odom
        gz topic that ros_gz_bridge.yaml expects.
 
-       TF: deliberately NOT publishing tf_topic here. fusioncore is
-       the sole publisher of odom->base_link (fed by bridged
-       /gnss/fix, /imu/data, /odom/wheels — the latter is this
-       plugin's /odom topic, relayed). Ground-truth /odom stays
-       available as a plain topic for error analysis / RTK-outage
-       testing; it just doesn't touch TF anymore. Two odom->base_link
-       broadcasters (this + fusioncore) would silently race.
+       TF: publish_tf explicitly false. fusioncore is the sole
+       publisher of odom->base_link (fed by bridged /gnss/fix,
+       /imu/data, /odom/wheels — the latter is this plugin's /odom
+       topic, relayed). Ground-truth /odom stays available as a
+       plain topic for error analysis / RTK-outage testing; it just
+       doesn't touch TF anymore. Two odom->base_link broadcasters
+       (this + fusioncore) would silently race — omitting tf_topic
+       alone does NOT prevent this; the plugin still broadcasts on
+       its default TF topic unless publish_tf is set false here.
        ══════════════════════════════════════════════════════════════ -->
   <gazebo>
     <plugin filename="gz-sim-diff-drive-system"
@@ -603,6 +620,7 @@
       <frame_id>odom</frame_id>
       <child_frame_id>base_link</child_frame_id>
       <odom_publish_frequency>50</odom_publish_frequency>
+      <publish_tf>false</publish_tf>
     </plugin>
   </gazebo>
 
