@@ -599,31 +599,50 @@ class NiceGuiNode(Node):
         # Sim GPS shim: saving a topo map hard-requires a finite, non-zero fix
         # (see save path) to anchor nodes to a datum, and at cold start
         # nothing has published one yet. Gazebo's real navsat sensor IS
-        # bridged onto /gnss/fix (ros_gz_bridge.yaml), so this shim is a
-        # fallback that yields to it once seen (_last_real_gps_t), not the
-        # only sim source — don't assume this is the fix fusioncore anchors
-        # on. The sim flag is the authoritative signal, plumbed from
+        # bridged onto /gnss/fix (ros_gz_bridge.yaml) — this shim used to
+        # publish onto that SAME topic and rely on a discovery-time backoff
+        # (get_publishers_info_by_topic) to yield to the real bridge. That
+        # was racy: DDS discovery has latency, so a bridge that starts
+        # publishing in the same window could be missed, letting one fake
+        # fix at the hardcoded datum below reach fusioncore. That datum is
+        # ~53m from a real field's actual datum (verified against
+        # maps/maize_map's back-solved origin) — a jump big enough to trip
+        # fusioncore's outlier gate and anchor it on the wrong reference for
+        # the rest of the run, silently rejecting every subsequent real fix.
+        # Fix: publish on a dedicated topic so there is no shared-topic race
+        # at all, and only let the UI treat it as a real-position fallback
+        # (topo-map save path) when no genuine /gnss/fix has arrived
+        # recently — fusioncore never subscribes to this topic, so it can
+        # no longer be corrupted by the shim regardless of timing.
+        # The sim flag is the authoritative signal, plumbed from
         # manage.py's is_sim through devkit.launch.py -> ui.launch.py, so we
         # never publish this on hardware. The India datum matches the
         # leaflet centre / F2C fallback used elsewhere in this UI.
+        _FAKE_GPS_TOPIC = '/gnss/fix_sim_shim'
         self.declare_parameter('sim', False)
         self._is_sim = bool(self.get_parameter('sim').value)
         self._FAKE_GPS_LAT = 9.045094
         self._FAKE_GPS_LON = 77.792024
         self._FAKE_GPS_ALT = 40.0
-        # Sentinel marking our own synthetic fixes so store_gps doesn't treat
-        # them as a real GPS. status.service is uint16 and real receivers only
-        # set the low bits (GPS=1/GLONASS=2/COMPASS=4/GALILEO=8, max 15), so a
-        # high value is unambiguous and assignable.
+        # Sentinel marking our own synthetic fixes. Kept even though the
+        # shim is off /gnss/fix now: store_fake_gps still uses it to make
+        # sure we're not somehow processing our own echo, and it's cheap
+        # insurance against a future re-merge of the two topics.
+        # status.service is uint16 and real receivers only set the low bits
+        # (GPS=1/GLONASS=2/COMPASS=4/GALILEO=8, max 15), so a high value is
+        # unambiguous and assignable.
         self._FAKE_GPS_SENTINEL = 0xF000
         self._last_real_gps_t = 0.0
         if self._is_sim:
             self._fake_gps_pub = self.create_publisher(
-                NavSatFix, '/gnss/fix', _SENSOR_QOS)
+                NavSatFix, _FAKE_GPS_TOPIC, _SENSOR_QOS)
+            self.create_subscription(
+                NavSatFix, _FAKE_GPS_TOPIC, self.store_fake_gps, _SENSOR_QOS)
             self.create_timer(1.0, self._publish_fake_gps)
             self.get_logger().info(
-                'Sim mode: publishing fake /gnss/fix at datum '
-                f'({self._FAKE_GPS_LAT}, {self._FAKE_GPS_LON})')
+                f'Sim mode: publishing fake fix on {_FAKE_GPS_TOPIC} at datum '
+                f'({self._FAKE_GPS_LAT}, {self._FAKE_GPS_LON}) — fusioncore '
+                'does not subscribe to this topic')
         self.create_subscription(BatteryState, 'battery_state',       self.store_battery,               1)
         self.create_subscription(Bool,         'bumper/front_top',    self.update_bumper_front_top,    SAFETY_QOS)
         self.create_subscription(Bool,         'bumper/front_bottom', self.update_bumper_front_bottom, SAFETY_QOS)
@@ -1206,7 +1225,7 @@ class NiceGuiNode(Node):
             self.f2c_save_status = 'ERROR: no odometry'
             return
         if self.latest_gps is None:
-            self.f2c_save_status = 'ERROR: no GPS message on /gnss/fix yet'
+            self.f2c_save_status = 'ERROR: no GPS fix yet (/gnss/fix or sim shim)'
             return
 
         _lat = self.latest_gps.latitude
@@ -3759,35 +3778,33 @@ class NiceGuiNode(Node):
 
     def store_gps(self, msg: NavSatFix) -> None:
         self.latest_gps = msg
-        # Only a fix from outside this node (no sentinel) counts as "real GPS
-        # present" and suppresses the sim shim.
-        if msg.status.service != self._FAKE_GPS_SENTINEL:
-            self._last_real_gps_t = self.get_clock().now().nanoseconds * 1e-9
+        # Anything arriving on the real /gnss/fix topic is by definition a
+        # real fix now that the shim publishes elsewhere — no sentinel check
+        # needed here any more, but keep the same variable/semantics for the
+        # staleness gate below.
+        self._last_real_gps_t = self.get_clock().now().nanoseconds * 1e-9
 
-    def _publish_fake_gps(self) -> None:
-        """Publish a fix at the field datum (sim only — timer isn't created
-        on hardware). Fallback only: ros_gz_bridge bridges Gazebo's real
-        navsat sensor onto this same topic, so a real fix is the expected
-        normal case. Before publishing, checks get_publishers_info_by_topic
-        for /gnss/fix and backs off if anyone else is already advertised —
-        this beats a fixed startup delay because it reacts to the bridge's
-        actual state, not a guessed spin-up time. Still not airtight: DDS
-        discovery itself has latency, so a bridge that starts publishing in
-        the same discovery window we check could still be missed once.
+    def store_fake_gps(self, msg: NavSatFix) -> None:
+        """Consume the sim shim's fix as a fallback ONLY (see _FAKE_GPS_TOPIC
+        setup docstring). This topic is never seen by fusioncore, so this is
+        purely for the UI's own use (e.g. the topo-map save path needing a
+        finite fix at cold start before the real bridge has published one).
+        Content-gated rather than topic-gated: only takes effect if no real
+        fix has arrived recently, so a slow-starting real bridge doesn't
+        leave the UI without any fix while it comes up.
         """
         now = self.get_clock().now().nanoseconds * 1e-9
         if now - self._last_real_gps_t < 20.0:
-            return  # a real fix was seen recently; don't interfere
-        # Check who else is actually publishing /gnss/fix right now, rather
-        # than guessing how long the bridge takes to start. If the bridge
-        # (or anything else) is already advertised as a publisher, it will
-        # win any real race — don't add our fix into the mix at all.
-        others = [
-            p for p in self.get_publishers_info_by_topic('/gnss/fix')
-            if p.node_name != self.get_name()
-        ]
-        if others:
-            return  # a real publisher is live; let it be the sole source
+            return  # a real fix was seen recently; don't override it
+        self.latest_gps = msg
+
+    def _publish_fake_gps(self) -> None:
+        """Publish a fix at the field datum (sim only — timer isn't created
+        on hardware). Runs on its own dedicated topic (_FAKE_GPS_TOPIC), so
+        there is no shared-topic race with ros_gz_bridge's real navsat
+        publisher any more — no discovery-timing backoff needed, since
+        fusioncore and the real bridge never see this topic at all.
+        """
         msg = NavSatFix()
         msg.header.stamp = self.get_clock().now().to_msg()
         msg.header.frame_id = 'gps'
