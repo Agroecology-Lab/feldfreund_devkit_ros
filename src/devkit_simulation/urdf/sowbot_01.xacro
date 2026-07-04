@@ -178,16 +178,29 @@
   <!-- Native <collision><surface><friction> above is silently dropped on
        URDF->SDF conversion (Gazebo Harmonic) — without this, tracks have
        zero ground friction and spin in place. This is the form that
-       actually survives conversion. -->
+       actually survives conversion.
+
+       Confirmed by live test (2026-07-04): left_track_link/odometry
+       reached ~1 m/s while base_link never moved — belt spinning with no
+       traction. Root cause: mu1/mu2/fdir1 is the ODE anisotropic-friction
+       shortcut; fdir1 (a friction *direction* vector) isn't honoured the
+       same way once the world's physics engine was switched to dartsim
+       (see patch_world_physics_engine in topo_to_forest3d.py — that
+       switch was made to get TrackedVehicle/TrackController working at
+       all, but happened after this friction block was tuned against
+       ODE). Replaced with the same plain isotropic mu/mu2 form already
+       proven to work under dartsim on the ground collision
+       (patch_ground_friction's GROUND_FRICTION_SURFACE). No fdir1 — if
+       skid-steer turning needs directional friction again, that has to
+       be re-validated against dartsim specifically, not assumed from the
+       old ODE tuning. -->
   <gazebo reference="left_track_link">
-    <mu1>0.7</mu1>
-    <mu2>150</mu2>
-    <fdir1>0 1 0</fdir1>
+    <mu1>0.9</mu1>
+    <mu2>0.9</mu2>
   </gazebo>
   <gazebo reference="right_track_link">
-    <mu1>0.7</mu1>
-    <mu2>150</mu2>
-    <fdir1>0 1 0</fdir1>
+    <mu1>0.9</mu1>
+    <mu2>0.9</mu2>
   </gazebo>
 
   <!-- ══════════════════════════════════════════════════════════════
