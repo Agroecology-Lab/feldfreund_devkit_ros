@@ -3310,6 +3310,14 @@ class NiceGuiNode(Node):
                                f'-x "$SPAWN_X" -y "$SPAWN_Y" -z "$SPAWN_Z" && '
                                f'sleep 2 && ros2 run ros_gz_bridge parameter_bridge --ros-args '
                                f'-p use_sim_time:=true -p config_file:={bridge_config} & '
+                               # This button never launched robot_state_publisher
+                               # (only sim.launch.py did) — imu_link/gps_link and
+                               # every other URDF fixed-joint TF never existed on
+                               # this path, breaking fusioncore lever-arm
+                               # resolution and heading validation silently.
+                               f'ros2 run robot_state_publisher robot_state_publisher --ros-args '
+                               f'-p use_sim_time:=true '
+                               f'-p robot_description:="$(xacro {xacro_file})" & '
                                f'{nav2_launch_cmd}')
                         _spawn_proc[0] = subprocess.Popen(['/bin/bash', '-c', cmd],
                             stdout=open('/tmp/gazebo_spawn.log', 'w', encoding="utf-8"), stderr=subprocess.STDOUT,
