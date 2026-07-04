@@ -9,12 +9,16 @@ from launch_ros.actions import Node
 def generate_launch_description():
     """Generate launch description for the devkit UI."""
     # sim flows down from devkit.launch.py. The UI node uses it to decide
-    # whether to publish a fake /gnss/fix at the field datum. ros_gz_bridge
-    # now bridges Gazebo's real navsat sensor onto /gnss/fix too, so this is
-    # a cold-start fallback, not "sim has no real GPS" — it yields to the
-    # real bridged fix once one arrives (see ui_node._publish_fake_gps). It
-    # still matters: at boot the fake fix can win the race and anchor
-    # fusioncore's filter at the placeholder datum instead of the field.
+    # whether to publish a fake fix on /gnss/fix_sim_shim at the field
+    # datum, purely as a cold-start fallback for the UI's own topo-map save
+    # path (see ui_node._publish_fake_gps / store_fake_gps). This used to
+    # publish onto /gnss/fix itself — the same topic ros_gz_bridge bridges
+    # Gazebo's real navsat sensor onto — and rely on a discovery-timing
+    # backoff to yield to the real fix. That race could be lost once during
+    # DDS discovery, letting the placeholder datum reach fusioncore and
+    # anchor its filter ~53m from the real field, silently rejecting every
+    # subsequent real fix as an outlier. Moving the shim to its own topic
+    # removes the race entirely: fusioncore never subscribes to it.
     sim_arg = DeclareLaunchArgument(
         'sim',
         default_value='false',
