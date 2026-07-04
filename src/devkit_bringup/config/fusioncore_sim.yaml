@@ -38,10 +38,12 @@ fusioncore:
     # silently reject every fix in sim and starve the filter of GNSS updates.
     gnss.min_fix_type: 1
 
-    # Looser than real-hardware 9.49. Sim GNSS is currently noiseless (see
-    # header), so this mainly guards against startup transients, not real
-    # sensor outliers — revisit once gps_sensor gets a <noise> block.
-    outlier_threshold_gnss: 16.27
+    # Tightened back to hardware-equivalent strictness (was 16.27). Loose
+    # here let a wrong-but-plausible spherical_coordinates origin (bad/
+    # missing node GPS anchor) get silently fused instead of rejected,
+    # permanently biasing the filter every run since that patch landed.
+    # Re-loosen only once maps are confirmed saved with a real anchor.
+    outlier_threshold_gnss: 9.49
 
     encoder.nhc_vy_sigma: 3.0
 
