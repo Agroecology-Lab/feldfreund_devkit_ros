@@ -3253,96 +3253,58 @@ class NiceGuiNode(Node):
                 _AGRO_PKG = '/workspace/install/devkit_simulation/share/devkit_simulation'
 
                 def _launch_world():
+                    # Was: raw `gz sim` + a hand-rolled robot_state_publisher
+                    # invocation in _spawn_robot() that passed robot_description
+                    # as a literal XML string on a -p CLI arg — rcl's arg parser
+                    # chokes on that and aborts instantly, so imu_link/gps_link/
+                    # base_link never existed in TF. sim.launch.py already does
+                    # this correctly (robot_description via Command()
+                    # substitution), and does gz_sim + robot_state_publisher +
+                    # spawn (reads /workspace/spawn_pose.txt itself) + bridge
+                    # in one shot. Use it instead of duplicating the logic here.
                     if _gazebo_proc[0] is not None and _gazebo_proc[0].poll() is None:
                         _gazebo_lbl.set_text('already running')
                         return
                     try:
-                        env = {**os.environ, 'DISPLAY': os.environ.get('DISPLAY', ':0'),
-                               'GZ_SIM_RESOURCE_PATH': '/workspace/models' + (':' + os.environ['GZ_SIM_RESOURCE_PATH'] if os.environ.get('GZ_SIM_RESOURCE_PATH') else '')}
-                        _gazebo_proc[0] = subprocess.Popen(
-                            ['gz', 'sim', '-r', f'{_AGRO_PKG}/worlds/maize.world'],
+                        # DEVKIT_URDF must be set too — sim.launch.py's
+                        # spawn_entity script reads that env var (not the
+                        # urdf:= launch arg) to pick which xacro to actually
+                        # spawn in Gazebo. Only robot_state_publisher uses the
+                        # urdf:= arg. Without this, robot_description/TF would
+                        # be for the selected robot but the spawned entity
+                        # would silently default to sowbot_01.xacro instead.
+                        cmd = (
+                            f'export DEVKIT_URDF={_robot_model["xacro"]} && '
+                            'ros2 launch devkit_simulation sim.launch.py '
+                            f'world:=maize.world urdf:={_robot_model["xacro"]}'
+                        )
+                        _gazebo_proc[0] = subprocess.Popen(['/bin/bash', '-c', cmd],
                             stdout=open('/tmp/gazebo_world.log', 'w', encoding="utf-8"), stderr=subprocess.STDOUT,
-                            env=env, start_new_session=True)
-                        _gazebo_lbl.set_text(f'world launched — pid {_gazebo_proc[0].pid}')
+                            start_new_session=True)
+                        _gazebo_lbl.set_text(f'world+robot launching — pid {_gazebo_proc[0].pid}')
                         _gazebo_lbl.style('color:#1a7f37')
                     except Exception as exc:
                         _gazebo_lbl.set_text(f'ERROR: {exc}')
                         _gazebo_lbl.style('color:#cf222e')
 
                 def _spawn_robot():
+                    # Robot/bridge/robot_state_publisher are already brought up
+                    # by _launch_world() (sim.launch.py handles gz_sim + RSP +
+                    # spawn + bridge as one unit). This button now only adds
+                    # Nav2 on top — it no longer re-spawns the entity by hand.
+                    if _gazebo_proc[0] is None or _gazebo_proc[0].poll() is not None:
+                        _spawn_lbl.set_text('ERROR: launch the world first')
+                        _spawn_lbl.style('color:#cf222e')
+                        return
                     if _spawn_proc[0] is not None and _spawn_proc[0].poll() is None:
                         _spawn_lbl.set_text('already running')
                         return
                     try:
-                        xacro_file    = f'{_AGRO_PKG}/urdf/{_robot_model["xacro"]}'
-                        bridge_config = f'{_AGRO_PKG}/config/ros_gz_bridge.yaml'
-
-                        # Hand off to nav2_only.launch.py for Nav2 — extracted
-                        # from sowbot_sim.launch.py specifically so this manual
-                        # flow can add Nav2 on top of the Gazebo/robot/bridge
-                        # already started above, without sowbot_sim.launch.py's
-                        # preflight_pkill killing them and its own sim_launch
-                        # spawning a duplicate world+robot. Both launch files
-                        # share the same _nav2_sim_nodes()/_nav2_lifecycle_
-                        # manager_node() helpers (nav2_only imports them via
-                        # importlib) so the t+5s lifecycle stagger and
-                        # bond_timeout=15.0 fix live in one place only.
-                        #
-                        # Fixed 10s sleep before launching: the spawn+bridge
-                        # sequence to our left (xacro && create && sleep 2 &&
-                        # bridge) needs a few seconds beyond its own sleep 2
-                        # for ros_gz_bridge to actually start and begin
-                        # publishing /clock — without this, Nav2's lifecycle
-                        # nodes could come up before any sim-time clock source
-                        # exists. Not a readiness check, just a fixed delay
-                        # (matches the style of sim.launch.py's own `sleep 30`
-                        # after its gz-service poll) — increase if this proves
-                        # too short under load.
-                        nav2_launch_cmd = (
-                            'sleep 10 && '
-                            'ros2 launch devkit_bringup nav2_only.launch.py '
-                            '>> /tmp/gazebo_spawn.log 2>&1'
-                        )
-
-                        cmd = (f'ros2 run ros_gz_sim delete -name agro_robot 2>/dev/null; '
-                               f'xacro {xacro_file} > /tmp/agro_robot_resolved.urdf && '
-                               # Spawn pose comes from topo_to_forest3d.py's
-                               # HOME-node + terrain_offset calculation (see
-                               # sim.launch.py for the same logic) — NOT a
-                               # hardcoded origin. The world's terrain/crops
-                               # are shifted by terrain_offset, so a fixed
-                               # (0,0) spawn drifts off the actual ground
-                               # once that offset is non-zero. This button
-                               # had its own copy of the old hardcoded
-                               # -x 0.0 -y 0.0 -z 0.3, separate from
-                               # sim.launch.py's spawn_entity, which is why
-                               # fixing sim.launch.py alone didn't help —
-                               # this is the path the UI button actually
-                               # runs. Falls back to legacy (0,0,0.3) if the
-                               # file is missing.
-                               f'SPAWN_FILE="/workspace/spawn_pose.txt"; '
-                               f'if [ -f "$SPAWN_FILE" ]; then '
-                               f'read -r SPAWN_X SPAWN_Y SPAWN_Z < "$SPAWN_FILE"; '
-                               f'else SPAWN_X=0.0; SPAWN_Y=0.0; SPAWN_Z=0.3; fi; '
-                               f'ros2 run ros_gz_sim create -name agro_robot '
-                               f'-string "$(cat /tmp/agro_robot_resolved.urdf)" '
-                               f'-x "$SPAWN_X" -y "$SPAWN_Y" -z "$SPAWN_Z" && '
-                               f'sleep 2 && ros2 run ros_gz_bridge parameter_bridge --ros-args '
-                               f'-p use_sim_time:=true -p config_file:={bridge_config} & '
-                               # This button never launched robot_state_publisher
-                               # (only sim.launch.py did) — imu_link/gps_link and
-                               # every other URDF fixed-joint TF never existed on
-                               # this path, breaking fusioncore lever-arm
-                               # resolution and heading validation silently.
-                               f'ros2 run robot_state_publisher robot_state_publisher --ros-args '
-                               f'-p use_sim_time:=true '
-                               f'-p robot_description:="$(xacro {xacro_file})" & '
-                               f'{nav2_launch_cmd}')
+                        cmd = 'ros2 launch devkit_bringup nav2_only.launch.py >> /tmp/gazebo_spawn.log 2>&1'
                         _spawn_proc[0] = subprocess.Popen(['/bin/bash', '-c', cmd],
                             stdout=open('/tmp/gazebo_spawn.log', 'w', encoding="utf-8"), stderr=subprocess.STDOUT,
                             start_new_session=True)
-                        _spawn_lbl.set_text(
-                            f'spawning {_robot_model["xacro"]} + Nav2 — pid {_spawn_proc[0].pid}')
+                        _spawn_lbl.set_text(f'nav2 launching — pid {_spawn_proc[0].pid}')
                         _spawn_lbl.style('color:#1a7f37')
                     except Exception as exc:
                         _spawn_lbl.set_text(f'ERROR: {exc}')
