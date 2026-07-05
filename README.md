@@ -116,7 +116,7 @@ xhost +local:docker
 Access http://localhost to access the WebUI
 
 *Notes for Mac users:
-`--net=host` in [line 208 of manage.py](https://github.com/Agroecology-Lab/feldfreund_devkit_ros/blob/6c18e0ebc7b81741786f12bc2ac4063289895f28/manage.py#L208) doesn't bridge to the host on macOS Docker Desktop (Docker runs inside a Linux VM there), making `localhost` unreachable. Fix this by replacing the `--net=host` parameter with explicit port mappings `-p 80:80 -p 8080:8080 -p 8765:8765` 
+Port mappings may not bridge to the host on macOS Docker Desktop (Docker runs inside a Linux VM there), making `localhost` unreachable. Fix this by adding explicit port mappings to docker run flags, [cmd 250 of manage.py](https://github.com/Agroecology-Lab/feldfreund_devkit_ros/blob/8dcfde1b813bd829756a372d88195bb2b9249313/manage.py#L250) 
 
 Drop the xhost line, you'll still be able to access GUI tools via a browser.
 
