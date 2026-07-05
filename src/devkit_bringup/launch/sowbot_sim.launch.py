@@ -412,9 +412,13 @@ def generate_launch_description():
             '    break; '
             '  fi; '
             'done; '
+            # Patterns updated for the new-style static_transform_publisher
+            # args (--frame-id odom --child-frame-id base_footprint), which
+            # no longer put "odom base_footprint" adjacent on the command
+            # line the way the old positional args did.
             'ros2 lifecycle set /odom_to_base_footprint_static shutdown 2>/dev/null; '
-            'pkill -f "static_transform_publishe[r].*odom base_footprint" || true; '
-            'pkill -f "static_transform_publishe[r].*base_footprint base_link" || true; '
+            'pkill -f "static_transform_publishe[r].*--frame-id odom --child-frame-id base_footprint" || true; '
+            'pkill -f "static_transform_publishe[r].*--frame-id base_footprint --child-frame-id base_link" || true; '
             'echo "[bootstrap_tf_killer] killed odom->base_footprint and base_footprint->base_link static publishers after ${elapsed}s wait for real /odom data"',
         ],
         name='kill_bootstrap_tfs',
