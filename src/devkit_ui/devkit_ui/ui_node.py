@@ -3271,63 +3271,35 @@ class NiceGuiNode(Node):
                 # is not set in the UI node's subprocess environment.
                 _AGRO_PKG = '/workspace/install/devkit_simulation/share/devkit_simulation'
 
-                def _launch_world():
-                    # Was: raw `gz sim` + a hand-rolled robot_state_publisher
-                    # invocation in _spawn_robot() that passed robot_description
-                    # as a literal XML string on a -p CLI arg — rcl's arg parser
-                    # chokes on that and aborts instantly, so imu_link/gps_link/
-                    # base_link never existed in TF. sim.launch.py already does
-                    # this correctly (robot_description via Command()
-                    # substitution), and does gz_sim + robot_state_publisher +
-                    # spawn (reads /workspace/spawn_pose.txt itself) + bridge
-                    # in one shot. Use it instead of duplicating the logic here.
+                def _launch_sim():
+                    # Single button, runs the exact same thing as the CLI:
+                    # `ros2 launch devkit_bringup sowbot_sim.launch.py
+                    #   world:=maize.world urdf:=<selected xacro>`
+                    # (same command _sim_cmd() builds for the browser button).
+                    # Replaces the old Launch World / Spawn Robot split, which
+                    # ran sim.launch.py + nav2_only.launch.py instead — that
+                    # path skipped preflight_pkill, fusioncore, and
+                    # kill_bootstrap_tfs entirely (all of which only exist in
+                    # sowbot_sim.launch.py), causing stale wall-time bootstrap
+                    # TFs to fight the real sim-time TF forever and FusionCore
+                    # to never run at all. Do not reintroduce that split.
                     if _gazebo_proc[0] is not None and _gazebo_proc[0].poll() is None:
                         _gazebo_lbl.set_text('already running')
                         return
                     try:
-                        # DEVKIT_URDF must be set too — sim.launch.py's
-                        # spawn_entity script reads that env var (not the
-                        # urdf:= launch arg) to pick which xacro to actually
-                        # spawn in Gazebo. Only robot_state_publisher uses the
-                        # urdf:= arg. Without this, robot_description/TF would
-                        # be for the selected robot but the spawned entity
-                        # would silently default to sowbot_01.xacro instead.
-                        cmd = (
-                            f'export DEVKIT_URDF={_robot_model["xacro"]} && '
-                            'ros2 launch devkit_simulation sim.launch.py '
-                            f'world:=maize.world urdf:={_robot_model["xacro"]}'
+                        _gazebo_proc[0] = subprocess.Popen(
+                            _sim_cmd(),
+                            stdout=open('/tmp/gazebo_sim.log', 'w', encoding="utf-8"),
+                            stderr=subprocess.STDOUT,
+                            env=_SIM_ENV,
+                            start_new_session=True,
                         )
-                        _gazebo_proc[0] = subprocess.Popen(['/bin/bash', '-c', cmd],
-                            stdout=open('/tmp/gazebo_world.log', 'w', encoding="utf-8"), stderr=subprocess.STDOUT,
-                            start_new_session=True)
-                        _gazebo_lbl.set_text(f'world+robot launching — pid {_gazebo_proc[0].pid}')
+                        _gazebo_lbl.set_text(
+                            f'sim launching — {_robot_model["xacro"]} — pid {_gazebo_proc[0].pid}')
                         _gazebo_lbl.style('color:#1a7f37')
                     except Exception as exc:
                         _gazebo_lbl.set_text(f'ERROR: {exc}')
                         _gazebo_lbl.style('color:#cf222e')
-
-                def _spawn_robot():
-                    # Robot/bridge/robot_state_publisher are already brought up
-                    # by _launch_world() (sim.launch.py handles gz_sim + RSP +
-                    # spawn + bridge as one unit). This button now only adds
-                    # Nav2 on top — it no longer re-spawns the entity by hand.
-                    if _gazebo_proc[0] is None or _gazebo_proc[0].poll() is not None:
-                        _spawn_lbl.set_text('ERROR: launch the world first')
-                        _spawn_lbl.style('color:#cf222e')
-                        return
-                    if _spawn_proc[0] is not None and _spawn_proc[0].poll() is None:
-                        _spawn_lbl.set_text('already running')
-                        return
-                    try:
-                        cmd = 'ros2 launch devkit_bringup nav2_only.launch.py >> /tmp/gazebo_spawn.log 2>&1'
-                        _spawn_proc[0] = subprocess.Popen(['/bin/bash', '-c', cmd],
-                            stdout=open('/tmp/gazebo_spawn.log', 'w', encoding="utf-8"), stderr=subprocess.STDOUT,
-                            start_new_session=True)
-                        _spawn_lbl.set_text(f'nav2 launching — pid {_spawn_proc[0].pid}')
-                        _spawn_lbl.style('color:#1a7f37')
-                    except Exception as exc:
-                        _spawn_lbl.set_text(f'ERROR: {exc}')
-                        _spawn_lbl.style('color:#cf222e')
 
                 # ── Plant Placement Controls ─────────────────────────────
                 # Configure plant spacing, row width, and model before
@@ -3552,8 +3524,7 @@ class NiceGuiNode(Node):
                 ui.separator().classes('w-full my-2')
 
                 with ui.row().classes('items-center gap-2 flex-wrap'):
-                    ui.button('Launch World', on_click=_launch_world).props('color=positive no-caps').classes('px-4')
-                    ui.button('Spawn Robot', on_click=_spawn_robot).props('color=primary no-caps').classes('px-4')
+                    ui.button('Launch Sim', on_click=_launch_sim).props('color=positive no-caps').classes('px-4 font-bold')
                     ui.button('Rebuild World from Map', on_click=_rebuild_world).props(
                         'outline no-caps').classes('px-4')
                     ui.button('Launch Sim (browser)', on_click=_start_gazebo_browser).props(
@@ -3567,7 +3538,7 @@ class NiceGuiNode(Node):
                         'font-family:\'Courier New\',monospace;">'
                         '↗ Gazebo (noVNC)</a>'
                     )
-                _spawn_lbl = ui.label('').classes('text-xs font-mono').style('color:#57606a')
+
 
                 # ── Sowbot Row Follow (sim) ──────────────────────────────
                 # Launches neo.launch.py in sim mode: subscribes to the
