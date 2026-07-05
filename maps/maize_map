@@ -82,8 +82,8 @@ nodes:
         y: -6.087
         z: 0.0
     properties:
-      xy_goal_tolerance: 0.1
-      yaw_goal_tolerance: 0.05
+      xy_goal_tolerance: 1.0
+      yaw_goal_tolerance: 6.28
       dropped_by: webui_f2c
       timestamp: 04-07-2026_15-54-40
       gps_lat: 9.0455348
@@ -126,8 +126,8 @@ nodes:
         y: -6.087
         z: 0.0
     properties:
-      xy_goal_tolerance: 0.1
-      yaw_goal_tolerance: 0.05
+      xy_goal_tolerance: 1.0
+      yaw_goal_tolerance: 6.28
       dropped_by: webui_f2c
       timestamp: 04-07-2026_15-54-40
       gps_lat: 9.0455348
@@ -165,8 +165,8 @@ nodes:
         y: -5.287
         z: 0.0
     properties:
-      xy_goal_tolerance: 0.1
-      yaw_goal_tolerance: 0.05
+      xy_goal_tolerance: 1.0
+      yaw_goal_tolerance: 6.28
       dropped_by: webui_f2c
       timestamp: 04-07-2026_15-54-40
       gps_lat: 9.045542
@@ -204,8 +204,8 @@ nodes:
         y: -5.287
         z: 0.0
     properties:
-      xy_goal_tolerance: 0.1
-      yaw_goal_tolerance: 0.05
+      xy_goal_tolerance: 1.0
+      yaw_goal_tolerance: 6.28
       dropped_by: webui_f2c
       timestamp: 04-07-2026_15-54-40
       gps_lat: 9.045542
@@ -243,8 +243,8 @@ nodes:
         y: -4.487
         z: 0.0
     properties:
-      xy_goal_tolerance: 0.1
-      yaw_goal_tolerance: 0.05
+      xy_goal_tolerance: 1.0
+      yaw_goal_tolerance: 6.28
       dropped_by: webui_f2c
       timestamp: 04-07-2026_15-54-40
       gps_lat: 9.0455492
@@ -282,8 +282,8 @@ nodes:
         y: -4.487
         z: 0.0
     properties:
-      xy_goal_tolerance: 0.1
-      yaw_goal_tolerance: 0.05
+      xy_goal_tolerance: 1.0
+      yaw_goal_tolerance: 6.28
       dropped_by: webui_f2c
       timestamp: 04-07-2026_15-54-40
       gps_lat: 9.0455492
@@ -321,8 +321,8 @@ nodes:
         y: -3.687
         z: 0.0
     properties:
-      xy_goal_tolerance: 0.1
-      yaw_goal_tolerance: 0.05
+      xy_goal_tolerance: 1.0
+      yaw_goal_tolerance: 6.28
       dropped_by: webui_f2c
       timestamp: 04-07-2026_15-54-40
       gps_lat: 9.0455564
@@ -360,8 +360,8 @@ nodes:
         y: -3.687
         z: 0.0
     properties:
-      xy_goal_tolerance: 0.1
-      yaw_goal_tolerance: 0.05
+      xy_goal_tolerance: 1.0
+      yaw_goal_tolerance: 6.28
       dropped_by: webui_f2c
       timestamp: 04-07-2026_15-54-40
       gps_lat: 9.0455564
@@ -399,8 +399,8 @@ nodes:
         y: -2.887
         z: 0.0
     properties:
-      xy_goal_tolerance: 0.1
-      yaw_goal_tolerance: 0.05
+      xy_goal_tolerance: 1.0
+      yaw_goal_tolerance: 6.28
       dropped_by: webui_f2c
       timestamp: 04-07-2026_15-54-40
       gps_lat: 9.0455636
@@ -438,8 +438,8 @@ nodes:
         y: -2.887
         z: 0.0
     properties:
-      xy_goal_tolerance: 0.1
-      yaw_goal_tolerance: 0.05
+      xy_goal_tolerance: 1.0
+      yaw_goal_tolerance: 6.28
       dropped_by: webui_f2c
       timestamp: 04-07-2026_15-54-40
       gps_lat: 9.0455636
@@ -477,8 +477,8 @@ nodes:
         y: -2.087
         z: 0.0
     properties:
-      xy_goal_tolerance: 0.1
-      yaw_goal_tolerance: 0.05
+      xy_goal_tolerance: 1.0
+      yaw_goal_tolerance: 6.28
       dropped_by: webui_f2c
       timestamp: 04-07-2026_15-54-40
       gps_lat: 9.0455708
@@ -516,8 +516,8 @@ nodes:
         y: -2.087
         z: 0.0
     properties:
-      xy_goal_tolerance: 0.1
-      yaw_goal_tolerance: 0.05
+      xy_goal_tolerance: 1.0
+      yaw_goal_tolerance: 6.28
       dropped_by: webui_f2c
       timestamp: 04-07-2026_15-54-40
       gps_lat: 9.0455708
@@ -555,8 +555,8 @@ nodes:
         y: -1.287
         z: 0.0
     properties:
-      xy_goal_tolerance: 0.1
-      yaw_goal_tolerance: 0.05
+      xy_goal_tolerance: 1.0
+      yaw_goal_tolerance: 6.28
       dropped_by: webui_f2c
       timestamp: 04-07-2026_15-54-40
       gps_lat: 9.045578
@@ -594,8 +594,8 @@ nodes:
         y: -1.287
         z: 0.0
     properties:
-      xy_goal_tolerance: 0.1
-      yaw_goal_tolerance: 0.05
+      xy_goal_tolerance: 1.0
+      yaw_goal_tolerance: 6.28
       dropped_by: webui_f2c
       timestamp: 04-07-2026_15-54-40
       gps_lat: 9.045578
@@ -630,8 +630,8 @@ nodes:
         y: -0.487
         z: 0.0
     properties:
-      xy_goal_tolerance: 0.1
-      yaw_goal_tolerance: 0.05
+      xy_goal_tolerance: 1.0
+      yaw_goal_tolerance: 6.28
       dropped_by: webui_f2c
       timestamp: 04-07-2026_15-54-40
       gps_lat: 9.0455851
@@ -669,8 +669,8 @@ nodes:
         y: -0.487
         z: 0.0
     properties:
-      xy_goal_tolerance: 0.1
-      yaw_goal_tolerance: 0.05
+      xy_goal_tolerance: 1.0
+      yaw_goal_tolerance: 6.28
       dropped_by: webui_f2c
       timestamp: 04-07-2026_15-54-40
       gps_lat: 9.0455851
