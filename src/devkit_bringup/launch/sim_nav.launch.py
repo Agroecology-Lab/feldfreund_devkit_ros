@@ -74,6 +74,36 @@ from launch_ros.actions import Node
 from launch_ros.substitutions import FindPackageShare
 
 
+def _read_spawn_xy(path='/workspace/spawn_pose.txt'):
+    """Return (x, y) the robot will spawn at, in map/topo frame.
+
+    map->odom was hardcoded to identity, which is only correct if the
+    robot spawns exactly at map-frame (0,0). It never does — spawn_pose.txt
+    holds the topo node the robot actually spawns at (e.g. (-1.106,
+    -6.087)), written by topo_to_forest3d.py before this launch file runs
+    in the same manage.py invocation. fusioncore's odom frame originates
+    at wherever the robot is when its first GNSS fix lands (i.e. the
+    spawn point), so with map->odom=identity, Nav2 reads the robot's
+    odom-frame position (near (0,0)) as if it were the map-frame position
+    — off by the entire spawn offset. Every goal, and the costmap, is
+    then wrong by that same vector: the robot confidently drives toward
+    real topo coordinates while believing it's somewhere else entirely,
+    which is how it ends up off the terrain mesh.
+
+    Spawn yaw is always 0 (sim.launch.py's spawn_robot never passes a yaw
+    to `ros2 run ros_gz_sim create`), so only x/y need correcting here.
+    """
+    try:
+        with open(path) as f:
+            x, y, _z = f.read().split()
+        return float(x), float(y)
+    except Exception as e:
+        print(f"[sim_nav] WARNING: could not read spawn pose from {path} "
+              f"({e}) -- map->odom will fall back to identity, which is "
+              "only correct if the robot spawns at map-frame (0,0).")
+        return 0.0, 0.0
+
+
 def generate_launch_description():
     topo_share = get_package_share_directory('topological_navigation')
 
@@ -81,6 +111,8 @@ def generate_launch_description():
     map_path   = tmap2_file or os.path.join(
         topo_share, 'config', 'mixed_actions_map.yaml'
     )
+
+    spawn_x, spawn_y = _read_spawn_xy()
 
     # use_sim_time=False throughout: no Gazebo, no /clock at this stage.
     # Topo nav only needs wall-time TF to localise; it does not plan paths.
@@ -186,12 +218,18 @@ def generate_launch_description():
     # consistency (map->odom has no dynamic publisher to conflict with, but
     # it should still be latched on /tf_static rather than live on /tf so
     # late-starting TF listeners don't have to catch it mid-stream).
+    #
+    # Translation is (spawn_x, spawn_y), NOT (0,0,0) -- see _read_spawn_xy()
+    # docstring above. This was the actual bug: identity here silently
+    # offset the robot's believed map-frame position by the entire spawn
+    # vector for the life of the run, since nothing else ever corrects
+    # map->odom.
     map_to_odom = Node(
         package='tf2_ros',
         executable='static_transform_publisher',
         name='map_to_odom_static',
         arguments=[
-            '--x', '0', '--y', '0', '--z', '0',
+            '--x', str(spawn_x), '--y', str(spawn_y), '--z', '0',
             '--qx', '0', '--qy', '0', '--qz', '0', '--qw', '1',
             '--frame-id', 'map', '--child-frame-id', 'odom',
         ],
