@@ -25,15 +25,13 @@ fake_nav2_server is removed.  It was providing:
   3. /clock  — not needed; topo nav runs with use_sim_time=False so it
      does not need a /clock source.
 
-fusioncore is now live in sim (previously ground-truth /odom was just
-relayed straight to /odometry/global as a stand-in — see git history).
-The ghost DiffDrive plugin in sowbot_01.xacro no longer publishes TF;
-fusioncore is the sole publisher of odom->base_link, fed by /gnss/fix
-and /imu/data (bridged) and /odom/wheels (relayed from ground-truth
-/odom below, for encoder input only — this relay does NOT touch TF
-anymore). Brought up via lifecycle configure/activate through the
-launch event bus rather than `ros2 lifecycle set`, same pattern as
-github.com/manankharwar/fusioncore/tree/main/fusioncore_gazebo.
+fusioncore now lives in sowbot_sim.launch.py (the Gazebo layer), NOT here,
+for the same reason Nav2 does: it consumes sim-time-stamped sensors and must
+run with use_sim_time=True after /clock is live. The ghost DiffDrive plugin in
+sowbot_01.xacro no longer publishes TF; fusioncore is the sole publisher of
+odom->base_footprint, fed by /gnss/fix and /imu/data (bridged) and /odom/wheels
+(relayed from ground-truth /odom below, for encoder input only — this relay does
+NOT touch TF). This file keeps only the wall-time bootstrap TFs and topo nav.
 
 TF tree at boot (before Gazebo starts)
 ---------------------------------------
@@ -60,23 +58,20 @@ Startup sequencing
 t+0s   map_manager2 starts, publishes topo map
 t+2s   localisation2 starts, waits for map, then listens for TF
 t+4s   navigation2 starts, waits for localisation
-t+4s   fusioncore configure -> activate (lifecycle)
 t+5s   topological_map_visualiser starts
 UI     user presses Start Sim -> sowbot_sim.launch.py starts Gazebo +
-       ros_gz_bridge + Nav2 (all with use_sim_time=True, /clock already live)
+       ros_gz_bridge + Nav2 + fusioncore (all with use_sim_time=True,
+       /clock already live)
 """
 
 import os
 
 from ament_index_python.packages import get_package_share_directory
 from launch import LaunchDescription
-from launch.actions import EmitEvent, TimerAction
-from launch.events import matches_action
+from launch.actions import TimerAction
 from launch.substitutions import PathJoinSubstitution
-from launch_ros.actions import LifecycleNode, Node
-from launch_ros.events.lifecycle import ChangeState
+from launch_ros.actions import Node
 from launch_ros.substitutions import FindPackageShare
-from lifecycle_msgs.msg import Transition
 
 
 def generate_launch_description():
@@ -104,51 +99,15 @@ def generate_launch_description():
     )
 
     # ── fusioncore (UKF localisation) ──────────────────────────────────────────
-    # Sole publisher of odom->base_link in sim (ghost DiffDrive plugin in
-    # sowbot_01.xacro no longer has <tf_topic>). Publishes /fusion/odom;
-    # limbic_row_follow_node subscribes to /odometry/global, so a plain
-    # relay maps one onto the other (same nav_msgs/Odometry type both ends).
-    # Fed by /gnss/fix, /imu/data (bridged from Gazebo sensors) and
-    # /odom/wheels (relay of ground-truth /odom below, encoder input only —
-    # this does NOT feed TF, fusioncore owns that).
-    fusioncore_params = PathJoinSubstitution(
-        [FindPackageShare('devkit_bringup'), 'config', 'fusioncore_sim.yaml']
-    )
-    fusioncore_node = LifecycleNode(
-        package='fusioncore_ros',
-        executable='fusioncore_node',
-        name='fusioncore',
-        namespace='',
-        output='screen',
-        parameters=[fusioncore_params, sim_time],
-    )
-
-    # Configure only — fusioncore_node has its own autostart (confirmed via
-    # log: "Autostart enabled: activating in 200ms") that activates itself
-    # once configured. An external EmitEvent(ACTIVATE) here raced it and
-    # produced "No transition matching 3 found for current state active"
-    # (harmless but noisy — the node was already active by the time our
-    # event arrived). Configure is enough; let autostart do the rest.
-    fusioncore_configure = EmitEvent(event=ChangeState(
-        lifecycle_node_matcher=matches_action(fusioncore_node),
-        transition_id=Transition.TRANSITION_CONFIGURE,
-    ))
-
-    fusioncore_bringup = TimerAction(period=4.0, actions=[
-        fusioncore_node,
-        fusioncore_configure,
-    ])
-
-    fusion_to_global_relay = TimerAction(period=4.0, actions=[
-        Node(
-            package='topic_tools',
-            executable='relay',
-            name='fusion_odom_global_relay',
-            arguments=['/fusion/odom', '/odometry/global'],
-            parameters=[sim_time],
-            output='screen',
-        ),
-    ])
+    # MOVED to sowbot_sim.launch.py (the Gazebo layer), for the same reason Nav2
+    # lives there: fusioncore consumes sim-time-stamped sensors (/gnss/fix,
+    # /imu/data, /odom/wheels) and must run with use_sim_time=True *after* /clock
+    # is live. Started here on wall time it stamped its odom->base_footprint TF
+    # and /fusion/odom with wall-clock time while the rest of the stack is on sim
+    # time, so everything it published looked ~1.7e9 s in the future -> the
+    # "Extrapolation Error" class of failures and the robot driving off the world.
+    # The /odom -> /odom/wheels relay above stays here: it is a stamp-preserving
+    # passthrough and is harmless on wall time.
 
     # ── Bootstrap odom -> base_footprint (static, wall-time) ──────────────────
     # robot_state_publisher (Gazebo layer) normally provides this.  Without
@@ -273,8 +232,6 @@ def generate_launch_description():
 
     return LaunchDescription([
         odom_relay,
-        fusioncore_bringup,
-        fusion_to_global_relay,
         map_to_odom,
         odom_to_base_footprint,
         base_footprint_to_base_link,
