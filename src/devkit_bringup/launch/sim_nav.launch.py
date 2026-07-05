@@ -134,6 +134,18 @@ def generate_launch_description():
     )
 
     # ── UI node ───────────────────────────────────────────────────────────────
+    # Deliberate exception to this file's wall-time convention (see sim_time
+    # above). Everything else here runs before Gazebo/clock exist, but
+    # ui_node's _robot_pose() reads the live map->base_link TF for the SVG
+    # marker, and that TF's timestamp comes from fusioncore — which now runs
+    # in sowbot_sim.launch.py on use_sim_time=True (see that file). Without
+    # this, ui_node's own get_clock().now() stays on wall time while the TF
+    # stamp is in sim time; the staleness check in _robot_pose() then sees a
+    # ~1.7e9s gap every time and blanks the marker unconditionally, even
+    # though the transform itself is perfectly fresh. Harmless before Gazebo
+    # starts: with no /clock yet, a sim-time node's clock just reads 0, which
+    # still passes the staleness comparison against the (also wall-time)
+    # bootstrap TFs below.
     ui_node = Node(
         package='devkit_ui',
         executable='ui_node',
@@ -141,7 +153,7 @@ def generate_launch_description():
         output='screen',
         respawn=True,
         respawn_delay=5,
-        parameters=[{'sim': True}],
+        parameters=[{'sim': True}, {'use_sim_time': True}],
     )
 
     # ── Bootstrap map -> odom (static, wall-time) ────────────────────────────
