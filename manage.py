@@ -249,7 +249,13 @@ class DevkitManager:
         """
         cmd = [
             'docker', 'run', '-it', '--rm', '--name', self.container_name,
-            '--net=host', '--privileged',
+            '-p', '80:80',
+            '-p', '8080:8080',
+            '-p', '8765:8765',
+            '-p', '6080:6080',
+            '-p', '8734:8734',
+            '-p', '8888:8888',
+            '--privileged',
             '--env', 'RMW_IMPLEMENTATION=rmw_cyclonedds_cpp',
             '--env', 'PYTHONPATH=/root/.lizard:/workspace/install/lib/python3.12/site-packages',
             '--env', f'DISPLAY={os.environ.get("DISPLAY", ":0")}',
