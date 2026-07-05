@@ -78,7 +78,7 @@ nodes:
         y: 0.0
         z: 0.0
       position:
-        x: -1.106
+        x: -3.106
         y: -6.087
         z: 0.0
     properties:
@@ -122,7 +122,7 @@ nodes:
         y: 0.0
         z: 0.0
       position:
-        x: 9.433
+        x: 11.433
         y: -6.087
         z: 0.0
     properties:
@@ -161,7 +161,7 @@ nodes:
         y: 0.0
         z: 0.0
       position:
-        x: 9.433
+        x: 11.433
         y: -5.287
         z: 0.0
     properties:
@@ -200,7 +200,7 @@ nodes:
         y: 0.0
         z: 0.0
       position:
-        x: -0.961
+        x: -2.961
         y: -5.287
         z: 0.0
     properties:
@@ -239,7 +239,7 @@ nodes:
         y: 0.0
         z: 0.0
       position:
-        x: -0.816
+        x: -2.816
         y: -4.487
         z: 0.0
     properties:
@@ -278,7 +278,7 @@ nodes:
         y: 0.0
         z: 0.0
       position:
-        x: 9.433
+        x: 11.433
         y: -4.487
         z: 0.0
     properties:
@@ -317,7 +317,7 @@ nodes:
         y: 0.0
         z: 0.0
       position:
-        x: 9.433
+        x: 11.433
         y: -3.687
         z: 0.0
     properties:
@@ -356,7 +356,7 @@ nodes:
         y: 0.0
         z: 0.0
       position:
-        x: -0.67
+        x: -2.67
         y: -3.687
         z: 0.0
     properties:
@@ -395,7 +395,7 @@ nodes:
         y: 0.0
         z: 0.0
       position:
-        x: -0.525
+        x: -2.525
         y: -2.887
         z: 0.0
     properties:
@@ -434,7 +434,7 @@ nodes:
         y: 0.0
         z: 0.0
       position:
-        x: 9.433
+        x: 11.433
         y: -2.887
         z: 0.0
     properties:
@@ -473,7 +473,7 @@ nodes:
         y: 0.0
         z: 0.0
       position:
-        x: 9.433
+        x: 11.433
         y: -2.087
         z: 0.0
     properties:
@@ -512,7 +512,7 @@ nodes:
         y: 0.0
         z: 0.0
       position:
-        x: -0.379
+        x: -2.379
         y: -2.087
         z: 0.0
     properties:
@@ -551,7 +551,7 @@ nodes:
         y: 0.0
         z: 0.0
       position:
-        x: -0.234
+        x: -2.234
         y: -1.287
         z: 0.0
     properties:
@@ -590,7 +590,7 @@ nodes:
         y: 0.0
         z: 0.0
       position:
-        x: 9.433
+        x: 11.433
         y: -1.287
         z: 0.0
     properties:
@@ -626,7 +626,7 @@ nodes:
         y: 0.0
         z: 0.0
       position:
-        x: 9.433
+        x: 11.433
         y: -0.487
         z: 0.0
     properties:
@@ -665,7 +665,7 @@ nodes:
         y: 0.0
         z: 0.0
       position:
-        x: -0.089
+        x: -2.089
         y: -0.487
         z: 0.0
     properties:
