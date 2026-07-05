@@ -114,11 +114,27 @@ def generate_launch_description():
     # it, localisation2's TF listener can never resolve map->base_link and
     # blocks forever.  Once Gazebo starts, the dynamic TF supersedes this
     # static one automatically.
+    # NOTE: new-style named args (--x/--frame-id/etc), NOT the old positional
+    # 'x y z yaw pitch roll frame child' form. static_transform_publisher's
+    # old-style arg parser publishes onto plain /tf instead of the latched
+    # /tf_static. That meant this bootstrap static and fusioncore's real,
+    # moving odom->base_footprint TF were BOTH live on /tf for the entire
+    # ~3min window before kill_bootstrap_tfs (sowbot_sim.launch.py) fires.
+    # TF2 resolves lookups by most-recent-timestamp, so the controller
+    # aliased between the frozen identity pose and fusioncore's real one —
+    # a stable, periodic corruption that shows up as a perfect constant-
+    # curvature circle in /odom. Publishing to /tf_static means
+    # kill_bootstrap_tfs only has to clear a single latched transform, not
+    # race a live publisher.
     odom_to_base_footprint = Node(
         package='tf2_ros',
         executable='static_transform_publisher',
         name='odom_to_base_footprint_static',
-        arguments=['0', '0', '0', '0', '0', '0', 'odom', 'base_footprint'],
+        arguments=[
+            '--x', '0', '--y', '0', '--z', '0',
+            '--qx', '0', '--qy', '0', '--qz', '0', '--qw', '1',
+            '--frame-id', 'odom', '--child-frame-id', 'base_footprint',
+        ],
         parameters=[sim_time],
         output='screen',
     )
@@ -128,7 +144,11 @@ def generate_launch_description():
         package='tf2_ros',
         executable='static_transform_publisher',
         name='base_footprint_to_base_link_static',
-        arguments=['0', '0', '0', '0', '0', '0', 'base_footprint', 'base_link'],
+        arguments=[
+            '--x', '0', '--y', '0', '--z', '0',
+            '--qx', '0', '--qy', '0', '--qz', '0', '--qw', '1',
+            '--frame-id', 'base_footprint', '--child-frame-id', 'base_link',
+        ],
         parameters=[sim_time],
         output='screen',
     )
@@ -162,11 +182,19 @@ def generate_launch_description():
     # via the full static chain: map->odom->base_footprint->base_link.
     # Once Gazebo starts, the bridge publishes real odom TF with sim-time stamps
     # which supersede this static transform automatically.
+    # Same old-style -> new-style fix as the two statics above, for
+    # consistency (map->odom has no dynamic publisher to conflict with, but
+    # it should still be latched on /tf_static rather than live on /tf so
+    # late-starting TF listeners don't have to catch it mid-stream).
     map_to_odom = Node(
         package='tf2_ros',
         executable='static_transform_publisher',
         name='map_to_odom_static',
-        arguments=['0', '0', '0', '0', '0', '0', 'map', 'odom'],
+        arguments=[
+            '--x', '0', '--y', '0', '--z', '0',
+            '--qx', '0', '--qy', '0', '--qz', '0', '--qw', '1',
+            '--frame-id', 'map', '--child-frame-id', 'odom',
+        ],
         parameters=[sim_time],
         output='screen',
     )
