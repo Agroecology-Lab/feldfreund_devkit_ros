@@ -49,6 +49,7 @@ from ament_index_python.packages import get_package_share_directory
 from launch import LaunchDescription
 from launch.actions import (
     DeclareLaunchArgument,
+    EmitEvent,
     ExecuteProcess,
     IncludeLaunchDescription,
     RegisterEventHandler,
@@ -56,9 +57,13 @@ from launch.actions import (
     TimerAction,
 )
 from launch.event_handlers import OnProcessExit
+from launch.events import matches_action
 from launch.launch_description_sources import PythonLaunchDescriptionSource
-from launch.substitutions import LaunchConfiguration
-from launch_ros.actions import Node
+from launch.substitutions import LaunchConfiguration, PathJoinSubstitution
+from launch_ros.actions import LifecycleNode, Node
+from launch_ros.events.lifecycle import ChangeState
+from launch_ros.substitutions import FindPackageShare
+from lifecycle_msgs.msg import Transition
 
 # ---------------------------------------------------------------------------
 # Nav2 nodes — always use_sim_time=True (Gazebo is already running by the
@@ -396,6 +401,50 @@ def generate_launch_description():
         output='screen',
     )
 
+    # ── fusioncore (UKF localisation, t+15s) ──────────────────────────────────
+    # MOVED here from sim_nav.launch.py. fusioncore consumes sim-time-stamped
+    # sensors (/gnss/fix, /imu/data bridged from Gazebo, /odom/wheels relayed
+    # from ground-truth /odom) and is the sole publisher of odom->base_footprint.
+    # It MUST run with use_sim_time=True and only after /clock is live, exactly
+    # like Nav2 above. Started on wall time it stamped its TF and /fusion/odom
+    # with wall-clock time while the sim-time stack rejected them as ~1.7e9 s in
+    # the future ("Extrapolation Error"), which sent the robot off the world.
+    # t=15s matches the Nav2 timer: gz sim + spawn + ros_gz_bridge are up and
+    # /clock is publishing by then. autostart (fusioncore >= 0.3.1) activates the
+    # node ~200ms after configure, so a lone CONFIGURE event is enough.
+    fusioncore_params = PathJoinSubstitution(
+        [FindPackageShare('devkit_bringup'), 'config', 'fusioncore_sim.yaml']
+    )
+    fusioncore_node = LifecycleNode(
+        package='fusioncore_ros',
+        executable='fusioncore_node',
+        name='fusioncore',
+        namespace='',
+        output='screen',
+        parameters=[fusioncore_params, {'use_sim_time': True}],
+    )
+    fusioncore_configure = EmitEvent(event=ChangeState(
+        lifecycle_node_matcher=matches_action(fusioncore_node),
+        transition_id=Transition.TRANSITION_CONFIGURE,
+    ))
+    fusioncore_bringup = TimerAction(period=15.0, actions=[
+        fusioncore_node,
+        fusioncore_configure,
+    ])
+
+    # /fusion/odom -> /odometry/global (limbic_row_follow subscribes to the
+    # latter; same nav_msgs/Odometry type both ends).
+    fusion_to_global_relay = TimerAction(period=15.0, actions=[
+        Node(
+            package='topic_tools',
+            executable='relay',
+            name='fusion_odom_global_relay',
+            arguments=['/fusion/odom', '/odometry/global'],
+            parameters=[{'use_sim_time': True}],
+            output='screen',
+        ),
+    ])
+
     return LaunchDescription([
         gz_resource_path,
         set_urdf_env,
@@ -409,5 +458,7 @@ def generate_launch_description():
         bridge_watchdog,
         nav2,
         nav2_lifecycle,
+        fusioncore_bringup,
+        fusion_to_global_relay,
         kill_bootstrap_tfs,
     ])
