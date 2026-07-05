@@ -820,14 +820,33 @@ class NiceGuiNode(Node):
         keep showing it; if TF stalls, blank it even if /odom is still
         ticking.
         """
+        # TEMP DIAGNOSTIC (remove once the marker-drop cause is confirmed):
+        # distinguishes "TF lookup threw" from "TF stale" from "all fine" so
+        # we can see which one fires when the marker disappears on nav start.
+        # Rate-limited to ~1/s so it doesn't flood the log while the failure
+        # persists across many UI refresh ticks.
+        now_wall = self.get_clock().now().nanoseconds * 1e-9
+        last_log = getattr(self, '_pose_fail_log_t', 0.0)
+        can_log  = (now_wall - last_log) > 1.0
+
         try:
             t = self._tf_buffer.lookup_transform(
                 'map', 'base_link', Time())
-        except (LookupException, ConnectivityException, ExtrapolationException):
+        except (LookupException, ConnectivityException, ExtrapolationException) as e:
+            if can_log:
+                self._pose_fail_log_t = now_wall
+                self.get_logger().warn(
+                    f'_robot_pose: TF lookup map->base_link failed '
+                    f'({type(e).__name__}): {e}')
             return None
         stamp = t.header.stamp.sec + t.header.stamp.nanosec * 1e-9
         now = self.get_clock().now().nanoseconds * 1e-9
         if now - stamp > _TF_STALENESS_LIMIT:
+            if can_log:
+                self._pose_fail_log_t = now_wall
+                self.get_logger().warn(
+                    f'_robot_pose: TF map->base_link stale by '
+                    f'{now - stamp:.2f}s (limit {_TF_STALENESS_LIMIT}s)')
             return None
         p, q = t.transform.translation, t.transform.rotation
         yaw = math.atan2(2 * (q.w * q.z + q.x * q.y),
