@@ -404,7 +404,7 @@ def generate_launch_description():
     kill_bootstrap_tfs = ExecuteProcess(
         cmd=[
             '/bin/bash', '-c',
-            'elapsed=0; timeout_s=90; '
+            'elapsed=0; timeout_s=240; '
             'until timeout 2 ros2 topic echo /odom --once >/dev/null 2>&1; do '
             '  elapsed=$((elapsed+2)); '
             '  if [ "$elapsed" -ge "$timeout_s" ]; then '
