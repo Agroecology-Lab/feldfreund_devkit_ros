@@ -401,25 +401,33 @@ def generate_launch_description():
     # covered by the DiffDrive bridge on /tf; base_footprint->base_link is
     # covered by robot_state_publisher (50 Hz, comes up independently of
     # spawn timing). map->odom is left alone — it has no dynamic replacement.
+    #
+    # NOTE: this was previously a loop of `timeout 2 ros2 topic echo /odom
+    # --once` retried every 2s for up to 240s. That spawns a brand-new DDS
+    # participant on every single attempt, and gives each one only 2s to
+    # stand up, complete discovery against the bridge's existing publisher,
+    # match, and receive a sample -- a budget that's routinely too tight
+    # under loopback multicast discovery with ParticipantIndex=auto
+    # (successive short-lived participants can be slowed by TIME_WAIT churn
+    # on the discovery ports). Result: the check reported "no /odom data
+    # after 240s" and permanently killed the bootstrap statics even while
+    # /odom was being published continuously and reliably to every other
+    # node in the graph -- a false negative in the check, not an actual
+    # data outage. Fixed by using ONE participant with the full timeout
+    # budget instead of 120 short-lived ones.
     kill_bootstrap_tfs = ExecuteProcess(
         cmd=[
             '/bin/bash', '-c',
-            'elapsed=0; timeout_s=240; '
-            'until timeout 2 ros2 topic echo /odom --once >/dev/null 2>&1; do '
-            '  elapsed=$((elapsed+2)); '
-            '  if [ "$elapsed" -ge "$timeout_s" ]; then '
-            '    echo "[bootstrap_tf_killer] WARNING: no /odom data after ${timeout_s}s, killing statics anyway to avoid wedging forever"; '
-            '    break; '
-            '  fi; '
-            'done; '
-            # Patterns updated for the new-style static_transform_publisher
-            # args (--frame-id odom --child-frame-id base_footprint), which
-            # no longer put "odom base_footprint" adjacent on the command
-            # line the way the old positional args did.
+            'start_ts=$SECONDS; timeout_s=240; '
+            'if timeout "$timeout_s" ros2 topic echo /odom --once >/dev/null 2>&1; then '
+            '  echo "[bootstrap_tf_killer] real /odom data confirmed after $((SECONDS-start_ts))s"; '
+            'else '
+            '  echo "[bootstrap_tf_killer] WARNING: no /odom data after $((SECONDS-start_ts))s, killing statics anyway to avoid wedging forever"; '
+            'fi; '
             'ros2 lifecycle set /odom_to_base_footprint_static shutdown 2>/dev/null; '
-            'pkill -f "static_transform_publishe[r].*--frame-id odom --child-frame-id base_footprint" || true; '
-            'pkill -f "static_transform_publishe[r].*--frame-id base_footprint --child-frame-id base_link" || true; '
-            'echo "[bootstrap_tf_killer] killed odom->base_footprint and base_footprint->base_link static publishers after ${elapsed}s wait for real /odom data"',
+            'pkill -f "static_transform_publishe[r].*odom base_footprint" || true; '
+            'pkill -f "static_transform_publishe[r].*base_footprint base_link" || true; '
+            'echo "[bootstrap_tf_killer] killed odom->base_footprint and base_footprint->base_link static publishers ($((SECONDS-start_ts))s elapsed)"',
         ],
         name='kill_bootstrap_tfs',
         output='screen',
