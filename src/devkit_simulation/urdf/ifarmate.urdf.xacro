@@ -123,13 +123,18 @@
     </link>
 
     <!-- Friction in <gazebo reference> — inline <surface> in URDF
-         <collision> is dropped by sdformat conversion on Harmonic. -->
+         <collision> is dropped by sdformat conversion on Harmonic.
+         sdformat's urdf2sdf whitelist here is mu1/mu2/fdir1/minDepth/
+         kp/kd — NOT "mu". <mu> was silently falling through as an
+         unrecognized child of <link> (log: "XML Element[mu], child of
+         element[link], not defined in SDF") -> zero primary friction
+         on every wheel. slip1/slip2 are ODE-only params with no DART
+         equivalent (this world runs dartsim) and logged the same
+         warning for no effect — removed rather than faked. -->
     <gazebo reference="${prefix}_wheel">
-      <mu>2.0</mu>
+      <mu1>2.0</mu1>
       <mu2>0.3</mu2>
       <fdir1>1 0 0</fdir1>
-      <slip1>0.0</slip1>
-      <slip2>0.3</slip2>
       <minDepth>0.001</minDepth>
       <kp>1e6</kp>
       <kd>1.0</kd>
