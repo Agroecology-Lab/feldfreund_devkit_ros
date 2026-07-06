@@ -3,9 +3,21 @@
     <model name="plant">
         <static>true</static>
         <link name="link">
+            <!-- Collision swapped from mesh/plant_collision.glb to a simple
+                 cylinder proxy. The plant is static, so this only affects
+                 narrowphase collision checks (robot wheels/legs vs. plant),
+                 not rendering. A full detailed mesh collider costs far more
+                 in DART than a primitive, and at field scale (hundreds to
+                 thousands of plant instances) that cost adds up fast on
+                 integrated/weak GPUs and CPUs alike.
+                 Radius/length approximate a maize stalk footprint — tune if
+                 your plant.glb is a different crop/scale. -->
             <collision name="collision">
                 <geometry>
-                    <mesh><uri>mesh/plant_collision.glb</uri><scale>0.01 0.01 0.01</scale></mesh>
+                    <cylinder>
+                        <radius>0.02</radius>
+                        <length>0.6</length>
+                    </cylinder>
                 </geometry>
             </collision>
             <visual name="visual">
