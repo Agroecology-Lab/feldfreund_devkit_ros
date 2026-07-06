@@ -83,7 +83,7 @@ nodes:
         z: 0.0
     properties:
       xy_goal_tolerance: 0.1
-      yaw_goal_tolerance: 0.05
+      yaw_goal_tolerance: 3.14
       dropped_by: webui_f2c
       timestamp: 06-07-2026_14-47-21
       gps_lat: 9.045579
@@ -127,7 +127,7 @@ nodes:
         z: 0.0
     properties:
       xy_goal_tolerance: 0.1
-      yaw_goal_tolerance: 0.05
+      yaw_goal_tolerance: 3.14
       dropped_by: webui_f2c
       timestamp: 06-07-2026_14-47-21
       gps_lat: 9.045579
@@ -166,7 +166,7 @@ nodes:
         z: 0.0
     properties:
       xy_goal_tolerance: 0.1
-      yaw_goal_tolerance: 0.05
+      yaw_goal_tolerance: 3.14
       dropped_by: webui_f2c
       timestamp: 06-07-2026_14-47-21
       gps_lat: 9.0455898
@@ -205,7 +205,7 @@ nodes:
         z: 0.0
     properties:
       xy_goal_tolerance: 0.1
-      yaw_goal_tolerance: 0.05
+      yaw_goal_tolerance: 3.14
       dropped_by: webui_f2c
       timestamp: 06-07-2026_14-47-21
       gps_lat: 9.0455898
@@ -244,7 +244,7 @@ nodes:
         z: 0.0
     properties:
       xy_goal_tolerance: 0.1
-      yaw_goal_tolerance: 0.05
+      yaw_goal_tolerance: 3.14
       dropped_by: webui_f2c
       timestamp: 06-07-2026_14-47-21
       gps_lat: 9.0456006
@@ -283,7 +283,7 @@ nodes:
         z: 0.0
     properties:
       xy_goal_tolerance: 0.1
-      yaw_goal_tolerance: 0.05
+      yaw_goal_tolerance: 3.14
       dropped_by: webui_f2c
       timestamp: 06-07-2026_14-47-21
       gps_lat: 9.0456006
@@ -319,7 +319,7 @@ nodes:
         z: 0.0
     properties:
       xy_goal_tolerance: 0.1
-      yaw_goal_tolerance: 0.05
+      yaw_goal_tolerance: 3.14
       dropped_by: webui_f2c
       timestamp: 06-07-2026_14-47-21
       gps_lat: 9.0456114
@@ -358,7 +358,7 @@ nodes:
         z: 0.0
     properties:
       xy_goal_tolerance: 0.1
-      yaw_goal_tolerance: 0.05
+      yaw_goal_tolerance: 3.14
       dropped_by: webui_f2c
       timestamp: 06-07-2026_14-47-21
       gps_lat: 9.0456114
