@@ -2646,8 +2646,18 @@ class NiceGuiNode(Node):
         """Launch a mission from the UI queue.
 
         queue: list of (row_id, action_key, action_params) triples.
-        Each step navigates to the row's entry node and publishes
-        implement params + enable before the goal, then disable after.
+        Each queued row is TWO nav goals, not one:
+          1. transit to the row's entry node (implement OFF — this may be
+             headland travel through other rows/edges)
+          2. entry -> exit (implement ON) — this is the leg
+             topological_navigation actually resolves to a limbic_row_follow
+             edge, i.e. the row is actually traversed here.
+        Sending only the entry-node goal (previous behaviour) meant a
+        queued row was never actually driven through at all — any row
+        that DID get row-followed was only a side effect of the router's
+        path to reach a LATER row's entry passing through this row's exit.
+        A single-row mission, or the last row in a multi-row queue, was
+        silently never traversed.
         """
         if not queue:
             status_lbl.set_text('ERROR: queue is empty')
@@ -2662,24 +2672,34 @@ class NiceGuiNode(Node):
             status_lbl.style('color:#cf222e')
             return
 
-        # Resolve row_id → entry node from current topo map.
+        # Resolve row_id → (entry_node, exit_node) from current topo map.
         row_entry: dict[int, str] = {}
+        row_exit:  dict[int, str] = {}
         for nname, nd in self.topo_nodes.items():
             meta = nd.get('meta', {})
             rid  = meta.get('row_id')
-            if rid is not None and meta.get('row_role', '') == 'entry':
-                try:
-                    row_entry[int(rid)] = nname
-                except (TypeError, ValueError):
-                    pass
+            role = meta.get('row_role', '')
+            if rid is None:
+                continue
+            try:
+                rid_int = int(rid)
+            except (TypeError, ValueError):
+                continue
+            if role == 'entry':
+                row_entry[rid_int] = nname
+            elif role == 'exit':
+                row_exit[rid_int] = nname
 
-        missing = [rid for rid, _, _ in queue if rid not in row_entry]
-        if missing:
-            status_lbl.set_text(f'ERROR: no entry node for row(s) {missing}')
+        missing_entry = [rid for rid, _, _ in queue if rid not in row_entry]
+        missing_exit  = [rid for rid, _, _ in queue if rid not in row_exit]
+        if missing_entry or missing_exit:
+            missing = sorted(set(missing_entry) | set(missing_exit))
+            status_lbl.set_text(f'ERROR: incomplete row nodes for row(s) {missing}')
             status_lbl.style('color:#cf222e')
             return
 
-        steps = [(rid, row_entry[rid], act, params) for rid, act, params in queue]
+        steps = [(rid, row_entry[rid], row_exit[rid], act, params)
+                 for rid, act, params in queue]
 
         self._mission_running = True
         self._mission_cancel  = False
@@ -2688,7 +2708,7 @@ class NiceGuiNode(Node):
 
         def _execute():
             success_overall = True
-            for step_idx, (rid, entry_node, action, params) in enumerate(steps):
+            for step_idx, (rid, entry_node, exit_node, action, params) in enumerate(steps):
                 if self._mission_cancel or self.soft_estop_active:
                     status_lbl.set_text('Cancelled')
                     status_lbl.style('color:#9a6700')
@@ -2697,21 +2717,37 @@ class NiceGuiNode(Node):
 
                 adef = ACTIONS.get(action)
                 label = f'{adef.icon} {adef.label}' if adef else action
+
+                # Leg 1: transit to entry — implement OFF, this isn't the row yet.
                 status_lbl.set_text(
-                    f'[{step_idx+1}/{len(steps)}] Row {rid} {label} → {entry_node}')
+                    f'[{step_idx+1}/{len(steps)}] Row {rid} → transit to {entry_node}')
+                status_lbl.style('color:#0969da')
+                nav_ok = self._send_goal_sync(entry_node)
+                if not nav_ok:
+                    status_lbl.set_text(
+                        f'Row {rid}: transit to {entry_node} failed — stopping mission')
+                    status_lbl.style('color:#cf222e')
+                    success_overall = False
+                    break
+
+                if self._mission_cancel or self.soft_estop_active:
+                    status_lbl.set_text('Cancelled')
+                    status_lbl.style('color:#9a6700')
+                    success_overall = False
+                    break
+
+                # Leg 2: entry -> exit — implement ON, this is the row itself.
+                status_lbl.set_text(
+                    f'[{step_idx+1}/{len(steps)}] Row {rid} {label} → {exit_node}')
                 status_lbl.style('color:#0969da')
 
-                # Engage implement
                 self._publish_tool_msgs(action, params, enable=True)
-
-                nav_ok = self._send_goal_sync(entry_node)
-
-                # Disengage regardless of nav outcome
+                nav_ok = self._send_goal_sync(exit_node)
                 self._publish_tool_msgs(action, params, enable=False)
 
                 if not nav_ok:
                     status_lbl.set_text(
-                        f'Row {rid}: nav failed — stopping mission')
+                        f'Row {rid}: traversal to {exit_node} failed — stopping mission')
                     status_lbl.style('color:#cf222e')
                     success_overall = False
                     break
@@ -3172,22 +3208,30 @@ class NiceGuiNode(Node):
                             stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
                         ))
                         time.sleep(0.5)
-                        # RViz above works (just slow) because its Ogre1/GLX
-                        # renderer honours LIBGL_ALWAYS_SOFTWARE directly. This
-                        # is Ogre2, which initialises via EGL_EXT_platform_device
-                        # — it enumerates /dev/dri and explicitly selects a real
-                        # GPU node, and Mesa's software-force guard *refuses* to
-                        # override an explicitly-selected hardware device (the
-                        # "Not allowed to force software rendering..." warning
-                        # right before the segfault in gazebo_sim.log). No EGL
-                        # env var changes that once a real render node is
-                        # visible, and the compose file's /dev:/dev + privileged
-                        # means it always is.
+                        # Xvfb has no DRI/GLX driver, so it can't honour
+                        # whatever hardware-render env manage.py set for the
+                        # container (nvidia __GLX_VENDOR_LIBRARY_NAME, or
+                        # /dev/dri passthrough). Force llvmpipe software GL
+                        # for this process only, matching docs/research/Sim.md
                         #
-                        # Fix: hide /dev/dri from just this subprocess with a
-                        # private mount namespace (the same trick gz-sim's own
-                        # CI uses on GPU-less runners). Only this child's view
-                        # of /dev is masked — nothing else in the container.
+                        # Env vars alone are NOT enough for gz-sim: RViz's
+                        # Ogre1/GLX renderer honours LIBGL_ALWAYS_SOFTWARE
+                        # directly, but gz-sim's Ogre2 initialises via
+                        # EGL_EXT_platform_device, which explicitly enumerates
+                        # /dev/dri and selects a real GPU node — Mesa's
+                        # software-force guard refuses to override an
+                        # explicitly-selected hardware device (this is the
+                        # "Not allowed to force software rendering..." warning
+                        # immediately before the segfault in gazebo_sim.log).
+                        # No EGL env var changes that once a real render node
+                        # is visible, and this container's /dev:/dev +
+                        # privileged mode means it always is.
+                        #
+                        # Confirmed fix (tested manually in-container): hide
+                        # /dev/dri from just this subprocess with a private
+                        # mount namespace — the same trick gz-sim's own CI
+                        # uses on GPU-less runners. Only this child's view of
+                        # /dev is masked; nothing else in the container.
                         env = {
                             **_SIM_ENV,
                             'DISPLAY': ':99',
