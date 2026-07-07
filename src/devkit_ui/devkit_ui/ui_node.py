@@ -3172,34 +3172,42 @@ class NiceGuiNode(Node):
                             stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
                         ))
                         time.sleep(0.5)
-                        # Xvfb has no DRI/GLX driver, so it can't honour
-                        # whatever hardware-render env manage.py set for the
-                        # container (nvidia __GLX_VENDOR_LIBRARY_NAME, or
-                        # /dev/dri passthrough). Force llvmpipe software GL
-                        # for this process only, matching docs/research/Sim.md
+                        # RViz above works (just slow) because its Ogre1/GLX
+                        # renderer honours LIBGL_ALWAYS_SOFTWARE directly. This
+                        # is Ogre2, which initialises via EGL_EXT_platform_device
+                        # — it enumerates /dev/dri and explicitly selects a real
+                        # GPU node, and Mesa's software-force guard *refuses* to
+                        # override an explicitly-selected hardware device (the
+                        # "Not allowed to force software rendering..." warning
+                        # right before the segfault in gazebo_sim.log). No EGL
+                        # env var changes that once a real render node is
+                        # visible, and the compose file's /dev:/dev + privileged
+                        # means it always is.
+                        #
+                        # Fix: hide /dev/dri from just this subprocess with a
+                        # private mount namespace (the same trick gz-sim's own
+                        # CI uses on GPU-less runners). Only this child's view
+                        # of /dev is masked — nothing else in the container.
                         env = {
                             **_SIM_ENV,
                             'DISPLAY': ':99',
                             'LIBGL_ALWAYS_SOFTWARE': '1',
                             'GALLIUM_DRIVER': 'llvmpipe',
                             'MESA_LOADER_DRIVER_OVERRIDE': 'llvmpipe',
-                            '__GLX_VENDOR_LIBRARY_NAME': '',
-                            # ogre2 initializes via EGL, not GLX — the GLX-only
-                            # overrides above don't stop EGL from enumerating a
-                            # real /dev/dri device (visible here because of the
-                            # container's /dev:/dev mount + privileged mode),
-                            # and mesa then refuses to force software over a
-                            # real hardware device -> segfault. Force EGL onto
-                            # the software vendor explicitly.
-                            'EGL_PLATFORM': 'surfaceless',
-                            '__EGL_VENDOR_LIBRARY_FILENAMES':
-                                '/usr/share/glvnd/egl_vendor.d/50_mesa.json',
                         }
+                        _quoted_cmd = ' '.join(
+                            "'" + a.replace("'", "'\\''") + "'" for a in _sim_cmd())
+                        wrapped_cmd = [
+                            'unshare', '--mount', '--propagation', 'private',
+                            '--', 'bash', '-c',
+                            f'mount -t tmpfs tmpfs /dev/dri 2>/dev/null; '
+                            f'exec {_quoted_cmd}',
+                        ]
                         # Log to a file (not DEVNULL) so a crashed launch is
                         # diagnosable — tail /tmp/gazebo_sim.log.
                         _gz_log = open('/tmp/gazebo_sim.log', 'w',encoding="utf-8")
                         _gazebo_proc[0] = subprocess.Popen(
-                            _sim_cmd(),
+                            wrapped_cmd,
                             stdout=_gz_log, stderr=subprocess.STDOUT,
                             env=env,
                             start_new_session=True,
