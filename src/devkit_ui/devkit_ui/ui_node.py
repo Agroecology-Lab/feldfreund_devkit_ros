@@ -3184,6 +3184,16 @@ class NiceGuiNode(Node):
                             'GALLIUM_DRIVER': 'llvmpipe',
                             'MESA_LOADER_DRIVER_OVERRIDE': 'llvmpipe',
                             '__GLX_VENDOR_LIBRARY_NAME': '',
+                            # ogre2 initializes via EGL, not GLX — the GLX-only
+                            # overrides above don't stop EGL from enumerating a
+                            # real /dev/dri device (visible here because of the
+                            # container's /dev:/dev mount + privileged mode),
+                            # and mesa then refuses to force software over a
+                            # real hardware device -> segfault. Force EGL onto
+                            # the software vendor explicitly.
+                            'EGL_PLATFORM': 'surfaceless',
+                            '__EGL_VENDOR_LIBRARY_FILENAMES':
+                                '/usr/share/glvnd/egl_vendor.d/50_mesa.json',
                         }
                         # Log to a file (not DEVNULL) so a crashed launch is
                         # diagnosable — tail /tmp/gazebo_sim.log.
