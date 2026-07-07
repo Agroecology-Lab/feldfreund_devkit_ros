@@ -3172,7 +3172,19 @@ class NiceGuiNode(Node):
                             stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
                         ))
                         time.sleep(0.5)
-                        env = {**_SIM_ENV, 'DISPLAY': ':99'}
+                        # Xvfb has no DRI/GLX driver, so it can't honour
+                        # whatever hardware-render env manage.py set for the
+                        # container (nvidia __GLX_VENDOR_LIBRARY_NAME, or
+                        # /dev/dri passthrough). Force llvmpipe software GL
+                        # for this process only, matching docs/research/Sim.md
+                        env = {
+                            **_SIM_ENV,
+                            'DISPLAY': ':99',
+                            'LIBGL_ALWAYS_SOFTWARE': '1',
+                            'GALLIUM_DRIVER': 'llvmpipe',
+                            'MESA_LOADER_DRIVER_OVERRIDE': 'llvmpipe',
+                            '__GLX_VENDOR_LIBRARY_NAME': '',
+                        }
                         # Log to a file (not DEVNULL) so a crashed launch is
                         # diagnosable — tail /tmp/gazebo_sim.log.
                         _gz_log = open('/tmp/gazebo_sim.log', 'w',encoding="utf-8")
