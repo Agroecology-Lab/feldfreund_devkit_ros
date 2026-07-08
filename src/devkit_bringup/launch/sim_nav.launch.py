@@ -282,6 +282,17 @@ def generate_launch_description():
     # same time as navigation2 so the action server is ready before any
     # goal arrives. Subscribes to /aoc/heartbeat/neo_vision and calls
     # /row_follow/enable, both published by crop_row_node (neo.launch.py).
+    #
+    # use_sim_time=True (added): same bug class as ui_node above.
+    # _pose_in_frame() compares get_clock().now() against the stamp on the
+    # map->base_link TF, which is sim-time-stamped once fusioncore is up
+    # (sowbot_sim.launch.py, use_sim_time=True). Without this override,
+    # limbic_row_follow defaulted to use_sim_time=False, so now() read wall
+    # clock (~1.78e9s epoch) against a small sim-time stamp -> a ~1.78e9s
+    # "staleness" every call, tripping the 1.0s limit and aborting Phase 0
+    # alignment before the robot ever moved. Must come after row_follow_params
+    # in the list so it isn't clobbered if crop_row_params.yaml ever sets
+    # use_sim_time itself.
     row_follow_params = PathJoinSubstitution(
         [FindPackageShare('sowbot_row_follow'), 'config', 'crop_row_params.yaml']
     )
@@ -293,6 +304,7 @@ def generate_launch_description():
             output='screen',
             parameters=[
                 row_follow_params,
+                {'use_sim_time': True},
             ],
         ),
     ])
