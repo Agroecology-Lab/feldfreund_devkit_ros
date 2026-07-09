@@ -7,9 +7,8 @@ Development is led by the <a href="https://agroecologylab.org.uk" target="_blank
 
 Reference open hardware stack(s) under development at [Sowbot.co.uk](https://sowbot.co.uk) in addition to orginal [Zauberzeug Field Friend](https://github.com/zauberzeug/)
 
-[Quick start](https://github.com/Agroecology-Lab/feldfreund_devkit_ros#quick-start)
+[Quick start](https://github.com/Agroecology-Lab/feldfreund_devkit_ros#quick-start) **Collaborators welcome.** See [CONTRIBUTING.md](CONTRIBUTING.md). 
 
-**Collaborators welcome.** See [CONTRIBUTING.md](CONTRIBUTING.md). [Quick start](https://github.com/Agroecology-Lab/feldfreund_devkit_ros#quick-start)
 Contact: [sowbot.co.uk](https://sowbot.co.uk)
 
 **Milestone — multi-row mission following validated in Gazebo:**
