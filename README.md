@@ -12,37 +12,43 @@ Reference open hardware stack(s) under development at [Sowbot.co.uk](https://sow
 **Collaborators welcome.** See [CONTRIBUTING.md](CONTRIBUTING.md). [Quick start](https://github.com/Agroecology-Lab/feldfreund_devkit_ros#quick-start)
 Contact: [sowbot.co.uk](https://sowbot.co.uk)
 
+**Milestone — multi-row mission following validated in Gazebo:**
+
+[![Multi-row mission following in Gazebo](https://img.youtube.com/vi/A0CVNcp19vU/0.jpg)](https://www.youtube.com/watch?v=A0CVNcp19vU)
+
 ## Sowbot Roadmap
 
-| # | Feature | Description | Status | Phase |
-|---|---------|-------------|--------|-------|
-| **FOUNDATION** | | | | **2025** |
-| F1 | Containerised deployment | Full ROS 2 Jazzy stack managed via Docker and `manage.py`. Live volume mapping to `/workspace`. Build, full-build, and `+sim` build modes. | Done | 2025 |
-| F2 | Stable device addressing | `fixusb.py` with Jetson/generic architecture detection, kernel `low_latency` mode, and udev symlink generation. Writes `.env` consumed by all launch files. Note: `run_neo()` never calls `fixusb.py` so `.env` is not written for neo-only runs. | Done | 2025 |
-| F3 | Teleop dashboard | NiceGUI web cockpit on `:80`. Three-tab interface: **Nav** (joystick, e-stop, topo map, node-drop, track mode), **Mission** (fields2cover corner entry, F2C row plan generator, reorderable mission queue), **System** (telemetry, safety indicators, GPS leaflet map). | Done | 2025 |
-| F4 | ublox DGNSS driver | Dual F9P moving-base configuration with dynamic port assignment via `fixusb.py`. | Done | 2026 |
-| F5 | Diagnostics TUI | `agbot-diagnostic.py` terminal status view of all hardware topics. Run inside container via `login.sh`. | Done | 2025 |
-| **MVP FIELD** | | | | **2026** |
-| M1 | AOC platform integration | Demonstrates AOC platform abstraction on affordable ARM hardware accessible to smallholders. | ~60% Done | 2026 |
-| M2 | Topological navigation + Nav2 | LCAS `topological_navigation` (`aoc_refactor` branch) building in Dockerfile. RViz visualisation confirmed working. Self-contained `navigation2.py` with A\* route planning, explicit state machine, and `row_traversal` / `NavigateToPose` / `goal_align` edge actions. `fake_nav2_server` with `/limbic_row_follow` stub enables full pipeline testing in sim. `sim_nav.launch.py` now routes through real Nav2. Pending: Jazzy field validation on hardware. | ~80% Done | 2026 |
-| M2a | fusioncore Nav2 bridge | `fusioncore_node` launched via `devkit.launch.py`. Nav2 topic remapping shim wired. Pending: end-to-end test on live hardware. | ~75% Done | 2026 |
-| M3 | Open-field row-crop scenario | Live node-drop in UI. F2C row plan generator implemented in `ui_node.py` (corners → swaths → topo rows via `_run_f2c()`). YAML written to `/workspace/maps/`, `switch_topological_map` with fallback. Topo map auto-generated at container start. Pending: tmap2 authoring from real field survey; F2C obstacle costmap integration. | ~65% Done | 2026 |
-| M4 | RTK-GNSS localisation | Full pipeline implemented: dual F9P, shims, UKF fusion, NTRIP. Lever-arm offsets in `fusioncore.yaml` are zeroed placeholders (commented `# measured` TODOs). Pending: antenna lever-arm measurement, live hardware test. | ~75% Done | 2026 |
-| M5 | Dual-SBC ROS 2 stack | `manage.py` detects crossover interface, builds `CYCLONEDDS_URI` peer config and injects into Docker. `neo.launch.py` and `devkit.launch.py` finalised for Limbic+Neo split. `zenoh_config.json` not present in repo (listed as pending). No `rmw_zenoh_cpp` launch args visible in current launch files — DDS peer path is the active one. | ~50% Done | 2026 |
-| M6 | Gazebo simulation | `sowbot_sim.launch.py` + `sim_nav.launch.py` fully restructured. `kill_fake_nav2_on_clock` implemented. `use_sim_time=True` now threaded through topo stack.  | ~80% Done | 2026 |
-| M7 | Sentor safety monitoring | `sowbot_monitor.yaml` fully authored (e-stop, bumpers, battery, camera, odom, neo_vision heartbeat, node monitors). `sentor_node.py` wired into `devkit.launch.py`. Pending: smoke-test on live hardware; battery voltage cutoff needs field confirmation (`# TODO: CONFIRM` in YAML). | ~75% Done | 2026 |
-| M8 | Visual crop-row navigation | `sowbot_row_follow` package implemented. ExG+Otsu, visual servo, `limbic_row_follow_node.py` as Nav2 action server. Cancel and heartbeat-loss safety. TSM row-swap hold with 6-second debounce implemented. Camera calibration params required before field use. Pending: camera calibration, field test. | ~75% Done | 2026 |
-| **PRODUCTION** | | | | **~2027** |
-| P1 | STM32H7 + copper-rs MCU | Replace ESP32/Lizard DSL with STM32H745 running copper-rs statically-scheduled Rust firmware. Hard real-time motor PID, hardware safety interlocks. | Research | 2027 |
-| P2 | CANopen bus | ISO 11898 FDCAN at 500 kbit/s / 2 Mbit/s. lely-core CANopen master on T527 native M_CAN. DSP402 drive profile. | Research | 2027 |
-| P3 | RT kernel + core isolation | PREEMPT_RT on Limbic T527. `isolcpus=4-7`, RTK EKF on core 2 (SCHED_FIFO 60), AOC nav on cores 4-6, watchdog on core 5. GbE/CAN IRQ pinned to core 0. | Planned | 2027 |
-| P4 | ROFS image | Read-only rootfs — Ubuntu Noble minimal or Yocto with RT kernel, pre-built LCAS topo nav, Nav2, `rmw_zenoh_cpp`. Immutable field deployment. | Research | 2027 |
-| **END-EFFECTORS** | | | | **TBD** |
-| E1 | Delta weeding module | Open-Weeding-Delta precision mechanical weeding. CANopen actuator node on delta controller. | Research | TBD |
-| E2 | LASER weeding module | Laudando LASER integration. Requires E-Stop interlocking with CANopen safety chain. | Research | TBD |
-| **DATASETS & COLLABORATION** | | | | **Ongoing** |
-| D1 | UK open-field dataset | Field imagery and GNSS logs from UK agroecological farm conditions. CC licence. | Planned | 2026 |
-| D2 | Caatinga biome dataset | Semi-arid row-crop imagery from caatingarobotics. Validated on T527 AIPU. | Active | 2026 |
+| # | Feature | Description | Status | TRL | Phase |
+|---|---------|-------------|--------|-----|-------|
+| **FOUNDATION** | | | | | **2025** |
+| F1 | Containerised deployment | Full ROS 2 Jazzy stack managed via Docker and `manage.py`. Live volume mapping to `/workspace`. Build, full-build, and `+sim` build modes. | Done | 6 | 2025 |
+| F2 | Stable device addressing | `fixusb.py` with Jetson/generic architecture detection, kernel `low_latency` mode, and udev symlink generation. Writes `.env` consumed by all launch files. Note: `run_neo()` never calls `fixusb.py` so `.env` is not written for neo-only runs. | Done | 6 | 2025 |
+| F3 | Teleop dashboard | NiceGUI web cockpit on `:80`. Three-tab interface: **Nav** (joystick, e-stop, topo map, node-drop, track mode), **Mission** (fields2cover corner entry, F2C row plan generator, reorderable mission queue), **System** (telemetry, safety indicators, GPS leaflet map). | Done | 6 | 2025 |
+| F4 | ublox DGNSS driver | Dual F9P moving-base configuration with dynamic port assignment via `fixusb.py`. | Done | 6 | 2026 |
+| F5 | Diagnostics TUI | `agbot-diagnostic.py` terminal status view of all hardware topics. Run inside container via `login.sh`. | Done | 6 | 2025 |
+| **MVP FIELD** | | | | | **2026** |
+| M1 | Agri Open Core platform integration | Demonstrates AOC platform abstraction on affordable ARM hardware accessible to smallholders. | ~60% Done | 3 | 2026 |
+| M2 | Topological navigation + Nav2 | LCAS `topological_navigation` (`aoc_refactor` branch) building in Dockerfile. RViz visualisation confirmed working. Self-contained `navigation2.py` with A\* route planning, explicit state machine, and `row_traversal` / `NavigateToPose` / `goal_align` edge actions. `fake_nav2_server` with `/limbic_row_follow` stub enables full pipeline testing in sim. `sim_nav.launch.py` now routes through real Nav2. **Multi-row mission following (entry/exit node pairs across boustrophedon rows) validated end-to-end in Gazebo.** Pending: Jazzy field validation on hardware. | ~85% Done | 4 | 2026 |
+| M2a | fusioncore Nav2 bridge | `fusioncore_node` launched via `devkit.launch.py`. Nav2 topic remapping shim wired. Pending: end-to-end test on live hardware. | ~75% Done | 4 | 2026 |
+| M3 | Open-field row-crop scenario | Live node-drop in UI. F2C row plan generator implemented in `ui_node.py` (corners → swaths → topo rows via `_run_f2c()`). YAML written to `/workspace/maps/`, `switch_topological_map` with fallback. Topo map auto-generated at container start. Multi-row traversal across generated swaths confirmed in sim. Pending: tmap2 authoring from real field survey; F2C obstacle costmap integration. | ~70% Done | 4 | 2026 |
+| M4 | RTK-GNSS localisation | Full pipeline implemented: dual F9P, shims, UKF fusion, NTRIP. Lever-arm offsets in `fusioncore.yaml` are zeroed placeholders (commented `# measured` TODOs). Pending: antenna lever-arm measurement, live hardware test. | ~75% Done | 3 | 2026 |
+| M5 | Dual-SBC ROS 2 stack | `manage.py` detects crossover interface, builds `CYCLONEDDS_URI` peer config and injects into Docker. `neo.launch.py` and `devkit.launch.py` finalised for Limbic+Neo split. `zenoh_config.json` not present in repo (listed as pending). No `rmw_zenoh_cpp` launch args visible in current launch files — DDS peer path is the active one. | ~50% Done | 3 | 2026 |
+| M6 | Gazebo simulation | `sowbot_sim.launch.py` + `sim_nav.launch.py` fully restructured. `kill_fake_nav2_on_clock` implemented. `use_sim_time=True` now threaded through topo stack. **Multi-row mission following demonstrated end-to-end (see video above).** | ~90% Done | 4 | 2026 |
+| M7 | Sentor safety monitoring | `sowbot_monitor.yaml` fully authored (e-stop, bumpers, battery, camera, odom, neo_vision heartbeat, node monitors). `sentor_node.py` wired into `devkit.launch.py`. Pending: smoke-test on live hardware; battery voltage cutoff needs field confirmation (`# TODO: CONFIRM` in YAML). | ~75% Done | 3 | 2026 |
+| M8 | Visual crop-row navigation | `sowbot_row_follow` package implemented. ExG+Otsu, visual servo, `limbic_row_follow_node.py` as Nav2 action server. Cancel and heartbeat-loss safety. TSM row-swap hold with 6-second debounce implemented. Camera calibration params required before field use. Pending: camera calibration, field test. | ~75% Done | 3 | 2026 |
+| **PRODUCTION** | | | | | **~2027** |
+| P1 | STM32H7 + copper-rs MCU | Replace ESP32/Lizard DSL with STM32H745 running copper-rs statically-scheduled Rust firmware. Hard real-time motor PID, hardware safety interlocks. | Research | 2 | 2027 |
+| P2 | CANopen bus | ISO 11898 FDCAN at 500 kbit/s / 2 Mbit/s. lely-core CANopen master on T527 native M_CAN. DSP402 drive profile. | Research | 2 | 2027 |
+| P3 | RT kernel + core isolation | PREEMPT_RT on Limbic T527. `isolcpus=4-7`, RTK EKF on core 2 (SCHED_FIFO 60), AOC nav on cores 4-6, watchdog on core 5. GbE/CAN IRQ pinned to core 0. | Planned | 2 | 2027 |
+| P4 | ROFS image | Read-only rootfs — Ubuntu Noble minimal or Yocto with RT kernel, pre-built LCAS topo nav, Nav2, `rmw_zenoh_cpp`. Immutable field deployment. | Research | 1 | 2027 |
+| **END-EFFECTORS** | | | | | **TBD** |
+| E1 | Delta weeding module | Open-Weeding-Delta precision mechanical weeding. CANopen actuator node on delta controller. | Research | 1 | TBD |
+| E2 | LASER weeding module | Laudando LASER integration. Requires E-Stop interlocking with CANopen safety chain. | Research | 1 | TBD |
+| **DATASETS & COLLABORATION** | | | | | **Ongoing** |
+| D1 | UK open-field dataset | Field imagery and GNSS logs from UK agroecological farm conditions. CC licence. | Planned | 2 | 2026 |
+| D2 | Caatinga biome dataset | Semi-arid row-crop imagery from caatingarobotics. Validated on T527 AIPU. | Active | 5 | 2026 |
+
+<sub>TRL = Technology Readiness Level (1–9, ESA/NASA scale): 1–2 concept/formulation, 3 proof of concept, 4 validated in lab/simulation, 5 validated in relevant (non-lab) environment, 6 demonstrated in relevant environment, 7 operational prototype, 8 qualified system, 9 field-proven. Self-assessed per feature, not a formal review — adjust as needed.</sub>
 
 ### Collaboration
 
