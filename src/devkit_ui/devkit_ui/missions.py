@@ -80,7 +80,7 @@ import queue
 import re
 import threading
 from dataclasses import dataclass
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 
 import yaml
 
@@ -146,7 +146,7 @@ def action_ros_msgs(action_key: str,
 # ── Pure helpers (module-level, easy to test) ────────────────────────────────
 
 def _now_utc() -> datetime:
-    return datetime.now(datetime.UTC)
+    return datetime.now(timezone.utc)
 
 
 def _now_utc_str() -> str:
@@ -163,7 +163,7 @@ def _parse_ts(s: str | None) -> datetime | None:
         return None
     for fmt in (_TS_FMT, _TS_FMT_LEGACY):
         try:
-            return datetime.strptime(s, fmt).replace(tzinfo=datetime.UTC)
+            return datetime.strptime(s, fmt).replace(tzinfo=timezone.utc)
         except ValueError:
             pass
     return None
