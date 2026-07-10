@@ -46,7 +46,7 @@ import os
 import re
 import threading
 from collections.abc import Callable
-from datetime import datetime
+from datetime import datetime, timezone
 
 import yaml
 from geometry_msgs.msg import Point32, PolygonStamped
@@ -234,7 +234,7 @@ class ObstacleManager:
 
         clean = _NAME_CLEAN.sub(
             '', (name or '').strip().upper().replace(' ', '_'))
-        timestamp = datetime.now(datetime.UTC).strftime('%d-%m-%Y_%H-%M-%S')
+        timestamp = datetime.now(timezone.utc).strftime('%d-%m-%Y_%H-%M-%S')
 
         # Lock covers name allocation + tuple replacement + version bump.
         # Disk write and publish happen after release, in a thread.
