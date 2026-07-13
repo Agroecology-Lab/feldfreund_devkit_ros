@@ -309,6 +309,28 @@ def generate_launch_description():
         ),
     ])
 
+    # ── row_discovery_node (t+4s) ──────────────────────────────────────────────
+    # Sibling of limbic_row_follow, not a replacement: same package, same
+    # params file, started at the same time so it's ready as soon as the
+    # topo/TF stack is up. Idle until /row_discovery_node/start_discovery is
+    # called (e.g. from the UI's Discovery mode checkbox) — see row_discovery
+    # _node.py header for the full node/edge/service contract. Needs the same
+    # use_sim_time=True override as limbic_row_follow, for the same reason
+    # (its TF-staleness checks compare get_clock().now() against a
+    # sim-time-stamped map->base_link transform).
+    row_discovery = TimerAction(period=4.0, actions=[
+        Node(
+            package='sowbot_row_follow',
+            executable='row_discovery',
+            name='row_discovery_node',
+            output='screen',
+            parameters=[
+                row_follow_params,
+                {'use_sim_time': True},
+            ],
+        ),
+    ])
+
     # ── topological_map_visualiser (t+5s) ─────────────────────────────────────
     visualiser = TimerAction(period=5.0, actions=[
         Node(
@@ -330,5 +352,6 @@ def generate_launch_description():
         localisation,
         navigation,
         limbic_row_follow,
+        row_discovery,
         visualiser,
     ])
