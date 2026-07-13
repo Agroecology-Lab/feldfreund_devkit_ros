@@ -49,6 +49,7 @@ from sensor_msgs.msg import BatteryState, NavSatFix, NavSatStatus
 from shapely.geometry import LineString, MultiLineString, Polygon
 from shapely.ops import unary_union
 from std_msgs.msg import Bool, Empty, Float64, String
+from std_srvs.srv import Trigger
 from tf2_ros import (
     ConnectivityException,
     ExtrapolationException,
@@ -733,6 +734,21 @@ class NiceGuiNode(Node):
         if _ACTION_OK:
             self._nav_ac = ActionClient(self, GotoNode, 'topological_navigation')
 
+        # Row discovery: idle service clients + live status feed from
+        # row_discovery_node (started alongside limbic_row_follow in
+        # sim_nav.launch.py / row_follow.launch.py). Node may not exist if
+        # the launch file hasn't been updated yet -- wait_for_service in
+        # start_discovery()/stop_discovery() surfaces that as a status
+        # string rather than raising.
+        self._row_discovery_start_cli = self.create_client(
+            Trigger, '/row_discovery_node/start_discovery')
+        self._row_discovery_stop_cli = self.create_client(
+            Trigger, '/row_discovery_node/stop_discovery')
+        self.create_subscription(String, '/row_discovery/status',
+            lambda m: setattr(self, 'discovery_status', m.data), _SENSOR_QOS)
+        self.discovery_active: bool = False
+        self.discovery_status: str  = 'idle'
+
         self.latest_odom:    Odometry | None     = None
         self.latest_gps:     NavSatFix | None    = None
         self.latest_battery: BatteryState | None = None
@@ -1145,6 +1161,49 @@ class NiceGuiNode(Node):
         self._track_first = True
 
     # ── shared topo-map persistence helper ────────────────────────────────────
+
+    # ── Row discovery ────────────────────────────────────────────────────────
+
+    def start_discovery(self) -> None:
+        """Call row_discovery_node's start_discovery Trigger service.
+
+        NOTE: this only gates the UI confirmation flow (see _nav_content) --
+        it is not itself a safety interlock. There is no person-detection
+        system wired into this codebase to check against yet; the operator
+        confirmation dialog is the only guard that exists right now.
+        """
+        self.discovery_status = 'starting…'
+        def _work():
+            if not self._row_discovery_start_cli.wait_for_service(timeout_sec=2.0):
+                self.discovery_active = False
+                self.discovery_status = 'ERROR: row_discovery_node not running'
+                return
+            def _cb(f):
+                try:
+                    res = f.result()
+                    self.discovery_active = res.success
+                    self.discovery_status = res.message or (
+                        'running' if res.success else 'failed to start')
+                except Exception as e:
+                    self.discovery_active = False
+                    self.discovery_status = f'ERROR: {e}'
+            self._row_discovery_start_cli.call_async(
+                Trigger.Request()).add_done_callback(_cb)
+        threading.Thread(target=_work, daemon=True).start()
+
+    def stop_discovery(self) -> None:
+        def _work():
+            def _cb(f):
+                try:
+                    res = f.result()
+                    self.discovery_status = res.message or 'stopped'
+                except Exception as e:
+                    self.discovery_status = f'ERROR: {e}'
+                finally:
+                    self.discovery_active = False
+            self._row_discovery_stop_cli.call_async(
+                Trigger.Request()).add_done_callback(_cb)
+        threading.Thread(target=_work, daemon=True).start()
 
     def _persist_and_reload(self, modify_fn, status_attr: str,
                              success_msg: str) -> None:
@@ -1879,6 +1938,52 @@ class NiceGuiNode(Node):
                                 ),
                             ).classes('ml-auto').props('color=positive no-caps dense')
                         drop_status_lbl = ui.label('').classes('text-xs font-mono mt-1')
+
+                    with ui.card().classes('flex-1').style('padding:12px 14px'):
+                        ui.label('Row Discovery').classes('font-semibold mb-2')
+                        ui.html(
+                            '<div style="font-size:12px;color:#9a6700;'
+                            'background:#fff8dc;border:1px solid #d4a72c;'
+                            'border-radius:4px;padding:6px 8px;margin-bottom:8px;">'
+                            '⚠ Discovery mode drives the robot autonomously '
+                            'through the field with no operator override. '
+                            'Only enable this with the person-detection '
+                            'safety system active and confirmed running.</div>'
+                        )
+                        with ui.row().classes('items-center gap-2'):
+                            discovery_checkbox = ui.checkbox('Discovery mode').bind_value(
+                                self, 'discovery_active')
+                            ui.label().classes('text-xs font-mono ml-2').bind_text_from(
+                                self, 'discovery_status')
+
+                        async def _on_discovery_change(e, _cb=discovery_checkbox) -> None:
+                            if e.args:  # ticked on
+                                with ui.dialog() as d, ui.card():
+                                    ui.label(
+                                        'Confirm person-detection safety system'
+                                    ).classes('font-semibold')
+                                    ui.label(
+                                        'Discovery mode will drive the robot with '
+                                        'no operator override. Confirm the '
+                                        'person-detection safety system is running '
+                                        'and active before continuing.'
+                                    ).classes('text-sm').style('max-width:320px')
+                                    with ui.row().classes('justify-end gap-2 mt-2'):
+                                        ui.button('Cancel',
+                                            on_click=lambda: d.submit('cancel')).props(
+                                            'flat no-caps')
+                                        ui.button('Confirmed — Start', color='positive',
+                                            on_click=lambda: d.submit('go')).props(
+                                            'no-caps')
+                                result = await d
+                                if result != 'go':
+                                    _cb.value = False
+                                    return
+                                self.start_discovery()
+                            else:
+                                self.stop_discovery()
+
+                        discovery_checkbox.on('update:model-value', _on_discovery_change)
 
                     # OBSTACLE: Mark Obstacle card next to Drop Node
                     attach_nav_card(self, self._obstacle_mgr)
