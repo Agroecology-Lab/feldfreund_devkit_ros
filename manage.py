@@ -401,6 +401,15 @@ class DevkitManager:
             "python3 /workspace/topo_to_forest3d.py "
             "--topo /workspace/maps/maize_map "
             f"--out /workspace/forest3d.yaml "
+            # 5.0m: row_discovery_node's own worst-case straight-line
+            # excursion past a row end is headland_clearance_m (0.5m) +
+            # max_search_distance_m (1.5m) = 2.0m — this must stay
+            # comfortably UNDER the world's actual headland margin, or
+            # discovery mode drives the robot off the edge of the
+            # generated ground plane the moment TURN_2's open-loop
+            # alignment is even slightly off. If either number changes,
+            # check the other.
+            "--headland 5.0 "
             "--generate "
             f"--world-out {topo_world} "
             "--models-path /workspace/models && "
