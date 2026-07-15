@@ -5,6 +5,13 @@
 > **Standards**: All coding standards are in [CONTRIBUTING.md](CONTRIBUTING.md) – follow those rules\
 > **NiceGUI Documentation**: A condensed JSON version of NiceGUI's documentation is available at https://nicegui.io/static/sitewide_index.json
 
+## Skills Directory
+
+- Project skills live in `skills/`.
+- Skills must be model-agnostic and reusable by any coding assistant.
+- Each skill should be stored as `skills/<skill-name>/SKILL.md`.
+- When a task matches a skill, read and follow that skill before implementing changes.
+
 ## Core Principles
 
 ### Think from First Principles

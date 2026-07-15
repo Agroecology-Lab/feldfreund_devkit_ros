@@ -1,4 +1,4 @@
-.PHONY: help sync install-ci mypy pylint pre-commit
+.PHONY: help activate_venv sync install-ci mypy pylint ruff lint pre-commit check test
 
 default: help
 
@@ -28,7 +28,6 @@ pylint:
 	pylint \
 		--disable=duplicate-code \
 		./src/devkit_driver/devkit_driver \
-		./src/devkit_bringup/launch \
 		./src/devkit_ui/devkit_ui
 
 ## ruff		Run ruff code analysis.
@@ -37,9 +36,18 @@ ruff:
 	find ./src/devkit_bringup/launch -name '*.py' | xargs ruff check
 	find ./src/devkit_ui/devkit_ui -name '*.py' | xargs ruff check
 
+ruff-fix:
+	find ./src/devkit_driver/devkit_driver -name '*.py' | xargs ruff check --fix
+	find ./src/devkit_bringup/launch -name '*.py' | xargs ruff check --fix
+	find ./src/devkit_ui/devkit_ui -name '*.py' | xargs ruff check --fix
+
 ## pre-commit	Run pre-commit hooks on all files.
 pre-commit:
 	pre-commit run --all-files
 
+## test		Run unit tests.
+test:
+	cd src/devkit_ui && python -m unittest discover
+
 ## check		Run all code checks (mypy, pre-commit, pylint).
-check: mypy pre-commit pylint
+check: mypy pre-commit pylint test
