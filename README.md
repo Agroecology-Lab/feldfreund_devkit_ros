@@ -125,6 +125,17 @@ Port mappings may not bridge to the host on macOS Docker Desktop (Docker runs in
 
 Drop the xhost line, you'll still be able to access GUI tools via a browser.
 
+#### Linux
+
+If you're getting this error:
+
+```
+docker: Error response from daemon: could not select device driver "" with capabilities: [[gpu]]
+```
+You'll need to install the [Nvidia Container runtime](https://docs.nvidia.com/datacenter/cloud-native/container-toolkit/latest/install-guide.html).
+
+#### Gazebo
+
 If you'd like to use Gazebo then add a +sim argument to your build instruction
 
 ```bash

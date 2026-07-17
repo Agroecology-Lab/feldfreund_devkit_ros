@@ -16,7 +16,7 @@ import sys
 import threading
 import time
 import zipfile
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from itertools import pairwise
 from pathlib import Path
 
@@ -806,6 +806,8 @@ class NiceGuiNode(Node):
         self._mission_cancel:    bool          = False
         self._mission_run_id:    str | None = None   # active MissionStore id
 
+        self._pose_fail_log_t = 0.0
+
         @ui.page('/')
         def page():
             self.content()
@@ -842,8 +844,7 @@ class NiceGuiNode(Node):
         # Rate-limited to ~1/s so it doesn't flood the log while the failure
         # persists across many UI refresh ticks.
         now_wall = self.get_clock().now().nanoseconds * 1e-9
-        last_log = getattr(self, '_pose_fail_log_t', 0.0)
-        can_log  = (now_wall - last_log) > 1.0
+        can_log  = (now_wall - self._pose_fail_log_t) > 1.0
 
         try:
             t = self._tf_buffer.lookup_transform(
@@ -974,7 +975,7 @@ class NiceGuiNode(Node):
                         'gps_hdop': None}
 
         row_meta: dict = {'row_id': row_id, 'row_role': row_role or 'entry'} if is_row else {}
-        timestamp = datetime.now(timezone.utc).strftime('%d-%m-%Y_%H-%M-%S')
+        timestamp = datetime.now(UTC).strftime('%d-%m-%Y_%H-%M-%S')
         node_meta_disk = {'map': map_name, 'node': name, 'pointset': map_name}
         node_meta_ui   = {**node_meta_disk, 'dropped_by': 'webui',
                           'timestamp': timestamp, **gps_meta, **row_meta}
@@ -1044,7 +1045,7 @@ class NiceGuiNode(Node):
                     self.get_logger().warn(f'Node {name} already in file — skipping write')
                     return
 
-                _ts = datetime.now(timezone.utc).strftime('%d-%m-%Y_%H-%M-%S')
+                _ts = datetime.now(UTC).strftime('%d-%m-%Y_%H-%M-%S')
                 if 'meta' not in file_doc:
                     file_doc['meta'] = {}
                 file_doc['meta']['last_updated'] = _ts
@@ -1227,7 +1228,7 @@ class NiceGuiNode(Node):
                 # requires: meta.last_updated and pointset.
                 # Older map files (and our own archive/clear output) may omit
                 # them, causing switch_topological_map → validate() to reject.
-                _ts = datetime.now(timezone.utc).strftime('%d-%m-%Y_%H-%M-%S')
+                _ts = datetime.now(UTC).strftime('%d-%m-%Y_%H-%M-%S')
                 if 'meta' not in file_doc:
                     file_doc['meta'] = {}
                 file_doc['meta']['last_updated'] = _ts
@@ -1350,7 +1351,7 @@ class NiceGuiNode(Node):
 
         map_name  = self._topo_doc.get('name', 'mixed_test_map')
         nav_frame = self._topo_doc.get('transformation', {}).get('topo_frame_id', 'map')
-        timestamp = datetime.now(timezone.utc).strftime('%d-%m-%Y_%H-%M-%S')
+        timestamp = datetime.now(UTC).strftime('%d-%m-%Y_%H-%M-%S')
 
         connect_to = (self.topo_current
                       if self.topo_current not in ('—', 'none', 'None', '', None)
@@ -2967,7 +2968,7 @@ class NiceGuiNode(Node):
             # doc with no action config and every edge fails with
             # "No action config for 'NavigateToPose'".
             empty_doc = {
-                'meta':           {'last_updated': datetime.now(timezone.utc).strftime('%d-%m-%Y_%H-%M-%S')},
+                'meta':           {'last_updated': datetime.now(UTC).strftime('%d-%m-%Y_%H-%M-%S')},
                 'name':           map_name,
                 'metric_map':     self._topo_doc.get('metric_map', map_name),
                 'pointset':       map_name,
@@ -3531,7 +3532,7 @@ class NiceGuiNode(Node):
                 with ui.row().classes('w-full gap-4 mt-1'):
                     with ui.column().classes('flex-1 gap-0'):
                         ui.html('<div class="sec-label">Scale</div>')
-                        plant_scale = ui.number(
+                        ui.number(
                             value=100, min=5, max=300, step=5, precision=0,
                             suffix='%'
                         ).classes('w-full')
@@ -3601,7 +3602,6 @@ class NiceGuiNode(Node):
                     _plant_upload_lbl.style('color:#1a7f37')
 
                 async def _create_plant_model():
-                    import re
                     name = (model_name_input.value or '').strip()
                     if not name:
                         _plant_upload_lbl.set_text('enter a model name')
@@ -3646,7 +3646,7 @@ class NiceGuiNode(Node):
     <description>{name} plant model</description>
 </model>
 '''
-                        with open(model_dir / 'model.config', 'w') as f:
+                        with open(model_dir / 'model.config', 'w', encoding="utf-8") as f:
                             f.write(model_config)
                         # Write model.sdf
                         model_sdf = f'''<?xml version="1.0" ?>
@@ -3668,7 +3668,7 @@ class NiceGuiNode(Node):
     </model>
 </sdf>
 '''
-                        with open(model_dir / 'model.sdf', 'w') as f:
+                        with open(model_dir / 'model.sdf', 'w', encoding="utf-8") as f:
                             f.write(model_sdf)
                         # Refresh dropdown
                         new_models = _refresh_crop_models()

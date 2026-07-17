@@ -12,6 +12,7 @@ jobs:
           #- command: "make mypy"
           - command: "make pylint"
           - command: "make ruff"
+          - command: "make test"
     runs-on: ubuntu-latest
     timeout-minutes: 5
     steps:
