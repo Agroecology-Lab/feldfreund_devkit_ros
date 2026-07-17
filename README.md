@@ -13,25 +13,35 @@ All launch files and configuration files (except for the UI) are stored in the `
 
 ### DevKit driver
 
-The DevKit driver (based on [ATB Potsdam's field_friend_driver](https://github.com/ATB-potsdam-automation/field_friend_driver)) manages the communication with the ESP32 microcontroller running [Lizard](https://lizard.dev/) firmware - a domain-specific language for defining hardware behavior on embedded systems.
+The DevKit driver builds on the [feldfreund_devkit](https://github.com/zauberzeug/feldfreund_devkit) hardware abstraction (based on [RoSys](https://rosys.io/)) and exposes the robot's state and controls as ROS2 topics.
+The hardware itself is driven by an ESP32 "robot brain" running [Lizard](https://lizard.dev/) firmware; the robot brain and its Lizard configuration are managed through `feldfreund_devkit`.
+The driver runs against real hardware or, when `FELDFREUND_SIMULATION` is set, against a built-in simulation.
 
-The package provides:
+Configuration:
 
-- `config/devkit.liz`: Basic Lizard configuration for DevKit robot
-- `config/devkit.yaml`: Corresponding ROS2 driver configuration
+- `devkit_launch/config/feldfreund.py`: Hardware configuration of the DevKit (robot brain, wheels/ODrive, bumpers, IMU, ...), assembled via `feldfreund_devkit`.
+- `devkit_launch/config/devkit.yaml`: ROS2 parameters for the driver node (odometry covariances `pose_stddev` / `twist_stddev` and `publish_tf`).
 
-Available ROS2 topics:
+Published topics (driver → ROS):
 
-- `/cmd_vel` (geometry_msgs/Twist): Control robot movement
 - `/odom` (nav_msgs/Odometry): Robot odometry data
 - `/battery_state` (sensor_msgs/BatteryState): Battery status information
 - `/bumper/front_top` (std_msgs/Bool): Front top bumper state
 - `/bumper/front_bottom` (std_msgs/Bool): Front bottom bumper state
 - `/bumper/back` (std_msgs/Bool): Back bumper state
-- `/estop/soft` (std_msgs/Bool): Software emergency stop control
 - `/estop/front` (std_msgs/Bool): Hardware front emergency stop state
 - `/estop/back` (std_msgs/Bool): Hardware back emergency stop state
-- `/configure` (std_msgs/Empty): Trigger loading of the Lizard configuration file
+- `/clock` (rosgraph_msgs/Clock): Simulation time (published in simulation mode only)
+
+Subscribed topics (ROS → driver):
+
+- `/cmd_vel` (geometry_msgs/Twist): Control robot movement
+- `/estop/soft` (std_msgs/Bool): Software emergency stop control
+- `/esp/enable` (std_msgs/Empty): Enable the robot brain (hardware mode)
+- `/esp/disable` (std_msgs/Empty): Disable the robot brain (hardware mode)
+- `/esp/reset` (std_msgs/Empty): Reset the robot brain (hardware mode)
+- `/esp/restart` (std_msgs/Empty): Restart the robot brain (hardware mode)
+- `/esp/configure` (std_msgs/Empty): Send the Lizard configuration to the robot brain (hardware mode)
 
 ### Camera System
 
@@ -175,14 +185,11 @@ cd devkit_ros
 
 Before building, check and adjust if needed:
 
-1. **ROS2 Configuration** (`devkit_launch/config/devkit.yaml`):
-   - Verify `serial_port` matches your setup (default: "/dev/ttyTHS0")
-   - Check `flash_parameters` for your hardware (default: "-j orin --nand")
+1. **Hardware Configuration** (`devkit_launch/config/feldfreund.py`):
+   - Verify the robot brain, wheel/ODrive CAN addresses, bumper pins and IMU offsets match your hardware
 
-2. **Lizard Configuration** (`devkit_launch/config/devkit.liz`):
-   - Verify motor configuration matches your hardware
-   - Check pin assignments for bumpers and emergency stops
-   - Adjust any other hardware-specific settings
+2. **ROS2 Driver Configuration** (`devkit_launch/config/devkit.yaml`):
+   - Adjust the odometry covariances (`pose_stddev`, `twist_stddev`) and `publish_tf` if needed
 
 ### 3. Build with Docker
 
@@ -192,10 +199,10 @@ Before building, check and adjust if needed:
 
 ### 4. Send Lizard Configuration
 
-Once the system is running:
+Once the system is running, send the Lizard configuration to the robot brain:
 
-- Use the "Send Lizard Config" button in the UI
-- Or use the `/configure` topic in ROS2
+- Use the "Configure" button in the UI
+- Or publish to the `/esp/configure` topic in ROS2
 
 ### 5. Ready to Go
 

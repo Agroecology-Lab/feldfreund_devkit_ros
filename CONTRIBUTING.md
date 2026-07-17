@@ -45,6 +45,12 @@ make sync
 pre-commit install
 ```
 
+### Dependencies
+
+`requirements.txt` (runtime) and `requirements-dev.txt` (development and testing) are the single source of truth for dependencies.
+`pyproject.toml` only holds tool configuration (ruff, mypy, pylint, pytest) and does not declare dependencies.
+The project is installed via `pip` (see `make sync` and the Docker image); it does not use `uv`, so there is no `uv.lock`.
+
 ## Coding Style
 
 ### General Principles

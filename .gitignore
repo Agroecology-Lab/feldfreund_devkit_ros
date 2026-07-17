@@ -8,6 +8,7 @@ venv/
 .DS_Store
 
 .mypy_cache/
+.ruff_cache/
 .pytest_cache/
 .cache/
 __pycache__

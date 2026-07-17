@@ -15,7 +15,7 @@
       "label": "Build and run",
       "detail": "Build workspace and run devkit launch file",
       "type": "shell",
-      "command": "colcon build && source /workspace/install/setup.bash &&ros2 launch devkit devkit.launch.py",
+      "command": "colcon build && source /workspace/install/setup.bash && ros2 launch devkit_launch devkit.launch.py",
       "group": "build",
       "presentation": {
         "reveal": "always",
