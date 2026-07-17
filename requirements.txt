@@ -1,3 +1,3 @@
 rosys<1.0.0,>=0.32.0
-feldfreund_devkit @ git+https://github.com/zauberzeug/feldfreund_devkit.git@v0.1.0
+feldfreund_devkit @ git+https://github.com/zauberzeug/feldfreund_devkit.git@a1294c6c7c7d6218d2b3f29e4a81c4cb89d769b0
 numpy<3.0.0

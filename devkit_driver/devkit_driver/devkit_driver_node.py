@@ -8,7 +8,7 @@ import rclpy
 import rclpy.parameter
 import rosys
 from feldfreund_devkit import FeldfreundHardware, FeldfreundSimulation, System, api
-from feldfreund_devkit.config import config_from_file
+from feldfreund_devkit.config import Secrets, config_from_file
 from nicegui import app, ui, ui_run
 from rclpy.executors import ExternalShutdownException
 from rclpy.node import Node
@@ -68,8 +68,9 @@ def on_startup() -> None:
     if simulation_mode:
         rosys.enter_simulation()
 
-    config = config_from_file('/workspace/src/devkit_launch/config/feldfreund.py')
-    system = System(config)
+    secrets = Secrets()
+    config = config_from_file('/workspace/src/devkit_launch/config/feldfreund.py', secrets=secrets)
+    system = System(config, secrets=secrets)
     api.Online()
     threading.Thread(target=ros_main, args=(system,)).start()
 

@@ -43,6 +43,10 @@ services:
       - ROS_DOMAIN_ID=0 # Default ROS domain
       - RMW_IMPLEMENTATION=rmw_cyclonedds_cpp # Using CycloneDDS
       - FELDFREUND_SIMULATION=true # Run in simulation mode
+      # Placeholder secrets: feldfreund_devkit's Secrets() requires these even in
+      # simulation (no real cameras / router are used here).
+      - MJPEG_CAMERA_PASSWORD=simulation
+      - TELTONIKA_PASSWORD=simulation
 
     # Source and launch the devkit system
     command: bash -c "source /opt/ros/jazzy/setup.bash && source /workspace/install/setup.bash && ros2 launch devkit_launch devkit_simulation.launch.py"
