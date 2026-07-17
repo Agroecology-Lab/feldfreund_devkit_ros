@@ -23,3 +23,23 @@ jobs:
         run: pip install -r requirements-dev.txt
       - name: ${{ matrix.tools.command }}
         run: ${{ matrix.tools.command }}
+
+  ros-tests:
+    # ROS packages (rclpy, message types) are not on PyPI, so the tests run inside a
+    # ROS image instead of the pip-only code-checks job above.
+    runs-on: ubuntu-latest
+    container: ros:jazzy
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+      - name: install dependencies
+        run: |
+          apt-get update && apt-get install -y \
+            python3-pip git libgl1 libglib2.0-0 \
+            ros-jazzy-geometry-msgs ros-jazzy-nav-msgs ros-jazzy-sensor-msgs \
+            ros-jazzy-std-msgs ros-jazzy-rosgraph-msgs ros-jazzy-tf2-ros
+          pip install --break-system-packages --ignore-installed -r requirements-dev.txt
+      - name: run pytest
+        run: |
+          . /opt/ros/jazzy/setup.sh
+          make test

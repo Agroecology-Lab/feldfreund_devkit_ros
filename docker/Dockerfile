@@ -29,7 +29,9 @@ RUN apt-get update && apt-get install -y \
 RUN mkdir -p /root/.lizard && \
     cd /root && \
     LIZARD_VERSION=v0.9.0 && \
+    LIZARD_SHA256=eba9c9a62a4be52e3917aa9ecfdb08218df8da9ac8fcca115c694a236cc22c8c && \
     wget https://github.com/zauberzeug/lizard/releases/download/${LIZARD_VERSION}/lizard_firmware_and_devtools_${LIZARD_VERSION}_esp32.zip && \
+    echo "${LIZARD_SHA256}  lizard_firmware_and_devtools_${LIZARD_VERSION}_esp32.zip" | sha256sum -c - && \
     unzip lizard_firmware_and_devtools_${LIZARD_VERSION}_esp32.zip -d /root/.lizard && \
     chmod +x /root/.lizard/espresso.py && \
     cd /root/.lizard && \
