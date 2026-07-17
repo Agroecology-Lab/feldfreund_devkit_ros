@@ -240,7 +240,7 @@ WORKDIR /workspace
 # invalidates a RUN layer if its own inputs change, and this stage's only
 # input is EXTERNAL_CACHEBUST below — bump that (via `manage.py build +pull`)
 # to force a fresh pull of just these repos, without a full --no-cache build.
-ARG EXTERNAL_CACHEBUST=1
+ARG EXTERNAL_CACHEBUST=2
 
 # All repos clone in parallel; each retries 5x. Any failed clone fails the
 # build (a missing repo breaks rosdep/colcon downstream anyway).
