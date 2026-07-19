@@ -293,7 +293,7 @@ class DevkitManager:
         for cat in ('crop', 'weed'):
             asset = self.root_dir / 'docker' / 'forest3d-models' / cat
             if asset.is_dir():
-                cmd += ['-v', f'{asset}:/workspace/models/{cat}:ro']
+                cmd += ['-v', f'{asset}:/workspace/models/{cat}:rw']
         if extra_flags:
             cmd += extra_flags
         cmd += [self.image_name, 'bash', '-c']

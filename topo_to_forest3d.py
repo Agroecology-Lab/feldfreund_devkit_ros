@@ -664,6 +664,159 @@ def cull_crops_outside_field(world_path, rows, tol):
           f"(tol={tol:.2f}m)")
 
 
+def patch_crop_model_uri(world_path, model_name):
+    """Replace model variant in model://crop/ URIs with the selected model.
+
+    Forest3D generates model://crop/<variant> based on whatever subdirectory
+    it randomly picks from models/crop/. This forces all crop includes to
+    point at the user-selected model instead.
+    """
+    import xml.etree.ElementTree as _ET
+
+    world_path = Path(world_path)
+    if not world_path.exists():
+        print(f"WARNING: {world_path} not found — skipping crop model patch",
+              file=sys.stderr)
+        return
+
+    try:
+        root = _ET.parse(world_path).getroot()
+    except _ET.ParseError as exc:
+        print(f"WARNING: cannot parse {world_path} — skipping model patch: {exc}",
+              file=sys.stderr)
+        return
+
+    world_elem = root.find("world") or root
+    changed = 0
+    for include in world_elem.findall("include"):
+        uri_elem = include.find("uri")
+        if uri_elem is not None and (uri_elem.text or "").startswith("model://crop/"):
+            uri_elem.text = f"model://crop/{model_name}"
+            changed += 1
+
+    if changed == 0:
+        print(f"WARNING: no model://crop/ includes found in {world_path} — nothing patched",
+              file=sys.stderr)
+        return
+
+    world_path.write_text('<?xml version="1.0" ?>\n'
+                          + _ET.tostring(root, encoding="unicode"))
+    print(f"Patched {changed} crop include(s) to model://crop/{model_name}")
+
+
+def _read_mesh_scales(model_sdf_path):
+    """Return list of (section_tag, scale_text) for each <mesh><scale> found."""
+    import xml.etree.ElementTree as _ET
+    scales = []
+    root = _ET.parse(model_sdf_path).getroot()
+    for section in root.iter("visual"):
+        geom = section.find("geometry")
+        if geom is not None:
+            mesh = geom.find("mesh")
+            if mesh is not None:
+                scale_el = mesh.find("scale")
+                if scale_el is not None:
+                    scales.append((section.tag, scale_el.text))
+    for section in root.iter("collision"):
+        geom = section.find("geometry")
+        if geom is not None:
+            mesh = geom.find("mesh")
+            if mesh is not None:
+                scale_el = mesh.find("scale")
+                if scale_el is not None:
+                    scales.append((section.tag, scale_el.text))
+    return scales
+
+
+def _model_sdf_path(models_path, category, model_name):
+    return Path(models_path) / category / model_name / "model.sdf"
+
+
+_BASE_SCALE_FILE = ".base_scale"
+
+
+def _get_base_scales(model_sdf_path):
+    """Return (base_scales dict, was_initialised)."""
+    base_file = model_sdf_path.parent / _BASE_SCALE_FILE
+    if base_file.exists():
+        data = {}
+        for line in base_file.read_text().strip().splitlines():
+            if "=" in line:
+                k, v = line.split("=", 1)
+                data[k.strip()] = float(v.strip())
+        return data, False
+    scales = _read_mesh_scales(model_sdf_path)
+    data = {}
+    for tag, text in scales:
+        vals = text.strip().split()
+        if vals:
+            data[tag] = float(vals[0])
+    base_file.write_text("\n".join(f"{k}={v}" for k, v in data.items()) + "\n")
+    return data, True
+
+
+def patch_model_mesh_scale(models_path, category, model_name, user_factor):
+    """Scale the <mesh><scale> inside model.sdf so Gazebo renders it correctly.
+
+    Gazebo Sim ignores <include><scale> in world files (gz-sim#195).  The only
+    reliable way to resize a model is to patch the mesh <scale> in model.sdf
+    itself.
+
+    The *base* scale (the original design value, e.g. 0.7 for crop/plant) is
+    persisted in a .base_scale file next to model.sdf so repeated calls compose
+    correctly: new_scale = base_scale * user_factor.
+    """
+    import xml.etree.ElementTree as _ET
+
+    sdf_path = _model_sdf_path(models_path, category, model_name)
+    if not sdf_path.exists():
+        print(f"WARNING: {sdf_path} not found — skipping mesh scale patch",
+              file=sys.stderr)
+        return
+
+    base_scales, _ = _get_base_scales(sdf_path)
+    if not base_scales:
+        print(f"WARNING: no <mesh><scale> found in {sdf_path} — nothing to patch",
+              file=sys.stderr)
+        return
+
+    try:
+        tree = _ET.parse(sdf_path)
+        root = tree.getroot()
+    except _ET.ParseError as exc:
+        print(f"WARNING: cannot parse {sdf_path} — skipping mesh scale patch: {exc}",
+              file=sys.stderr)
+        return
+
+    _section_tags = ["visual", "collision"]
+    changed = 0
+    for tag in _section_tags:
+        for section in root.iter(tag):
+            geom = section.find("geometry")
+            if geom is not None:
+                mesh = geom.find("mesh")
+                if mesh is not None:
+                    scale_el = mesh.find("scale")
+                    if scale_el is not None:
+                        base = base_scales.get(tag)
+                        if base is None:
+                            vals = scale_el.text.strip().split()
+                            base = float(vals[0]) if vals else 1.0
+                        new_val = base * user_factor
+                        scale_el.text = f"{new_val:.6f} {new_val:.6f} {new_val:.6f}"
+                        changed += 1
+
+    if changed == 0:
+        print(f"WARNING: no <mesh><scale> elements found in {sdf_path}",
+              file=sys.stderr)
+        return
+
+    sdf_path.write_text('<?xml version="1.0" ?>\n'
+                        + _ET.tostring(root, encoding="unicode"))
+    print(f"Patched {changed} mesh scale(s) in {sdf_path} "
+          f"(base × {user_factor:.3f})")
+
+
 def write_spawn_pose(x, y, z, output_path):
     """Write the robot spawn pose so sim.launch.py can read it at startup.
 
@@ -736,6 +889,18 @@ if __name__ == '__main__':
     ap.add_argument('--plant-spacing', type=float, default=1.2,
                     help='Spacing between plants along a row (m). Forest3D '
                          'places int(row_length / plant_spacing) plants per row.')
+    ap.add_argument('--plant-scale', type=float, default=1.0,
+                    help='Uniform scale factor applied to selected category '
+                         '(default: 1.0). Multiplies the model visual size '
+                         'without affecting spacing or density.')
+    ap.add_argument('--scale-category', type=str, default='all',
+                    help='Category to scale ("all", "crop", "weed", '
+                         '"irrigation"). Defaults to "all" which scales '
+                         'every model:// include.')
+    ap.add_argument('--crop-model', type=str, default='plant',
+                    help='Crop model variant name to use (default: plant). '
+                         'Must be a subdirectory under models/crop/ containing '
+                         'a valid Gazebo model (model.config + model.sdf).')
     ap.add_argument('--density', type=int, default=None,
                     help='Global cap on crop models to place. Defaults to '
                          'num_rows x plants_per_row derived from the map so the '
@@ -876,5 +1041,28 @@ if __name__ == '__main__':
         # Step 5: trim crops to each row's real IN->OUT span (irregular fields).
         if args.world_out:
             cull_crops_outside_field(args.world_out, rows, args.plant_spacing / 2)
+
+        # Step 6: replace model://crop/ URIs to point at the user-selected model.
+        if args.world_out and args.crop_model:
+            patch_crop_model_uri(args.world_out, args.crop_model)
+
+        # Step 7: apply uniform scale to selected category (or all).
+        # Gazebo Sim ignores <include><scale> (gz-sim#195) — patch the
+        # mesh <scale> in model.sdf directly so the change actually renders.
+        if args.models_path and args.plant_scale != 1.0:
+            _categories_to_scale = (
+                ['crop', 'weed'] if args.scale_category == 'all'
+                else [args.scale_category]
+            )
+            _cat_model_map = {
+                'crop': args.crop_model or 'plant',
+                'weed': 'weed1',
+                'irrigation': 'irrigation',
+            }
+            for _cat in _categories_to_scale:
+                _model = _cat_model_map.get(_cat)
+                if _model:
+                    patch_model_mesh_scale(
+                        args.models_path, _cat, _model, args.plant_scale)
 
         print("Done.")

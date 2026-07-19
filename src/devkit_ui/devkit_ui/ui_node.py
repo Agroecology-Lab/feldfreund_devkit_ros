@@ -3420,6 +3420,16 @@ class NiceGuiNode(Node):
                         # Get plant placement values (cm → m conversion)
                         spacing_m = float(plant_spacing.value or 80) / 100.0
                         row_w_m = float(row_width_input.value or 80) / 100.0
+                        scale = float(plant_scale.value or 100) / 100.0
+                        cat = scale_category.value or 'all'
+                        model = plant_model.value or 'plant'
+                        # Validate selected model exists on disk
+                        model_dir = _CROP_MODELS_DIR / model
+                        if not model_dir.is_dir() or not (model_dir / 'model.sdf').is_file():
+                            _gazebo_lbl.set_text(
+                                f'model "{model}" not found — upload it first')
+                            _gazebo_lbl.style('color:#cf222e')
+                            return
                         r = subprocess.run(
                             ['python3', '/workspace/topo_to_forest3d.py',
                              '--topo', _MAP_FILE,
@@ -3428,7 +3438,10 @@ class NiceGuiNode(Node):
                              '--world-out', _WORLD_FILE,
                              '--models-path', '/workspace/models',
                              '--plant-spacing', str(spacing_m),
-                             '--row-width', str(row_w_m)],
+                             '--row-width', str(row_w_m),
+                             '--plant-scale', str(scale),
+                             '--scale-category', cat,
+                             '--crop-model', model],
                             capture_output=True, text=True, timeout=120, check=False
                         )
                         if r.returncode != 0:
@@ -3436,7 +3449,10 @@ class NiceGuiNode(Node):
                             _gazebo_lbl.set_text(f'rebuild failed: {err[-200:]}')
                             _gazebo_lbl.style('color:#cf222e')
                             return
-                        summary = f'world rebuilt (spacing={spacing_m:.2f}m, row={row_w_m:.2f}m)'
+                        summary = (f'world rebuilt (spacing={spacing_m:.2f}m, '
+                                  f'row={row_w_m:.2f}m, '
+                                  f'scale={scale:.2f} on {cat}, '
+                                  f'model={model})')
                         _gazebo_lbl.set_text(f'{summary} — relaunch to view')
                         _gazebo_lbl.style('color:#1a7f37')
                     except subprocess.TimeoutExpired:
@@ -3485,7 +3501,7 @@ class NiceGuiNode(Node):
                 # Configure plant spacing, row width, and model before
                 # rebuilding. Values are stored locally; --plant-spacing and
                 # --row-width are passed to topo_to_forest3d.py on rebuild.
-                # Scale is UI-only pending Khalid's backend implementation.
+                # Passed as --plant-scale, --scale-category, and --crop-model.
                 _CROP_MODELS_DIR = Path('/workspace/models/crop')
 
                 def _refresh_crop_models():
@@ -3528,15 +3544,20 @@ class NiceGuiNode(Node):
                 row_width_input.on('update:model-value', lambda e: _check_spacing_warning())
                 plant_spacing.on('update:model-value', lambda e: _check_spacing_warning())
 
-                # Row 2: Scale | Model selector
+                # Row 2: Scale + category | Model selector
                 with ui.row().classes('w-full gap-4 mt-1'):
                     with ui.column().classes('flex-1 gap-0'):
                         ui.html('<div class="sec-label">Scale</div>')
-                        ui.number(
-                            value=100, min=5, max=300, step=5, precision=0,
-                            suffix='%'
-                        ).classes('w-full')
-                        ui.label('Not yet wired').classes('text-xs').style('color:#8c959f')
+                        with ui.row().classes('items-center gap-1 w-full'):
+                            plant_scale = ui.number(
+                                value=100, min=5, max=1000, step=5, precision=0,
+                                suffix='%'
+                            ).classes('flex-1')
+                            ui.label('on').classes('text-xs').style('color:#8c959f')
+                            scale_category = ui.select(
+                                options=['all', 'crop', 'weed', 'irrigation'],
+                                value='all'
+                            ).classes('w-28')
                     with ui.column().classes('flex-1 gap-0'):
                         ui.html('<div class="sec-label">Model</div>')
                         plant_model = ui.select(
@@ -3556,6 +3577,14 @@ class NiceGuiNode(Node):
                     placeholder='my_plant',
                 ).classes('w-40')
 
+                def _is_valid_gltf(data, fname):
+                    ext = fname.lower().rsplit('.', 1)[-1] if '.' in fname else ''
+                    if ext == 'glb':
+                        return data[:4] == b'glTF'
+                    elif ext == 'gltf':
+                        return data.strip()[:1] in (b'{', b'[')
+                    return False
+
                 async def _handle_visual_upload(e):
                     try:
                         if hasattr(e, 'file'):
@@ -3566,6 +3595,16 @@ class NiceGuiNode(Node):
                             fname = getattr(e, 'name', 'visual.glb')
                     except Exception as exc:
                         _plant_upload_lbl.set_text(f'upload failed: {exc}')
+                        _plant_upload_lbl.style('color:#cf222e')
+                        return
+                    # Validate extension
+                    if not fname.lower().endswith(('.glb', '.gltf')):
+                        _plant_upload_lbl.set_text('only .glb/.gltf files accepted')
+                        _plant_upload_lbl.style('color:#cf222e')
+                        return
+                    # Validate magic bytes
+                    if not _is_valid_gltf(data, fname):
+                        _plant_upload_lbl.set_text('invalid glTF file')
                         _plant_upload_lbl.style('color:#cf222e')
                         return
                     # Validate size (50MB cap)
@@ -3588,6 +3627,14 @@ class NiceGuiNode(Node):
                             fname = getattr(e, 'name', 'collision.glb')
                     except Exception as exc:
                         _plant_upload_lbl.set_text(f'collision upload failed: {exc}')
+                        _plant_upload_lbl.style('color:#cf222e')
+                        return
+                    if not fname.lower().endswith(('.glb', '.gltf')):
+                        _plant_upload_lbl.set_text('only .glb/.gltf files accepted')
+                        _plant_upload_lbl.style('color:#cf222e')
+                        return
+                    if not _is_valid_gltf(data, fname):
+                        _plant_upload_lbl.set_text('invalid glTF file')
                         _plant_upload_lbl.style('color:#cf222e')
                         return
                     if len(data) > 50 * 1024 * 1024:
