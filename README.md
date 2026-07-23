@@ -57,6 +57,50 @@ High Level navigation is developed from the work of [Lincoln Centre for Autonomo
 
 Perception models, Nav2 stack, datasets and simulation environments are developed in collaboration with [caatingarobotics](https://github.com/joaodemouragy-hash/caatingarobotics), The [Sowbot Jazzy fork](https://github.com/samuk/caatingarobotics) is pending upstream merge.
 
+
+# Rewrite-from-Scratch Cost Estimate
+
+Estimate for reimplementing the full stack pulled in by `feldfreund_devkit_ros/docker/Dockerfile` (caatinga-dev), instead of building on ROS 2 Jazzy + Nav2 + third-party packages.
+
+## Foundational infra
+
+| Component | Rewrite hrs |
+|---|---|
+| ROS 2 core + Nav2 | 120,000–250,000 |
+
+## Robotics-specific packages pulled in
+
+| Package | What it does | Rewrite hrs |
+|---|---|---|
+| Gazebo Harmonic (`INSTALL_SIM`) | Physics engine + rendering + SDF | 15,000–70,000 |
+| `topological_navigation` (LCAS) | Topo-nav stack | 4,000–8,000 |
+| Fields2Cover | Coverage path planning | 2,500–5,000 |
+| YOLOX | Real-time object detector arch | 4,000–10,000 |
+| NiceGUI (web cockpit) | Web UI framework | 4,000–8,000 |
+| `ublox_dgnss` | RTK GNSS driver | 1,200–2,500 |
+| `septentrio_gnss_driver` | RTK GNSS driver | 1,200–2,500 |
+| `vision_opencv` (cv_bridge, image_geometry) | ROS↔OpenCV bridge | 1,000–2,500 |
+| `fusioncore` | UKF GNSS/IMU fusion | 800–2,000 |
+| Lizard | ESP32 firmware bridge | 800–1,500 |
+| Forest3D | Procedural terrain gen | 400–1,200 |
+| `sentor`, `ros2graph_explorer`, `ros2grapher` | Monitoring/dev-tool glue | 600–1,800 |
+
+**Subtotal, non-core: ~36,000–116,000 hrs**
+
+## Total
+
+**~155,000–365,000 engineering hours (≈75–180 person-years)**
+
+Excludes OpenCV, GDAL, Boost, Eigen, PyTorch — rewriting those too pushes this into the millions of hours and isn't a serious option.
+
+At a $120/hr fully-loaded US engineering rate, that's **≈$19M–$44M**.
+
+
+
+
+
+
+
 # ⚠️ CRITICAL SAFETY WARNING: 
 
  This software is under active development and may be broken at any given moment. For a stable reference implementation see the upstream Zauberzeug project.
