@@ -118,7 +118,7 @@ Use the management script to build the ROS 2 workspace and launch the robot stac
 xhost +local:docker
 ./manage.py 
 ```
-Access http://localhost to access the WebUI
+Access http://localhost:8090 to access the WebUI
 
 *Notes for Mac users:
 Port mappings may not bridge to the host on macOS Docker Desktop (Docker runs inside a Linux VM there), making `localhost` unreachable. Fix this by adding explicit port mappings to docker run flags, [cmd 250 of manage.py](https://github.com/Agroecology-Lab/feldfreund_devkit_ros/blob/8dcfde1b813bd829756a372d88195bb2b9249313/manage.py#L250) 
@@ -156,12 +156,64 @@ The primary entry point for the system. While it runs the full stack by default,
 | `./manage.py build +pull` | `build` | Re-clones the 9 external repos, keeps apt/pip/local layers cached |
 | `./manage.py build +pull +sim` | `build ` | Same, plus INSTALL_SIM=true |
 | `./manage.py full-build` | `full-build` | Runs `run_build(full=True)`. Cleans system & Re-installs all system dependencies. |
-| `./manage.py neo` | `neo` | Runs `neo`. Runs only the line following code for the second 'neo'(cortex) perception SBC. Then check `http://localhost:8080` |
-| `./manage.py neo-tsm` | `neo-tsm` | Runs `neo-tsm`. Runs experimental line following informed by [Vision based Crop Row Navigation under Varying Field Conditions in Arable Fields - Rajitha de Silva1, Grzegorz Cielniak2 and Junfeng Gao](https://arxiv.org/pdf/2209.14003). Then check `http://localhost:8080` |
+| `./manage.py neo` | `neo` | Runs `neo`. Runs only the line following code for the second 'neo'(cortex) perception SBC. Then check `http://localhost:8081` |
+| `./manage.py neo-tsm` | `neo-tsm` | Runs `neo-tsm`. Runs experimental line following informed by [Vision based Crop Row Navigation under Varying Field Conditions in Arable Fields - Rajitha de Silva1, Grzegorz Cielniak2 and Junfeng Gao](https://arxiv.org/pdf/2209.14003). Then check `http://localhost:8081` |
 | `./manage.py pull-caatinga` | `pulls & builds vision pipeline` | Requires the container to already be running |
 
 
 
+
+### One-command sim launch (TMuLE)
+
+[TMuLE](https://github.com/marc-hanheide/TMuLE) brings the whole row-following sim up in a single `tmux` session — one window per process — instead of running the three launch steps by hand in separate terminals:
+
+```bash
+tmule -c tmule/row_follow_sim.yaml launch
+tmux attach -t row_follow_sim
+```
+
+That starts `./manage.py --sim` (nav stack + Nav2 + UI), Gazebo (`sowbot_sim.launch.py`) and the crop-row CV node (`crop_row_nav.launch.py`), each in its own tmux window. `launch` returns immediately and leaves the session detached, so attach to watch the panes come up (and to type the `nav_stack` sudo password).
+
+One-time install (`tmux` plus the tool itself):
+
+```bash
+sudo apt install -y tmux pipx
+pipx install tmule && pipx ensurepath   # then open a new shell
+```
+
+Stop the stack with `tmule -c tmule/row_follow_sim.yaml stop`; re-attach later with `tmux attach -t row_follow_sim`.
+
+> If a runtime container is **already running**, the `nav_stack` window will fail on a `docker run` name collision. Either `docker stop sowbot_runtime` first, or launch just the windows that reuse the container: `tmule -c tmule/row_follow_sim.yaml launch -w gazebo`.
+
+#### tmux basics
+
+The stack runs in a *detached* tmux session named `row_follow_sim`, so closing your terminal does not kill it — **detaching is not stopping**. The session holds one window per sub-system (plus a stray `0: bash` that tmux always creates):
+
+```
+0: bash   1: nav_stack   2: gazebo   3: crop_row
+```
+
+Every shortcut starts with the prefix `Ctrl-b` — press and release it, then the next key:
+
+| Keys | Resulting Action |
+|:---|:---|
+| `Ctrl-b` `d` | Detach — leaves the whole stack running in the background |
+| `Ctrl-b` `w` | Interactive window picker (easiest way to move around) |
+| `Ctrl-b` `1` / `2` / `3` | Jump straight to `nav_stack` / `gazebo` / `crop_row` |
+| `Ctrl-b` `n` / `p` | Next / previous window |
+| `Ctrl-b` `[` | Scroll back through ROS log output — arrows/PgUp, `q` to exit |
+| `Ctrl-b` `z` | Zoom the current pane fullscreen (press again to unzoom) |
+| `Ctrl-b` `?` | List every binding |
+
+```bash
+tmux ls                              # list sessions
+tmux attach -t row_follow_sim        # attach
+tmux kill-session -t row_follow_sim  # nuke the session
+```
+
+Scrolling back (`Ctrl-b` `[`) is the one you'll reach for most — it's how you read ROS output that has already scrolled past. For mouse-wheel scrolling instead, add `set -g mouse on` to `~/.tmux.conf`.
+
+Scenario configs live in [`tmule/`](tmule/) — see [`tmule/README.md`](tmule/README.md) to tweak launch arguments or add your own scenario.
 
 ### Interactive Shell
 To enter the running container for debugging or manual ROS 2 commands:
