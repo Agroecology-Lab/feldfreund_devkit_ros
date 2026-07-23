@@ -118,7 +118,7 @@ Use the management script to build the ROS 2 workspace and launch the robot stac
 xhost +local:docker
 ./manage.py 
 ```
-Access http://localhost:8090 to access the WebUI
+Access http://localhost to access the WebUI
 
 *Notes for Mac users:
 Port mappings may not bridge to the host on macOS Docker Desktop (Docker runs inside a Linux VM there), making `localhost` unreachable. Fix this by adding explicit port mappings to docker run flags, [cmd 250 of manage.py](https://github.com/Agroecology-Lab/feldfreund_devkit_ros/blob/8dcfde1b813bd829756a372d88195bb2b9249313/manage.py#L250) 
