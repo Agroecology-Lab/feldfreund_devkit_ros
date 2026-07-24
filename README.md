@@ -68,7 +68,7 @@ Estimate for reimplementing the full stack pulled in by `feldfreund_devkit_ros/d
 |---|---|
 | ROS 2 core + Nav2 | 120,000–250,000 |
 
-## Robotics-specific packages pulled in
+## Packages pulled in & developed in house
 
 | Package | What it does | Rewrite hrs |
 |---|---|---|
@@ -82,18 +82,22 @@ Estimate for reimplementing the full stack pulled in by `feldfreund_devkit_ros/d
 | `vision_opencv` (cv_bridge, image_geometry) | ROS↔OpenCV bridge | 1,000–2,500 |
 | `fusioncore` | UKF GNSS/IMU fusion | 800–2,000 |
 | Lizard | ESP32 firmware bridge | 800–1,500 |
+| `virtual_maize_field` | Gazebo row-crop world gen | 400–1,200 |
 | Forest3D | Procedural terrain gen | 400–1,200 |
-| `sentor`, `ros2graph_explorer`, `ros2grapher` | Monitoring/dev-tool glue | 600–1,800 |
+| `sentor`, `mongodb_store`, `ros2graph_explorer`, `ros2grapher` | Monitoring/dev-tool glue | 600–1,800 |
+| `sowbot_row_follow` TSM vision pipeline | Line fitting, ExG masking, multi-row detection, gating | 800–1,800 |
+| `sowbot_row_follow` state machine + action server | FOLLOW_ROW transitions, control loop integration | 550–1,300 |
+| `sowbot_row_follow` field tuning/debugging | Reaching current maturity | 400–1,000 |
 
-**Subtotal, non-core: ~36,000–116,000 hrs**
+**Subtotal, non-core: ~37,750–120,100 hrs**
 
 ## Total
 
-**~155,000–365,000 engineering hours (≈75–180 person-years)**
+**~157,750–370,100 engineering hours (≈76–183 person-years)**
 
 Excludes OpenCV, GDAL, Boost, Eigen, PyTorch — rewriting those too pushes this into the millions of hours and isn't a serious option.
 
-At a $120/hr fully-loaded US engineering rate, that's **≈$19M–$44M**.
+At a $120/hr fully-loaded US engineering rate, that's **≈$18.9M–$44.4M**.
 
 
 
