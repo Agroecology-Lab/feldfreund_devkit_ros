@@ -53,9 +53,9 @@ Contact: [sowbot.co.uk](https://sowbot.co.uk)
 
 This project is built on and aims to maintain upstream compatibility with [zauberzeug/feldfreund\_devkit\_ros](https://github.com/zauberzeug/feldfreund_devkit_ros).
 
-High Level navigation is developed from the work of [Lincoln Centre for Autonomous Systems (LCAS)](https://lcas.lincoln.ac.uk) as part of the [Agri-OpenCore](https://agri-opencore.org) open ROS 2 ecosystem for agricultural robotics.
+High Level navigation is developed from the work of [Lincoln Centre for Autonomous Systems (LCAS)](https://lcas.lincoln.ac.uk) as part of the [Agri-OpenCore](https://agri-opencore.org) open ROS 2 ecosystem for agricultural robotic
 
-Perception models, Nav2 stack, datasets and simulation environments are developed in collaboration with [caatingarobotics](https://github.com/joaodemouragy-hash/caatingarobotics), The [Sowbot Jazzy fork](https://github.com/samuk/caatingarobotics) is pending upstream merge.
+Simulation configuration is partially derived from work by [caatingarobotics](https://github.com/joaodemouragy-hash/caatingarobotics), 
 
 
 # Rewrite-from-Scratch Cost Estimate
@@ -142,15 +142,12 @@ This repo may contain traces of LLM slop, We've done our best to mitigate this. 
 - xcode-select --install
 - [Git](https://github.com/git-guides/install-git)
 - [Docker](https://docs.docker.com/engine/install/)
-
-
-& See notes below
+- & launch Gazebo in a browser from the WebUI.
 
 #### Windows?
 - [Git](https://github.com/git-guides/install-git)
 - [Docker](https://docs.docker.com/engine/install/)
-
-Untested
+- Untested!
 
 ### 1. Clone the Repository
 Open a terminal on your host machine and download the workspace:
@@ -168,15 +165,11 @@ xhost +local:docker
 ```
 Access http://localhost to access the WebUI
 
-*Notes for Mac users:
-Port mappings may not bridge to the host on macOS Docker Desktop (Docker runs inside a Linux VM there), making `localhost` unreachable. Fix this by adding explicit port mappings to docker run flags, [cmd 250 of manage.py](https://github.com/Agroecology-Lab/feldfreund_devkit_ros/blob/8dcfde1b813bd829756a372d88195bb2b9249313/manage.py#L250) 
 
-Drop the xhost line, you'll still be able to access GUI tools via a browser.
 
 #### Linux
 
 If you're getting this error:
-
 ```
 docker: Error response from daemon: could not select device driver "" with capabilities: [[gpu]]
 ```
@@ -209,9 +202,9 @@ The primary entry point for the system. While it runs the full stack by default,
 | `./manage.py pull-caatinga` | `pulls & builds vision pipeline` | Requires the container to already be running |
 
 
-
-
 ### One-command sim launch (TMuLE)
+
+Whilst you can launch Gazebo and other tools from the webui, some may prefer the terminal, this makes terminal use a bit easier.
 
 [TMuLE](https://github.com/marc-hanheide/TMuLE) brings the whole row-following sim up in a single `tmux` session — one window per process — instead of running the three launch steps by hand in separate terminals:
 
@@ -221,13 +214,6 @@ tmux attach -t row_follow_sim
 ```
 
 That starts `./manage.py --sim` (nav stack + Nav2 + UI), Gazebo (`sowbot_sim.launch.py`) and the crop-row CV node (`crop_row_nav.launch.py`), each in its own tmux window. `launch` returns immediately and leaves the session detached, so attach to watch the panes come up (and to type the `nav_stack` sudo password).
-
-One-time install (`tmux` plus the tool itself):
-
-```bash
-sudo apt install -y tmux pipx
-pipx install tmule && pipx ensurepath   # then open a new shell
-```
 
 Stop the stack with `tmule -c tmule/row_follow_sim.yaml stop`; re-attach later with `tmux attach -t row_follow_sim`.
 
