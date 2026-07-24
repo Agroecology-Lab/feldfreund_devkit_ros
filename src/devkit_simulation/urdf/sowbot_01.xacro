@@ -570,8 +570,20 @@
       <right_track><link>right_track_link</link></right_track>
 
       <tracks_separation>${track_sep}</tracks_separation>
+      <!-- Was <tracks_height> (typo'd, silently dropped/defaulted by
+           the plugin's LoadParam fallback). Correct element name per
+           the gz-sim TrackedVehicle schema is singular "track_height". -->
       <track_height>${drive_radius}</track_height>  <!-- half-height to contact surface, not full box height -->
       <steering_efficiency>0.5</steering_efficiency>
+
+      <!-- Vehicle-level speed limit. min_velocity/max_velocity are NOT
+           TrackController parameters (they were previously placed there
+           and silently ignored) — they belong here, under
+           TrackedVehicle's <linear_velocity>. -->
+      <linear_velocity>
+        <min_velocity>-1.5</min_velocity>
+        <max_velocity>1.5</max_velocity>
+      </linear_velocity>
 
       <!-- Explicit global topic; without this the plugin defaults to
            /model/{entity_name}/cmd_vel which the bridge does not route. -->
@@ -580,13 +592,11 @@
   </gazebo>
 
   <!-- TrackController: one per side; listens on
-       /model/amiga_ng/left_track_link/track_cmd_vel  (default) -->
+       /model/amiga_ng/link/left_track_link/track_cmd_vel  (default) -->
   <gazebo>
     <plugin filename="gz-sim-track-controller-system"
             name="gz::sim::systems::TrackController">
       <link>left_track_link</link>
-      <min_velocity>-1.5</min_velocity>
-      <max_velocity>1.5</max_velocity>
     </plugin>
   </gazebo>
 
@@ -594,8 +604,6 @@
     <plugin filename="gz-sim-track-controller-system"
             name="gz::sim::systems::TrackController">
       <link>right_track_link</link>
-      <min_velocity>-1.5</min_velocity>
-      <max_velocity>1.5</max_velocity>
     </plugin>
   </gazebo>
 
