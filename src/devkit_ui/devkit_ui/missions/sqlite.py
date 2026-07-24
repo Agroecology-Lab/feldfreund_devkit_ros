@@ -31,6 +31,10 @@ class MissionSqliteStore:
         """Attaches the store to a node."""
         # Nothing needed here.
 
+    def close(self) -> None:
+        """Closes the store."""
+        self._conn.close()
+
     # ── public API ────────────────────────────────────────────────────────
 
     def add(self,
