@@ -68,9 +68,9 @@ ff_exec() {
         echo "[tmule] ERROR: no runtime container found; is ./manage.py --sim running?" >&2
         return 1
     fi
-    docker exec -it "$cn" bash -c "
+    docker exec -it "$cn" bash -lc '
         source /opt/ros/*/setup.bash 2>/dev/null
         [ -f /workspace/install/setup.bash ] && source /workspace/install/setup.bash
-        export PYTHONPATH=\$PYTHONPATH:/workspace/src/devkit_ui
-        exec $*"
+        export PYTHONPATH="$PYTHONPATH:/workspace/src/devkit_ui"
+        exec "$@"' bash "$@"
 }
