@@ -1,0 +1,50 @@
+# TMuLE launch config: full row-following SIMULATION stack.
+#
+# One tmux window per sub-system, one pane each. This is the automated
+# equivalent of the three manual steps in ~/.scripts/sowbot_launch.script.
+#
+#   Launch:  tmule -c tmule/row_follow_sim.yaml launch
+#   Attach:  tmux attach -t row_follow_sim
+#   Stop:    tmule -c tmule/row_follow_sim.yaml stop
+#
+# All three sub-systems share ONE Docker container (sowbot_runtime):
+#   1. nav_stack  -> ./manage.py --sim  creates the container + runs topo nav / Nav2 / UI
+#   2. gazebo     -> docker exec ... ros2 launch devkit_bringup sowbot_sim.launch.py
+#   3. crop_row   -> docker exec ... ros2 launch sowbot_row_follow crop_row_nav.launch.py
+#
+# nav_stack has no `check`, so `launch` returns immediately and the tmux session
+# runs in the background. The gazebo/crop_row panes self-gate (ff_wait_*) until
+# the container — and the generated world — are ready, so ordering is automatic.
+
+session: row_follow_sim
+
+# Sourced into every pane's shell before its command runs (and prepended to
+# every check). Defines the ff_* helpers from lib.sh and cd's to the repo root
+# so ./manage.py resolves. @TMULE_CONFIG_DIR@ = this file's directory.
+init_cmd: |
+  cd "@TMULE_CONFIG_DIR@/.." || exit 1
+  source "@TMULE_CONFIG_DIR@/lib.sh"
+
+windows:
+  # 1. Nav stack: creates the sowbot_runtime container and runs topo nav +
+  #    Nav2 + UI. May prompt for a sudo password (fixusb.py) — enter it here.
+  - name: nav_stack
+    panes:
+      - ./manage.py --sim
+
+  # 2. Gazebo: waits for the container and the topo-derived world, then launches
+  #    the sim (normally started from the UI System tab; here it's automated).
+  - name: gazebo
+    panes:
+      - |
+        ff_wait_container || exit 1
+        ff_wait_world
+        ff_exec ros2 launch devkit_bringup sowbot_sim.launch.py world:=maize.world urdf:=ifarmate.urdf.xacro
+
+  # 3. Crop-row CV node: not started by either of the above. Waits for the
+  #    container, then runs the detector against the sim camera feed.
+  - name: crop_row
+    panes:
+      - |
+        ff_wait_container || exit 1
+        ff_exec ros2 launch sowbot_row_follow crop_row_nav.launch.py use_camera:=false image_topic:=/camera/image_raw detector:=tsmV
