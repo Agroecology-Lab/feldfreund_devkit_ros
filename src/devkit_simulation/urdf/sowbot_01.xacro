@@ -570,7 +570,7 @@
       <right_track><link>right_track_link</link></right_track>
 
       <tracks_separation>${track_sep}</tracks_separation>
-      <tracks_height>${drive_radius}</tracks_height>  <!-- half-height to contact surface, not full box height -->
+      <track_height>${drive_radius}</track_height>  <!-- half-height to contact surface, not full box height -->
       <steering_efficiency>0.5</steering_efficiency>
 
       <!-- Explicit global topic; without this the plugin defaults to
