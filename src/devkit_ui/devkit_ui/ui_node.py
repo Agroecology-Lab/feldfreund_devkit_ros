@@ -59,7 +59,8 @@ from tf2_ros.buffer import Buffer
 from tf2_ros.transform_listener import TransformListener
 
 # MISSION: store owns missions.yaml, scheduling, and run recording.
-from devkit_ui.missions import ACTIONS, MissionStore, action_ros_msgs
+from devkit_ui.actions import ACTIONS, action_ros_msgs
+from devkit_ui.missions import MissionStore
 
 # pylint: enable=import-error
 # OBSTACLE: obstacle manager + UI attachment helpers
@@ -3581,7 +3582,7 @@ class NiceGuiNode(Node):
                     ext = fname.lower().rsplit('.', 1)[-1] if '.' in fname else ''
                     if ext == 'glb':
                         return data[:4] == b'glTF'
-                    elif ext == 'gltf':
+                    if ext == 'gltf':
                         return data.strip()[:1] in (b'{', b'[')
                     return False
 

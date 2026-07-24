@@ -1,7 +1,7 @@
 import unittest
 from typing import cast
 
-from devkit_ui.mission_sqlite_store import MissionSqliteStore
+from devkit_ui.missions.sqlite import MissionSqliteStore
 
 
 class TestMissionSqliteStore(unittest.TestCase):
