@@ -19,10 +19,10 @@ Startup sequence inside this file
 1. preflight_pkill  — kills any stale parameter_bridge from a previous run
 2. sim_launch       — gz sim + robot_state_publisher + spawn + ros_gz_bridge
                       (ros_gz_bridge starts 2s after spawn exits, per sim.launch.py)
-3. nav2 (t+15s)     — Nav2 server nodes with use_sim_time=True; by this point
+3. nav2 (t+35s)     — Nav2 server nodes with use_sim_time=True; by this point
                       /clock is live from the bridge and TF frames carry
                       Gazebo sim-time stamps, so all TF lookups succeed
-4. nav2_lifecycle (t+20s) — lifecycle_manager_navigation, started 5s AFTER
+4. nav2_lifecycle (t+40s) — lifecycle_manager_navigation, started 5s AFTER
                       the Nav2 nodes above so it never races their process
                       startup (previously both started in the same
                       TimerAction batch; under load this could leave
@@ -350,18 +350,22 @@ def generate_launch_description():
         )
     )
 
-    # ── Nav2 (t+15s) ──────────────────────────────────────────────────────────
-    # 15s gives gz sim time to start, the robot to spawn, and ros_gz_bridge
+    # ── Nav2 (t+35s) ──────────────────────────────────────────────────────────
+    # 35s gives gz sim time to start, the robot to spawn, and ros_gz_bridge
     # to come up and start publishing /clock with RELIABLE QoS.  By the time
     # Nav2 initialises, /clock is live and all TF frames carry Gazebo
     # sim-time stamps — so use_sim_time=True works correctly from the start.
+    # (Bumped from 15s: logs showed bridge/clock coming up ~t+18s, and spawn
+    # itself taking longer with the heavier xacro. This is a band-aid — the
+    # fixed sleep still races if spawn gets slower again; polling /clock
+    # instead of sleeping is the fix that stops needing retuning.)
     nav2_params = os.path.join(devkit_launch_pkg, 'config', 'nav2_params_sim.yaml')
     nav2 = TimerAction(
-        period=15.0,
+        period=35.0,
         actions=_nav2_sim_nodes(nav2_params, use_sim_time=True),
     )
 
-    # ── Nav2 lifecycle manager (t+20s) ────────────────────────────────────────
+    # ── Nav2 lifecycle manager (t+40s) ────────────────────────────────────────
     # Started 5s AFTER the Nav2 server nodes above, not in the same batch.
     # Previously this raced controller_server/behavior_server/bt_navigator's
     # process startup, since ros2 launch forks everything in a TimerAction
@@ -373,7 +377,7 @@ def generate_launch_description():
     # plus bond_timeout=15.0 (see _nav2_lifecycle_manager_node) gives every
     # managed node real margin before lifecycle transitions are attempted.
     nav2_lifecycle = TimerAction(
-        period=20.0,
+        period=40.0,
         actions=[_nav2_lifecycle_manager_node(nav2_params, use_sim_time=True)],
     )
 
@@ -433,7 +437,7 @@ def generate_launch_description():
         output='screen',
     )
 
-    # ── fusioncore (UKF localisation, t+15s) ──────────────────────────────────
+    # ── fusioncore (UKF localisation, t+35s) ──────────────────────────────────
     # MOVED here from sim_nav.launch.py. fusioncore consumes sim-time-stamped
     # sensors (/gnss/fix, /imu/data bridged from Gazebo, /odom/wheels relayed
     # from ground-truth /odom) and is the sole publisher of odom->base_footprint.
@@ -441,7 +445,7 @@ def generate_launch_description():
     # like Nav2 above. Started on wall time it stamped its TF and /fusion/odom
     # with wall-clock time while the sim-time stack rejected them as ~1.7e9 s in
     # the future ("Extrapolation Error"), which sent the robot off the world.
-    # t=15s matches the Nav2 timer: gz sim + spawn + ros_gz_bridge are up and
+    # t=35s matches the Nav2 timer: gz sim + spawn + ros_gz_bridge are up and
     # /clock is publishing by then. autostart (fusioncore >= 0.3.1) activates the
     # node ~200ms after configure, so a lone CONFIGURE event is enough.
     fusioncore_params = PathJoinSubstitution(
@@ -459,14 +463,14 @@ def generate_launch_description():
         lifecycle_node_matcher=matches_action(fusioncore_node),
         transition_id=Transition.TRANSITION_CONFIGURE,
     ))
-    fusioncore_bringup = TimerAction(period=15.0, actions=[
+    fusioncore_bringup = TimerAction(period=35.0, actions=[
         fusioncore_node,
         fusioncore_configure,
     ])
 
     # /fusion/odom -> /odometry/global (limbic_row_follow subscribes to the
     # latter; same nav_msgs/Odometry type both ends).
-    fusion_to_global_relay = TimerAction(period=15.0, actions=[
+    fusion_to_global_relay = TimerAction(period=35.0, actions=[
         Node(
             package='topic_tools',
             executable='relay',
