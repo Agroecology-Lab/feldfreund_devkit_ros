@@ -337,6 +337,8 @@ RUN apt-get update && \
           caatinga_vision \
           sowbot_row_follow \
           yolox \
+          tmux \
+          pipx \
           sentor" && \
       break || (echo "rosdep attempt $i failed, retrying in 15s..." && sleep 15); \
     done && \
@@ -390,6 +392,7 @@ RUN apt-get update && \
       --parallel-workers "$(nproc)" \
       --cmake-args -DCMAKE_BUILD_TYPE=Release && \
     apt-get clean && rm -rf /var/lib/apt/lists/*
+    pipx install tmule && pipx ensurepath 
 
 # Smoke-test: cv_bridge must import cleanly under numpy 2 (the crop_row_node fix)
 RUN . /opt/ros/jazzy/setup.sh && \
