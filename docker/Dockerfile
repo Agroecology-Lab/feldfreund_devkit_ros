@@ -392,12 +392,29 @@ RUN apt-get update && \
       --parallel-workers "$(nproc)" \
       --cmake-args -DCMAKE_BUILD_TYPE=Release && \
     apt-get clean && rm -rf /var/lib/apt/lists/*
-    pipx install tmule && pipx ensurepath 
 
 # Smoke-test: cv_bridge must import cleanly under numpy 2 (the crop_row_node fix)
 RUN . /opt/ros/jazzy/setup.sh && \
     . /workspace/install/setup.sh && \
     python3 -c "import numpy; from cv_bridge import CvBridge; CvBridge(); print('cv_bridge OK on numpy', numpy.__version__)"
+
+# ============================================================
+# Stage 10.5: pipx + tmule
+# ============================================================
+# pipx was never actually installed anywhere upstream — only referenced in
+# the Stage 9 rosdep --skip-keys list, which just tells rosdep to ignore it,
+# not install it. Install it explicitly here before using it.
+RUN apt-get update && \
+    apt-get install -y --no-install-recommends pipx && \
+    apt-get clean && rm -rf /var/lib/apt/lists/* && \
+    pipx install tmule && \
+    pipx ensurepath
+
+# pipx installs binaries to ~/.local/bin by default. `pipx ensurepath` only
+# patches ~/.bashrc / shell profiles for *interactive* shells — it has no
+# effect on the non-interactive `bash -c ... exec "$@"` in ENTRYPOINT below.
+# Set PATH explicitly so `tmule` is actually reachable at runtime.
+ENV PATH="/root/.local/bin:${PATH}"
 
 ARG INSTALL_SIM=false
 RUN if [ "$INSTALL_SIM" = "true" ]; then \
