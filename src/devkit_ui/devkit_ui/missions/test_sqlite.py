@@ -8,6 +8,9 @@ class TestMissionSqliteStore(unittest.TestCase):
     def setUp(self) -> None:
         self._store = MissionSqliteStore(':memory:')
 
+    def tearDown(self) -> None:
+        self._store.close()
+
     def test_missions_getter_returns_all_missions_in_id_order(self) -> None:
         self._store.add(rows=[3], action='spray', action_params={'dose': 3}, name='THIRD')
         self._store.add(rows=[1], action='weed', action_params={'dose': 1}, name='FIRST')

@@ -15,16 +15,18 @@ import subprocess
 import sys
 import threading
 import time
+import traceback
 import zipfile
+from collections.abc import Callable, Iterator
 from datetime import UTC, datetime
 from itertools import pairwise
+from operator import attrgetter
 from pathlib import Path
 
 # The following imports get generated in the Dockerfile, they aren't available to pylint
 # pylint: disable=import-error
 import fields2cover as f2c
 import rclpy
-import yaml
 from ament_index_python.packages import (
     PackageNotFoundError,
     get_package_share_directory,
@@ -61,6 +63,15 @@ from tf2_ros.transform_listener import TransformListener
 # MISSION: store owns missions.yaml, scheduling, and run recording.
 from devkit_ui.actions import ACTIONS, action_ros_msgs
 from devkit_ui.missions import MissionStore
+from devkit_ui.models import (
+    NodeID,
+    TopoDoc,
+    TopoEdge,
+    TopoNode,
+    TopoPose,
+    TopoProperties,
+    Vector2,
+)
 
 # pylint: enable=import-error
 # OBSTACLE: obstacle manager + UI attachment helpers
@@ -70,6 +81,7 @@ from devkit_ui.obstacles import (
     attach_mission_sidebar_controls,
     attach_nav_card,
 )
+from devkit_ui.parse import dump_topo_yaml, parse_topo_json, parse_topo_yaml
 
 _TOPO_SRV_OK = False
 try:
@@ -103,6 +115,11 @@ TMAP_QOS = QoSProfile(
 
 _ROW_ACTION = 'limbic_row_follow'
 _NAV_ACTION = 'navigate_to_pose'
+
+def _topo_to_msg(doc: TopoDoc) -> String:
+    msg = String()
+    msg.data = json.dumps(doc.to_dict(), ensure_ascii=False)
+    return msg
 
 
 def _headland_neighbour_pairs(coords: dict) -> list:
@@ -209,34 +226,18 @@ body, .nicegui-content { background: var(--bg) !important; color: var(--txt); }
 
 # ── map parser ────────────────────────────────────────────────────────────────
 
-def _parse_topo_json(json_str: str) -> tuple[dict[str, dict], dict]:
-    doc = json.loads(json_str)
-    nodes: dict[str, dict] = {}
-    for entry in doc.get('nodes', []):
-        n     = entry['node']
-        name  = n['name']
-        pos   = n['pose']['position']
-        edges = [e['node'] for e in n.get('edges', []) if 'node' in e]
-        meta  = dict(entry.get('meta', {}))
-        props = n.get('properties', {})
-        for key in ('dropped_by', 'timestamp', 'row_id', 'row_role',
-                    'gps_lat', 'gps_lon', 'gps_fix_type', 'gps_hdop'):
-            if key in props and key not in meta:
-                meta[key] = props[key]
-        nodes[name] = {'x': float(pos['x']), 'y': float(pos['y']),
-                       'edges': edges, 'meta': meta}
-    return nodes, doc
-
-
-def _demo_nodes() -> dict[str, dict]:
-    return {
-        'N1': {'x':  0.0, 'y': 0.0, 'edges': ['N2'],       'meta': {}},
-        'N2': {'x':  3.0, 'y': 0.0, 'edges': ['N1', 'N3'], 'meta': {}},
-        'N3': {'x':  6.0, 'y': 0.0, 'edges': ['N2', 'N4'], 'meta': {}},
-        'N4': {'x':  9.0, 'y': 0.0, 'edges': ['N3', 'N5'], 'meta': {}},
-        'N5': {'x': 12.0, 'y': 0.0, 'edges': ['N4', 'N6'], 'meta': {}},
-        'N6': {'x': 15.0, 'y': 0.0, 'edges': ['N5'],       'meta': {}},
-    }
+def _demo_doc() -> TopoDoc:
+    return TopoDoc(
+        name="mixed_test_map",
+        nodes=[
+            TopoNode(name='N1', pose=TopoPose(x=0.0, y=0.0), edges=['N2'], meta={}),
+            TopoNode(name='N2', pose=TopoPose(x=3.0, y=0.0), edges=['N1', 'N3'], meta={}),
+            TopoNode(name='N3', pose=TopoPose(x=6.0, y=0.0), edges=['N2', 'N4'], meta={}),
+            TopoNode(name='N4', pose=TopoPose(x=9.0, y=0.0), edges=['N3', 'N5'], meta={}),
+            TopoNode(name='N5', pose=TopoPose(x=12.0, y=0.0), edges=['N4', 'N6'], meta={}),
+            TopoNode(name='N6', pose=TopoPose(x=15.0, y=0.0), edges=['N5'], meta={}),
+        ],
+    )
 
 
 # ── SVG renderer ──────────────────────────────────────────────────────────────
@@ -246,14 +247,16 @@ _MARGIN, _NODE_R = 56, 17
 _TF_STALENESS_LIMIT = 2.0  # s — map->base_link older than this: don't draw it
 
 
-def _node_transform(nodes: dict):
+def _node_transform(nodes: Iterator[TopoNode]):
     """World->screen transform (tx, ty) + extents (dx, dy) for the node bbox.
 
     Shared by _build_svg and _build_robot_svg so both layers map coordinates
     identically.
     """
-    xs = [n['x'] for n in nodes.values()]
-    ys = [n['y'] for n in nodes.values()]
+    xs, ys = [], []
+    for node in nodes:
+        xs.append(node.x)
+        ys.append(node.y)
     dx = (max(xs) - min(xs)) or 1.0
     dy = (max(ys) - min(ys)) or 1.0
     x_min, y_min = min(xs), min(ys)
@@ -265,7 +268,7 @@ def _node_transform(nodes: dict):
     return tx, ty, dx, dy
 
 
-def _build_robot_svg(nodes: dict, robot: tuple | None) -> str:
+def _build_robot_svg(nodes: Iterator[TopoNode], robot: tuple | None) -> str:
     """Transparent overlay SVG with only the live robot marker (map frame).
 
     Kept separate from _build_svg so robot movement updates this layer alone,
@@ -288,38 +291,43 @@ def _build_robot_svg(nodes: dict, robot: tuple | None) -> str:
             f'stroke="#ffffff" stroke-width="2"/></svg>')
 
 
-def _build_svg(nodes: dict, selected: str | None, current: str | None) -> str:
-    if not nodes:
+def _build_svg(doc: TopoDoc, selected: str | None, current: str | None) -> str:
+    if not doc.nodes:
         return (f'<svg width="100%" viewBox="0 0 {_SVG_W} {_SVG_H}" '
                 f'style="background:#f6f8fa;border-radius:4px;border:1px solid #d0d7de">'
                 f'<text x="{_SVG_W//2}" y="{_SVG_H//2}" text-anchor="middle" '
                 f'fill="#8c959f" font-family="Courier New" font-size="13">No map loaded</text>'
                 f'</svg>')
 
-    tx, ty, _dx, _dy = _node_transform(nodes)
+    tx, ty, _dx, _dy = _node_transform(doc.nodes)
 
     parts: list[str] = [f'<rect width="{_SVG_W}" height="{_SVG_H}" fill="#f6f8fa" rx="4"/>']
 
     drawn: set = set()
-    for name, nd in nodes.items():
-        for tgt in nd['edges']:
-            key = tuple(sorted([name, tgt]))
-            if key in drawn or tgt not in nodes:
+    for nd in doc.nodes:
+        for tgt in nd.edges:
+            tgt_name = tgt.node
+            key = tuple(sorted([nd.name, tgt_name]))
+            if key in drawn or not doc.has_node(tgt_name):
                 continue
             drawn.add(key)
-            is_row_edge = (nd.get('meta', {}).get('row_id') is not None
-                           or nodes[tgt].get('meta', {}).get('row_id') is not None)
+
+            tgt_node = doc.get_node(tgt_name)
+
+            is_row_edge = (nd.meta.get('row_id') is not None
+                           or tgt_node.meta.get('row_id') is not None)
             parts.append(
-                f'<line x1="{tx(nd["x"]):.1f}" y1="{ty(nd["y"]):.1f}" '
-                f'x2="{tx(nodes[tgt]["x"]):.1f}" y2="{ty(nodes[tgt]["y"]):.1f}" '
+                f'<line x1="{tx(nd.x):.1f}" y1="{ty(nd.y):.1f}" '
+                f'x2="{tx(tgt_node.x):.1f}" y2="{ty(tgt_node.y):.1f}" '
                 f'stroke="{"#d8e8fd" if is_row_edge else "#d0d7de"}" '
                 f'stroke-width="{"2" if is_row_edge else "1"}" stroke-linecap="round"/>')
 
-    for name, nd in nodes.items():
-        cx, cy = tx(nd['x']), ty(nd['y'])
+    for nd in doc.nodes:
+        name = nd.name
+        cx, cy = tx(nd.x), ty(nd.y)
         is_cur = name == current
         is_sel = name == selected
-        is_row = nd.get('meta', {}).get('row_id') is not None
+        is_row = nd.meta.get('row_id') is not None
 
         # pylint: disable=multiple-statements
         if is_cur:
@@ -328,7 +336,7 @@ def _build_svg(nodes: dict, selected: str | None, current: str | None) -> str:
             fill, stroke, sw = '#fff8c5', '#9a6700', 2
         elif is_row:
             fill, stroke, sw = '#d8e8fd', '#0969da', 1
-        elif nd.get('meta', {}).get('dropped_by'):
+        elif nd.meta.get('dropped_by'):
             fill, stroke, sw = '#f6f8fa', '#8c959f', 1
         else:
             fill, stroke, sw = '#ffffff', '#d0d7de', 1
@@ -356,7 +364,7 @@ def _build_svg(nodes: dict, selected: str | None, current: str | None) -> str:
                 f'<text x="{cx:.1f}" y="{cy+4:.1f}" text-anchor="middle" fill="#0969da" '
                 f'font-family="Courier New" font-size="8" font-weight="700" '
                 f'style="pointer-events:none">'
-                f'{nd["meta"].get("row_role","?")[0].upper()}{nd["meta"].get("row_id","")}'
+                f'{nd.meta.get("row_role","?")[0].upper()}{nd.meta.get("row_id","")}'
                 f'</text>')
 
         parts.append(
@@ -720,9 +728,8 @@ class NiceGuiNode(Node):
         self.create_subscription(String, '/current_node',
                                  lambda m: setattr(self, 'topo_current', m.data), _SENSOR_QOS)
 
-        self._topo_doc:  dict            = {}
-        self.topo_nodes: dict[str, dict] = _demo_nodes()
-        self.topo_demo:  bool            = True
+        self._topo_doc:  TopoDoc | None = _demo_doc()
+        self._topo_demo: bool           = False
         self.create_subscription(String, '/topological_map_2', self._on_topo_map, TMAP_QOS)
         self._topo_map_pub = self.create_publisher(String, '/topological_map_2', TMAP_QOS)
 
@@ -875,10 +882,8 @@ class NiceGuiNode(Node):
 
     def _on_topo_map(self, msg: String) -> None:
         try:
-            nodes, doc      = _parse_topo_json(msg.data)
-            self.topo_nodes = nodes
-            self._topo_doc  = doc
-            self.topo_demo  = False
+            self._topo_doc = parse_topo_json(msg.data)
+            self._topo_demo  = False
         except Exception as e:
             self.get_logger().warn(f'Failed to parse /topological_map_2: {e}')
 
@@ -933,7 +938,7 @@ class NiceGuiNode(Node):
     # ── node dropping ─────────────────────────────────────────────────────────
 
     def drop_topo_node(self, name: str, row_id: int | None,
-                       row_role: str | None) -> None:
+                       row_role: str = 'entry') -> None:
         name = re.sub(r'[^A-Z0-9_]', '', name.strip().upper().replace(' ', '_'))
         if not name:
             self.drop_status = 'ERROR: node name required'
@@ -941,7 +946,7 @@ class NiceGuiNode(Node):
         if not _NAME_RE.match(name):
             self.drop_status = f'ERROR: invalid name "{name}"'
             return
-        if name in self.topo_nodes:
+        if self._topo_doc.has_node(name):
             self.drop_status = f'ERROR: {name} already exists'
             return
         if self.latest_odom is None and not self._is_sim:
@@ -955,12 +960,12 @@ class NiceGuiNode(Node):
         y = round(self.latest_odom.pose.pose.position.y, 3) if self.latest_odom else 0.0
         connect_to = (self.topo_current
                       if self.topo_current not in ('—', 'none', 'None', '', None) else None)
-        if connect_to and connect_to not in self.topo_nodes:
+        if connect_to and not self._topo_doc.has_node(connect_to):
             connect_to = None
-        if not connect_to and self.topo_selected and self.topo_selected in self.topo_nodes:
+        if not connect_to and self.topo_selected and self._topo_doc.has_node(self.topo_selected):
             connect_to = self.topo_selected
-        map_name  = self._topo_doc.get('name', 'mixed_test_map')
-        nav_frame = self._topo_doc.get('transformation', {}).get('topo_frame_id', 'map')
+        map_name  = self._topo_doc.name
+        nav_frame = self._topo_doc.transformation.get('topo_frame_id', 'map')
         is_row    = row_id is not None
 
         if is_row:
@@ -971,51 +976,45 @@ class NiceGuiNode(Node):
         gps = self.latest_gps
         gps_meta: dict = {}
         if gps is not None and gps.status.status >= 0:
-            gps_meta = {'gps_lat': round(gps.latitude, 7), 'gps_lon': round(gps.longitude, 7),
-                        'gps_fix_type': int(gps.status.status),
-                        'gps_hdop': None}
+            gps_meta = {
+                'gps_lat': round(gps.latitude, 7),
+                'gps_lon': round(gps.longitude, 7),
+                'gps_fix_type': int(gps.status.status),
+                'gps_hdop': None,
+            }
 
-        row_meta: dict = {'row_id': row_id, 'row_role': row_role or 'entry'} if is_row else {}
-        timestamp = datetime.now(UTC).strftime('%d-%m-%Y_%H-%M-%S')
-        node_meta_disk = {'map': map_name, 'node': name, 'pointset': map_name}
-        node_meta_ui   = {**node_meta_disk, 'dropped_by': 'webui',
-                          'timestamp': timestamp, **gps_meta, **row_meta}
-        node_properties_disk = {'xy_goal_tolerance': xy_tol, 'yaw_goal_tolerance': yaw_tol,
-                                 'dropped_by': 'webui', 'timestamp': timestamp,
-                                 **gps_meta, **row_meta}
+        row_meta: dict = {}
+        if is_row:
+            row_meta = {
+                'row_id': row_id,
+                'row_role': row_role,
+            }
 
-        def _make_node_dict(meta: dict, props: dict) -> dict:
-            return {'meta': meta, 'node': {
-                'edges': ([{'action': edge_action, 'edge_id': f'{name}_{connect_to}',
-                             'node': connect_to}] if connect_to else []),
-                'name': name, 'nav_frame': nav_frame,
-                'pose': {'orientation': {'w': 1.0, 'x': 0.0, 'y': 0.0, 'z': 0.0},
-                         'position':    {'x': x,   'y': y,   'z': 0.0}},
-                'properties': props,
-                'verts': [{'x': -vert_r, 'y': -vert_r}, {'x': vert_r, 'y': -vert_r},
-                           {'x':  vert_r, 'y':  vert_r}, {'x': -vert_r, 'y':  vert_r}],
-            }}
-
-        _make_node_dict(node_meta_ui, {'xy_goal_tolerance': xy_tol,
-                                       'yaw_goal_tolerance': yaw_tol})
-        new_nodes = dict(self.topo_nodes)
-        new_nodes[name] = {'x': x, 'y': y,
-                           'edges': [connect_to] if connect_to else [],
-                           'meta': node_meta_ui}
-        if connect_to:
-            if connect_to in new_nodes:
-                rev = list(new_nodes[connect_to]['edges'])
-                if name not in rev:
-                    rev.append(name)
-                new_nodes[connect_to] = {**new_nodes[connect_to], 'edges': rev}
-            for entry in self._topo_doc.get('nodes', []):
-                n = entry.get('node', {})
-                if n.get('name') == connect_to:
-                    n.setdefault('edges', []).append(
-                        {'action': edge_action, 'edge_id': f'{connect_to}_{name}', 'node': name})
-                    break
-
-        self.topo_nodes = new_nodes
+        self._topo_doc.add_node(TopoNode(
+            name=name,
+            nav_frame=nav_frame,
+            x=x,
+            y=y,
+            meta={
+                'map': map_name,
+                'node': name,
+                'pointset': map_name,
+                'dropped_by': 'webui',
+                'timestamp': datetime.now(UTC).strftime('%d-%m-%Y_%H-%M-%S'),
+                **gps_meta,
+                **row_meta
+            },
+            properties=TopoProperties(xy_goal_tolerance=xy_tol, yaw_goal_tolerance=yaw_tol),
+            verts=[
+                Vector2(x=-vert_r, y=-vert_r),
+                Vector2(x=vert_r, y=-vert_r),
+                Vector2(x=vert_r, y=vert_r),
+                Vector2(x=-vert_r, y=vert_r),
+            ],
+            edges=[
+                TopoEdge(action=edge_action, edge_id=f'{name}_{connect_to}', node=connect_to),
+            ] if connect_to else [],
+        ))
 
         conn_str = f' → {connect_to}' if connect_to else ''
         gps_str  = (f' [{gps_meta["gps_lat"]:.5f},{gps_meta["gps_lon"]:.5f}]'
@@ -1030,42 +1029,20 @@ class NiceGuiNode(Node):
                                  'topological_navigation/config/mixed_actions_map.yaml')
 
                 if os.path.exists(map_file):
-                    with open(map_file, encoding='utf-8') as f:
-                        file_doc = yaml.safe_load(f)
+                    file_doc = parse_topo_yaml(map_file)
                 elif os.path.exists(installed_src):
-                    with open(installed_src, encoding='utf-8') as f:
-                        file_doc = yaml.safe_load(f)
+                    file_doc = parse_topo_yaml(installed_src)
                     self.get_logger().info('Seeding from installed source')
                 else:
-                    file_doc = copy.deepcopy(self._topo_doc)
+                    file_doc = self._topo_doc
                     self.get_logger().warn('No YAML source — JSON fallback')
 
-                existing_names = {e.get('node', {}).get('name')
-                                  for e in file_doc.get('nodes', [])}
+                existing_names = {e.name for e in file_doc.nodes}
                 if name in existing_names:
                     self.get_logger().warn(f'Node {name} already in file — skipping write')
                     return
 
-                _ts = datetime.now(UTC).strftime('%d-%m-%Y_%H-%M-%S')
-                if 'meta' not in file_doc:
-                    file_doc['meta'] = {}
-                file_doc['meta']['last_updated'] = _ts
-                if 'pointset' not in file_doc:
-                    file_doc['pointset'] = map_name
-
-                file_doc.setdefault('nodes', []).append(
-                    _make_node_dict(node_meta_disk, node_properties_disk))
-                if connect_to:
-                    for entry in file_doc.get('nodes', []):
-                        n = entry.get('node', {})
-                        if n.get('name') == connect_to:
-                            n.setdefault('edges', []).append(
-                                {'action': edge_action,
-                                 'edge_id': f'{connect_to}_{name}', 'node': name})
-                            break
-                with open(map_file, 'w', encoding='utf-8') as f:
-                    yaml.dump(file_doc, f, default_flow_style=False,
-                               allow_unicode=True, sort_keys=False)
+                dump_topo_yaml(file_doc, map_file)
 
                 self._topo_doc = file_doc
 
@@ -1091,23 +1068,19 @@ class NiceGuiNode(Node):
                         self.drop_status = (f'{name}{conn_str} at ({x},{y})'
                                             f'{row_str}{gps_str} — live')
                     else:
-                        msg = String()
-                        msg.data = json.dumps(self._topo_doc, ensure_ascii=False)
-                        self._topo_map_pub.publish(msg)
+                        self._topo_map_pub.publish(_topo_to_msg(self._topo_doc))
                         err = sr.message if sr else 'timeout'
                         self.drop_status = f'{name}{conn_str} saved (switch failed: {err})'
                         self.get_logger().warn(f'switch_topological_map failed ({err})')
                 else:
-                    msg = String()
-                    msg.data = json.dumps(self._topo_doc, ensure_ascii=False)
-                    self._topo_map_pub.publish(msg)
+                    self._topo_map_pub.publish(_topo_to_msg(self._topo_doc))
                     self.drop_status = (f'{name}{conn_str} at ({x},{y})'
                                         f'{row_str}{gps_str} — live (no srv)')
                 self.get_logger().info(
                     f'Node dropped: {name} at ({x:.3f},{y:.3f}){conn_str}{row_str}{gps_str}')
             except Exception as e:
                 self.drop_status = f'ERROR: {e}'
-                self.get_logger().error(f'drop_topo_node failed: {e}')
+                self.get_logger().error(f'drop_topo_node failed: {e} ({type(e)}\n{traceback.format_exc()})')
 
         threading.Thread(target=_publish_and_persist, daemon=True).start()
 
@@ -1122,8 +1095,8 @@ class NiceGuiNode(Node):
         if self._track_timer is not None:
             self.track_status = 'ERROR: already running'
             return
-        existing = [n for n in self.topo_nodes
-                    if n.startswith(prefix + '_') and n[len(prefix)+1:].isdigit()]
+        existing = [n.name for n in self._topo_doc.nodes
+                    if n.name.startswith(prefix + '_') and n.name[len(prefix)+1:].isdigit()]
         self._track_counter = (max(int(n[len(prefix)+1:]) for n in existing)
                                if existing else 0)
         self._track_prefix = prefix
@@ -1207,9 +1180,9 @@ class NiceGuiNode(Node):
                 Trigger.Request()).add_done_callback(_cb)
         threading.Thread(target=_work, daemon=True).start()
 
-    def _persist_and_reload(self, modify_fn, status_attr: str,
+    def _persist_and_reload(self, modify_fn: Callable[[TopoDoc], None], status_attr: str,
                              success_msg: str) -> None:
-        map_name = self._topo_doc.get('name', 'mixed_test_map')
+        map_name = self._topo_doc.name
         map_file = f'/workspace/maps/{map_name}'
         installed_src = ('/workspace/install/topological_navigation/share/'
                          'topological_navigation/config/mixed_actions_map.yaml')
@@ -1217,37 +1190,18 @@ class NiceGuiNode(Node):
         def _work():
             try:
                 if os.path.exists(map_file):
-                    with open(map_file, encoding='utf-8') as f:
-                        file_doc = yaml.safe_load(f)
+                    file_doc = parse_topo_yaml(map_file)
                 elif os.path.exists(installed_src):
-                    with open(installed_src, encoding='utf-8') as f:
-                        file_doc = yaml.safe_load(f)
+                    file_doc = parse_topo_yaml(installed_src)
                 else:
                     file_doc = copy.deepcopy(self._topo_doc)
 
-                # Ensure the doc has the two top-level fields the tmap schema
-                # requires: meta.last_updated and pointset.
-                # Older map files (and our own archive/clear output) may omit
-                # them, causing switch_topological_map → validate() to reject.
-                _ts = datetime.now(UTC).strftime('%d-%m-%Y_%H-%M-%S')
-                if 'meta' not in file_doc:
-                    file_doc['meta'] = {}
-                file_doc['meta']['last_updated'] = _ts
-                if 'pointset' not in file_doc:
-                    file_doc['pointset'] = map_name
-
                 # Backfill missing per-node entry meta (hand-written nodes).
-                for _entry in file_doc.get('nodes', []):
-                    if 'meta' not in _entry:
-                        _nm = _entry.get('node', {}).get('name', '')
-                        _entry['meta'] = {
-                            'map': map_name, 'node': _nm, 'pointset': map_name}
+                file_doc.ensure_meta(map_name)
 
                 modify_fn(file_doc)
 
-                with open(map_file, 'w', encoding='utf-8') as f:
-                    yaml.dump(file_doc, f, default_flow_style=False,
-                               allow_unicode=True, sort_keys=False)
+                dump_topo_yaml(file_doc, map_file)
                 self._topo_doc = file_doc
 
                 def _call(client, req, timeout=5.0):
@@ -1268,21 +1222,17 @@ class NiceGuiNode(Node):
                     if sr and sr.success:
                         setattr(self, status_attr, f'{success_msg} — live')
                     else:
-                        msg = String()
-                        msg.data = json.dumps(self._topo_doc, ensure_ascii=False)
-                        self._topo_map_pub.publish(msg)
+                        self._topo_map_pub.publish(_topo_to_msg(self._topo_doc))
                         err = sr.message if sr else 'timeout'
                         setattr(self, status_attr,
                                 f'{success_msg} (switch failed: {err})')
                 else:
-                    msg = String()
-                    msg.data = json.dumps(self._topo_doc, ensure_ascii=False)
-                    self._topo_map_pub.publish(msg)
+                    self._topo_map_pub.publish(_topo_to_msg(self._topo_doc))
                     setattr(self, status_attr, f'{success_msg} — live (no srv)')
                 self.get_logger().info(f'_persist_and_reload: {success_msg}')
             except Exception as e:
                 setattr(self, status_attr, f'ERROR: {e}')
-                self.get_logger().error(f'_persist_and_reload failed: {e}')
+                self.get_logger().error(f'_persist_and_reload failed: {e} ({type(e)}\n{traceback.format_exc()})')
 
         threading.Thread(target=_work, daemon=True).start()
 
@@ -1350,44 +1300,49 @@ class NiceGuiNode(Node):
             anchor_lon = self.latest_gps.longitude
         fix_type   = int(self.latest_gps.status.status)
 
-        map_name  = self._topo_doc.get('name', 'mixed_test_map')
-        nav_frame = self._topo_doc.get('transformation', {}).get('topo_frame_id', 'map')
+        map_name  = self._topo_doc.name or 'mixed_test_map'
+        nav_frame = self._topo_doc.transformation.get('topo_frame_id', 'map')
         timestamp = datetime.now(UTC).strftime('%d-%m-%Y_%H-%M-%S')
 
         connect_to = (self.topo_current
                       if self.topo_current not in ('—', 'none', 'None', '', None)
                       else None)
-        if connect_to and connect_to not in self.topo_nodes:
+        if connect_to and not self._topo_doc.has_node(connect_to):
             connect_to = None
-        if not connect_to and self.topo_selected and self.topo_selected in self.topo_nodes:
+        if not connect_to and self.topo_selected and self._topo_doc.has_node(self.topo_selected):
             connect_to = self.topo_selected
 
-        new_topo_nodes = dict(self.topo_nodes)
-        if overwrite:
-            new_topo_nodes = {k: v for k, v in new_topo_nodes.items()
-                              if not k.startswith(f'{prefix}_R')}
-        new_entries: list = []
-        added: list = []
-        row_names: dict = {}
-        row_coords: dict = {}   # node_name -> (x, y) for headland end-classification
-        skipped: list = []
+        new_topo_nodes: dict[NodeID, TopoNode] = {}
 
-        verts = [{'x': -0.5, 'y': -0.5}, {'x':  0.5, 'y': -0.5},
-                 {'x':  0.5, 'y':  0.5}, {'x': -0.5, 'y':  0.5}]
+        added: list[int] = []
+        row_names: dict[int, tuple[NodeID, NodeID]] = {}
+        row_coords: dict[str, tuple[float, float]] = {}   # node_name -> (x, y) for headland end-classification
+        skipped: list[int] = []
 
-        def _disk_node(name, x, y, role, lat, lon, edges, rid):
-            meta = {'map': map_name, 'node': name, 'pointset': map_name}
-            props = {'xy_goal_tolerance': 0.1, 'yaw_goal_tolerance': 0.05,
-                        'dropped_by': 'webui_f2c', 'timestamp': timestamp,
-                        'gps_lat': round(lat, 7), 'gps_lon': round(lon, 7),
-                        'gps_fix_type': fix_type, 'gps_hdop': None,
-                        'row_id': rid, 'row_role': role}
-            return {'meta': meta, 'node': {
-                'edges': edges, 'name': name, 'nav_frame': nav_frame,
-                'pose': {'orientation': {'w': 1.0, 'x': 0.0, 'y': 0.0, 'z': 0.0},
-                            'position':    {'x': x,   'y': y,   'z': 0.0}},
-                'properties': props, 'verts': verts,
-            }}
+        verts = [Vector2(x=-0.5, y=-0.5), Vector2(x= 0.5, y=-0.5),
+                 Vector2(x= 0.5, y= 0.5), Vector2(x=-0.5, y= 0.5)]
+
+        def _disk_node(name, x, y, role, lat, lon, edges, rid) -> TopoNode:
+            return TopoNode(
+                name=name,
+                nav_frame=nav_frame,
+                edges=edges,
+                pose=TopoPose(x=x, y=y),
+                properties=TopoProperties(
+                    xy_goal_tolerance=0.1,
+                    yaw_goal_tolerance=0.05,
+                    dropped_by='webui_f2c',
+                    timestamp=timestamp,
+                    gps_lat=round(lat, 7),
+                    gps_lon=round(lon, 7),
+                    gps_fix_type=fix_type,
+                    gps_hdop=None,
+                    row_id=rid,
+                    row_role=role,
+                ),
+                verts=verts,
+                meta={'map': map_name, 'node': name}
+            )
 
         for i, swath in enumerate(self._f2c_swaths):
             if len(swath) < 2:
@@ -1407,25 +1362,18 @@ class NiceGuiNode(Node):
                 skipped.append(rid)
                 continue
 
-
-            in_edges = [{'action': _ROW_ACTION,
-                         'edge_id': f'{in_name}_{out_name}', 'node': out_name}]
-            new_entries.append(_disk_node(in_name,  ix, iy, 'entry', in_lat,  in_lon,  in_edges, rid))
-            new_entries.append(_disk_node(out_name, ox, oy, 'exit',  out_lat, out_lon, [], rid))
-
             ui_meta_common = {'dropped_by': 'webui_f2c', 'timestamp': timestamp,
                               'gps_fix_type': fix_type, 'gps_hdop': None,
                               'row_id': rid}
-            new_topo_nodes[in_name] = {
-                'x': ix, 'y': iy, 'edges': [out_name],
-                'meta': {**ui_meta_common, 'row_role': 'entry',
-                         'gps_lat': round(in_lat, 7), 'gps_lon': round(in_lon, 7)},
-            }
-            new_topo_nodes[out_name] = {
-                'x': ox, 'y': oy, 'edges': [],
-                'meta': {**ui_meta_common, 'row_role': 'exit',
-                         'gps_lat': round(out_lat, 7), 'gps_lon': round(out_lon, 7)},
-            }
+
+            in_edges = [TopoEdge(action=_ROW_ACTION, edge_id=f'{in_name}_{out_name}', node=out_name)]
+            in_node = _disk_node(in_name,  ix, iy, 'entry', in_lat,  in_lon,  in_edges, rid)
+            in_node.add_metadata(**ui_meta_common)
+            out_node = _disk_node(out_name, ox, oy, 'exit',  out_lat, out_lon, [], rid)
+            out_node.add_metadata(**ui_meta_common)
+
+            new_topo_nodes[in_name] = in_node
+            new_topo_nodes[out_name] = out_node
             added.append(rid)
             row_names[rid] = (in_name, out_name)
             # Retain endpoint coords so headland edges can be built by physical
@@ -1453,50 +1401,34 @@ class NiceGuiNode(Node):
         # consecutive nodes. IN→OUT row-follow edges are untouched.
         def _add_headland_edge(p: str, q: str) -> None:
             """Bidirectional nav_to_pose edge p<->q in both graph structures."""
+
+            edge_name = f'{p}_{q}'
+
             for a, b in ((p, q), (q, p)):
-                e = list(new_topo_nodes[a]['edges'])
-                if b not in e:
-                    e.append(b)
-                    new_topo_nodes[a] = {**new_topo_nodes[a], 'edges': e}
-            for entry in new_entries:
-                n = entry['node']
-                if n['name'] in (p, q):
-                    other = q if n['name'] == p else p
-                    if not any(ed.get('node') == other for ed in n.get('edges', [])):
-                        n['edges'].append({
-                            'action': _NAV_ACTION,
-                            'edge_id': f"{n['name']}_{other}", 'node': other})
+                a_node = new_topo_nodes[a]
+                a_node.add_edge(TopoEdge(action=_NAV_ACTION, edge_id=edge_name, node=b))
+
+            for node in new_topo_nodes.values():
+                if node.name not in (p, q):
+                    continue
+
+                other = q if node.name == p else p
+                node.add_edge(other, action=_NAV_ACTION)
 
         all_pts = dict(row_coords)   # {name: (x, y)}
         for a_name, b_name in _headland_neighbour_pairs(all_pts):
             _add_headland_edge(a_name, b_name)
 
-        graph_splice: list = []
         if connect_to:
             first_in = row_names[added[0]][0]
             last_out = row_names[added[-1]][1]
 
             for tgt in (first_in, last_out):
-                c_e = list(new_topo_nodes[connect_to]['edges'])
-                if tgt not in c_e:
-                    c_e.append(tgt)
-                    new_topo_nodes[connect_to] = {
-                        **new_topo_nodes[connect_to], 'edges': c_e}
-                t_e = list(new_topo_nodes[tgt]['edges'])
-                if connect_to not in t_e:
-                    t_e.append(connect_to)
-                    new_topo_nodes[tgt] = {**new_topo_nodes[tgt], 'edges': t_e}
-                for entry in new_entries:
-                    n = entry['node']
-                    if n['name'] == tgt and not any(
-                            e.get('node') == connect_to for e in n.get('edges', [])):
-                        n['edges'].append({
-                            'action': _NAV_ACTION,
-                            'edge_id': f'{tgt}_{connect_to}', 'node': connect_to,
-                        })
-                graph_splice.append((connect_to, tgt))
+                if tgt not in new_topo_nodes:
+                    continue
+                node = new_topo_nodes[tgt]
+                node.add_edge(connect_to, action=_NAV_ACTION)
 
-        self.topo_nodes = new_topo_nodes
         skip_str   = f' (skipped {len(skipped)} dup ids)' if skipped else ''
         splice_str = f' · spliced @ {connect_to}' if connect_to else ' · standalone'
         self.f2c_save_status = (
@@ -1505,43 +1437,31 @@ class NiceGuiNode(Node):
         def _modify(file_doc):
             if overwrite:
                 old_names = {
-                    e.get('node', {}).get('name', '')
-                    for e in file_doc.get('nodes', [])
-                    if e.get('node', {}).get('name', '').startswith(f'{prefix}_R')
+                    e.name
+                    for e in file_doc.nodes
+                    if e.name.startswith(f'{prefix}_R')
                 }
                 if old_names:
-                    file_doc['nodes'] = [
-                        e for e in file_doc.get('nodes', [])
-                        if e.get('node', {}).get('name') not in old_names
+                    file_doc.nodes = [
+                        e for e in file_doc.nodes
+                        if e.name not in old_names
                     ]
                     # Prune dangling edges pointing at removed nodes
-                    for entry in file_doc.get('nodes', []):
-                        n = entry.get('node', {})
-                        n['edges'] = [
-                            e for e in n.get('edges', [])
-                            if e.get('node') not in old_names
+                    for entry in file_doc.nodes:
+                        entry.edges = [
+                            e for e in entry.edges
+                            if e.node not in old_names
                         ]
-            existing = {e.get('node', {}).get('name')
-                        for e in file_doc.get('nodes', [])}
-            for entry in new_entries:
-                if entry['node']['name'] in existing:
+            existing = {e.name for e in file_doc.nodes}
+            for entry in new_topo_nodes.values():
+                if entry.name in existing:
                     continue
-                file_doc.setdefault('nodes', []).append(entry)
-            for src, tgt in graph_splice:
-                for entry in file_doc.get('nodes', []):
-                    n = entry.get('node', {})
-                    if n.get('name') != src:
-                        continue
-                    if not any(e.get('node') == tgt for e in n.get('edges', [])):
-                        n.setdefault('edges', []).append({
-                            'action': _NAV_ACTION,
-                            'edge_id': f'{src}_{tgt}', 'node': tgt,
-                        })
-                    break
+                file_doc.nodes.append(entry)
 
         self._persist_and_reload(
             _modify, 'f2c_save_status',
-            f'saved {len(added)} rows · {prefix}{splice_str}{skip_str}')
+            f'saved {len(added)} rows · {prefix}{splice_str}{skip_str}',
+        )
 
     # ── Repair row connectivity ──────────────────────────────────────────────
 
@@ -1552,8 +1472,8 @@ class NiceGuiNode(Node):
 
         rows: dict = {}
         coords: dict = {}   # node_name -> (x, y) for same-end classification
-        for nm, nd in self.topo_nodes.items():
-            meta = nd.get('meta', {}) or {}
+        for node in self._topo_doc.nodes:
+            meta = node.meta
             rid = meta.get('row_id')
             role = meta.get('row_role')
             if rid is None or role not in ('entry', 'exit'):
@@ -1562,18 +1482,16 @@ class NiceGuiNode(Node):
                 rid_int = int(rid)
             except (TypeError, ValueError):
                 continue
-            rows.setdefault(rid_int, {})[role] = nm
+            rows.setdefault(rid_int, {})[role] = node.name
             # x/y live at the top level of the lightweight node dict
-            x, y = nd.get('x'), nd.get('y')
-            if x is not None and y is not None:
-                coords[nm] = (float(x), float(y))
+            coords[node.name] = (node.x, node.y)
 
         if not rows:
             self.f2c_save_status = 'ERROR: no row nodes found'
             return
 
         sorted_rids = sorted(rows)
-        if connect_to and connect_to not in self.topo_nodes:
+        if connect_to and not self._topo_doc.has_node(connect_to):
             self.get_logger().warn(
                 f'repair: connect_to={connect_to!r} not in map, ignoring')
             connect_to = None
@@ -1611,18 +1529,16 @@ class NiceGuiNode(Node):
                 wanted_edges.append((connect_to, tgt, _NAV_ACTION))
                 wanted_edges.append((tgt, connect_to, _NAV_ACTION))
 
-        new_topo_nodes = dict(self.topo_nodes)
+        new_topo_nodes = {node.name: node for node in self._topo_doc.nodes}
         added_count = 0
         for src, tgt, _action in wanted_edges:
             if src not in new_topo_nodes or src == tgt:
                 continue
-            cur = list(new_topo_nodes[src].get('edges', []))
+            cur = new_topo_nodes[src].edges
             if tgt in cur:
                 continue
             cur.append(tgt)
-            new_topo_nodes[src] = {**new_topo_nodes[src], 'edges': cur}
             added_count += 1
-        self.topo_nodes = new_topo_nodes
 
         if added_count == 0:
             self.f2c_save_status = (
@@ -1635,61 +1551,43 @@ class NiceGuiNode(Node):
             for src, tgt, action in wanted_edges:
                 if src == tgt:
                     continue
-                for entry in file_doc.get('nodes', []):
-                    n = entry.get('node', {})
-                    if n.get('name') != src:
+                for entry in file_doc.nodes:
+                    if entry.name != src:
                         continue
-                    if any(e.get('node') == tgt for e in n.get('edges', [])):
+                    if any(e.name == tgt for e in entry.edges):
                         break
-                    n.setdefault('edges', []).append({
-                        'action': action,
-                        'edge_id': f'{src}_{tgt}', 'node': tgt,
-                    })
+                    entry.add_edge(tgt, action=action)
                     break
 
         target_str = (f' @ {connect_to}' if connect_to
                       else ' — NO SPLICE, chain still isolated')
         self._persist_and_reload(
             _modify, 'f2c_save_status',
-            f'repair: wired {added_count} edges{target_str}')
+            f'repair: wired {added_count} edges{target_str}',
+        )
 
     # ── Delete topo nodes / rows ─────────────────────────────────────────────
 
     def delete_topo_node(self, name: str) -> None:
-        if not name or name not in self.topo_nodes:
-            self.delete_status = f'ERROR: {name!r} not in map'
-            return
         if not self._topo_doc:
             self.delete_status = 'ERROR: map not loaded'
             return
+        if not name or not self._topo_doc.has_node(name):
+            self.delete_status = f'ERROR: {name!r} not in map'
+            return
 
-        new_nodes = {}
-        for nm, nd in self.topo_nodes.items():
-            if nm == name:
-                continue
-            edges = [e for e in nd.get('edges', []) if e != name]
-            new_nodes[nm] = {**nd, 'edges': edges}
-        self.topo_nodes = new_nodes
         if self.topo_selected == name:
             self.topo_selected = None
         self.delete_status = f'deleting {name}…'
 
         def _modify(file_doc):
-            kept = []
-            for entry in file_doc.get('nodes', []):
-                n = entry.get('node', {})
-                if n.get('name') == name:
-                    continue
-                n['edges'] = [e for e in n.get('edges', [])
-                              if e.get('node') != name]
-                kept.append(entry)
-            file_doc['nodes'] = kept
+            file_doc.remove_node(name)
 
         self._persist_and_reload(_modify, 'delete_status', f'deleted {name}')
 
     def delete_row(self, row_id: int) -> None:
-        targets = {nm for nm, nd in self.topo_nodes.items()
-                   if nd.get('meta', {}).get('row_id') == row_id}
+        targets = {node.name for node in self._topo_doc.nodes
+                   if node.meta.get('row_id') == row_id}
         if not targets:
             self.delete_status = f'ERROR: no nodes for row {row_id}'
             return
@@ -1697,27 +1595,12 @@ class NiceGuiNode(Node):
             self.delete_status = 'ERROR: map not loaded'
             return
 
-        new_nodes = {}
-        for nm, nd in self.topo_nodes.items():
-            if nm in targets:
-                continue
-            edges = [e for e in nd.get('edges', []) if e not in targets]
-            new_nodes[nm] = {**nd, 'edges': edges}
-        self.topo_nodes = new_nodes
         if self.topo_selected in targets:
             self.topo_selected = None
         self.delete_status = f'deleting row {row_id} ({len(targets)} nodes)…'
 
         def _modify(file_doc):
-            kept = []
-            for entry in file_doc.get('nodes', []):
-                n = entry.get('node', {})
-                if n.get('name') in targets:
-                    continue
-                n['edges'] = [e for e in n.get('edges', [])
-                              if e.get('node') not in targets]
-                kept.append(entry)
-            file_doc['nodes'] = kept
+            file_doc.remove_nodes(targets)
 
         self._persist_and_reload(_modify, 'delete_status',
                                   f'deleted row {row_id} ({len(targets)} nodes)')
@@ -1725,10 +1608,10 @@ class NiceGuiNode(Node):
     # ── Confirmation dialogs ─────────────────────────────────────────────────
 
     async def confirm_delete_node(self, name: str | None) -> None:
-        if not name or name not in self.topo_nodes:
+        if not name or not self._topo_doc.has_node(name):
             return
-        nd = self.topo_nodes[name]
-        rid = nd.get('meta', {}).get('row_id')
+        nd = self._topo_doc.get_node(name)
+        rid = nd.meta.get('row_id')
         with ui.dialog() as d, ui.card():
             ui.label(f'Delete topo node "{name}"?').classes('font-semibold')
             if rid is not None:
@@ -1746,8 +1629,8 @@ class NiceGuiNode(Node):
             self.delete_topo_node(name)
 
     async def confirm_delete_row(self, row_id: int) -> None:
-        targets = sorted(nm for nm, nd in self.topo_nodes.items()
-                         if nd.get('meta', {}).get('row_id') == row_id)
+        targets = sorted(node.name for node in self._topo_doc.nodes
+                         if node.meta.get('row_id') == row_id)
         if not targets:
             return
         with ui.dialog() as d, ui.card():
@@ -1765,35 +1648,17 @@ class NiceGuiNode(Node):
     # ── existing helpers below ───────────────────────────────────────────────
 
     def _patch_node_role(self, node_name: str, role: str) -> None:
-        if node_name in self.topo_nodes:
-            nd = dict(self.topo_nodes[node_name])
-            nd['meta'] = {**nd.get('meta', {}), 'row_role': role}
-            new_nodes = dict(self.topo_nodes)
-            new_nodes[node_name] = nd
-            self.topo_nodes = new_nodes
-        for entry in self._topo_doc.get('nodes', []):
-            n = entry.get('node', {})
-            if n.get('name') == node_name:
-                entry.get('meta', {})['row_role'] = role
-                n.get('properties', {})['row_role'] = role
-                break
-        map_name = self._topo_doc.get('name', 'mixed_test_map')
+        map_name = self._topo_doc.name
         map_file = f'/workspace/maps/{map_name}'
         def _write():
             try:
                 if not os.path.exists(map_file):
                     return
-                with open(map_file, encoding='utf-8') as f:
-                    doc = yaml.safe_load(f)
-                for entry in doc.get('nodes', []):
-                    n = entry.get('node', {})
-                    if n.get('name') == node_name:
-                        entry.get('meta', {})['row_role'] = role
-                        n.get('properties', {})['row_role'] = role
-                        break
-                with open(map_file, 'w', encoding='utf-8') as f:
-                    yaml.dump(doc, f, default_flow_style=False,
-                               allow_unicode=True, sort_keys=False)
+                doc = parse_topo_yaml(map_file)
+                if doc.has_node(node_name):
+                    node = doc.get_node(node_name)
+                    node.patch_role(role)
+                dump_topo_yaml(doc, map_file)
             except Exception as e:
                 self.get_logger().error(f'_patch_node_role failed: {e}')
         threading.Thread(target=_write, daemon=True).start()
@@ -1862,10 +1727,10 @@ class NiceGuiNode(Node):
                         # the clickable node DOM.
                         with ui.element('div').classes('relative w-full'):
                             map_html = ui.html(
-                                _build_svg(self.topo_nodes, None, None)
+                                _build_svg(self._topo_doc, None, None)
                             ).classes('w-full')
                             robot_html = ui.html(
-                                _build_robot_svg(self.topo_nodes, None)
+                                _build_robot_svg(self._topo_doc.nodes, None)
                             ).classes('absolute top-0 left-0 w-full').style(
                                 'pointer-events:none')
 
@@ -2023,7 +1888,7 @@ class NiceGuiNode(Node):
 
         def on_node_clicked(e) -> None:
             n = (e.args or {}).get('node')
-            if n and n in self.topo_nodes:
+            if n and self._topo_doc.has_node(n):
                 self.topo_selected = n
         ui.on('topo_node_clicked', on_node_clicked)
 
@@ -2051,7 +1916,7 @@ class NiceGuiNode(Node):
             if odom is not None:
                 px, py  = odom.pose.pose.position.x, odom.pose.pose.position.y
                 gps_str = (f'\n{gps.latitude:.5f}\n{gps.longitude:.5f}'
-                           if gps and gps.status.status >= 0 else '')
+                        if gps and gps.status.status >= 0 else '')
                 pose_lbl.set_text(f'({px:.2f}, {py:.2f}){gps_str}')
             else:
                 pose_lbl.set_text('no odom')
@@ -2087,43 +1952,44 @@ class NiceGuiNode(Node):
 
             rp = self._robot_pose()
             rp_key = None if rp is None else (round(rp[0], 1), round(rp[1], 1),
-                                              round(rp[2], 2))
+                                            round(rp[2], 2))
             snap = {'sel': self.topo_selected, 'cur': self.topo_current,
                     'stat': self.topo_nav_status, 'nav': self.topo_navigating,
-                    'nodes': id(self.topo_nodes), 'robot': rp_key}
+                    'nodes': set(self._topo_doc.nodes), 'robot': rp_key}
+            nonlocal _prev
             changed = {k for k, v in snap.items() if _prev.get(k) != v}
             if not changed:
                 return
             _prev.update(snap)
 
             if changed & {'robot', 'nodes'}:
-                robot_html.set_content(_build_robot_svg(self.topo_nodes, rp))
+                robot_html.set_content(_build_robot_svg(self._topo_doc.nodes, rp))
 
             if changed & {'sel', 'cur', 'nodes'}:
                 map_html.set_content(
-                    _build_svg(self.topo_nodes, self.topo_selected,
-                               self.topo_current))
+                    _build_svg(self._topo_doc, self.topo_selected,
+                            self.topo_current))
                 inject_click_js()
 
             if changed & {'sel', 'nodes'}:
                 node_col.clear()
                 with node_col:
-                    for nname in sorted(self.topo_nodes):
-                        nd       = self.topo_nodes[nname]
-                        is_row   = nd.get('meta', {}).get('row_id') is not None
-                        rid_v    = nd.get('meta', {}).get('row_id', '')
-                        rrole_v  = nd.get('meta', {}).get('row_role', '')
-                        glat     = nd.get('meta', {}).get('gps_lat', '')
-                        glon     = nd.get('meta', {}).get('gps_lon', '')
+                    node_names = sorted(self._topo_doc.nodes, key=attrgetter('name'))
+                    for nd in node_names:
+                        is_row   = nd.meta.get('row_id') is not None
+                        rid_v    = nd.meta.get('row_id', '')
+                        rrole_v  = nd.meta.get('row_role', '')
+                        glat     = nd.meta.get('gps_lat', '')
+                        glon     = nd.meta.get('gps_lon', '')
                         title    = (f'Row {rid_v} {rrole_v} | {glat} {glon}'.strip()
                                     if is_row else f'{glat} {glon}'.strip())
                         cls      = ('node-item'
-                                    + (' sel' if nname == self.topo_selected else '')
+                                    + (' sel' if nd.name == self.topo_selected else '')
                                     + (' row' if is_row else ''))
-                        n = nname
+                        n = nd.name
                         ui.html(
                             f'<div class="{cls}" title="{title}">'
-                            f'{nname}{"  · row" if is_row else ""}</div>'
+                            f'{nd.name}{"  · row" if is_row else ""}</div>'
                         ).on('click', lambda _, n=n: setattr(self, 'topo_selected', n))
 
             cur_lbl.set_text(self.topo_current or '—')
@@ -2134,7 +2000,7 @@ class NiceGuiNode(Node):
                 'color:#cf222e' if 'fail' in self.topo_nav_status else
                 'color:#1a7f37' if self.topo_nav_status == 'arrived' else 'color:#57606a')
             can_go = (bool(self.topo_selected) and not self.topo_navigating
-                      and not self.soft_estop_active)
+                    and not self.soft_estop_active)
             go_btn.set_enabled(can_go)
             stop_btn.set_enabled(self.topo_navigating)
             del_btn.set_enabled(bool(self.topo_selected))
@@ -2375,15 +2241,15 @@ class NiceGuiNode(Node):
         async def do_repair():
             cur = self.topo_current
             default_base = ''
-            if cur not in ('—', 'none', 'None', '', None) and cur in self.topo_nodes:
+            if cur not in ('—', 'none', 'None', '', None) and self._topo_doc.has_node(cur):
                 default_base = cur
-            elif self.topo_selected and self.topo_selected in self.topo_nodes:
+            elif self.topo_selected and self._topo_doc.has_node(self.topo_selected):
                 default_base = self.topo_selected
 
             row_count = sum(
-                1 for nd in self.topo_nodes.values()
-                if nd.get('meta', {}).get('row_id') is not None
-                and nd.get('meta', {}).get('row_role') == 'entry'
+                1 for nd in self._topo_doc.nodes
+                if nd.meta.get('row_id') is not None
+                and nd.meta.get('row_role') == 'entry'
             )
 
             with ui.dialog() as d, ui.card():
@@ -2415,7 +2281,7 @@ class NiceGuiNode(Node):
                 return
 
             base = (base_input.value or '').strip()
-            if base and base not in self.topo_nodes:
+            if base and not self._topo_doc.has_node(base):
                 self.f2c_save_status = f'ERROR: base node {base!r} not in map'
                 return
             self.repair_row_connectivity(connect_to=base or None)
@@ -2557,18 +2423,20 @@ class NiceGuiNode(Node):
                 ).props('color=negative no-caps flat')
 
             # ── available rows refresh ────────────────────────────────────────
-            _avail_prev = [None]
+            _avail_prev: list[set[TopoNode]] = [set()]
             def _refresh_available():
-                if id(self.topo_nodes) == _avail_prev[0]:
+                nonlocal _avail_prev
+                snap = set(self._topo_doc.nodes)
+                if snap != _avail_prev[0]:
                     return
-                _avail_prev[0] = id(self.topo_nodes)
+                _avail_prev[0] = snap
                 rows: dict[int, str] = {}
-                for nname, nd in self.topo_nodes.items():
-                    meta = nd.get('meta', {})
+                for nd in self._topo_doc.nodes:
+                    meta = nd.meta
                     rid  = meta.get('row_id')
                     if rid is not None and meta.get('row_role', '') == 'entry':
                         try:
-                            rows[int(rid)] = nname
+                            rows[int(rid)] = nd.name
                         except (TypeError, ValueError):
                             pass
                 available_col.clear()
@@ -2624,9 +2492,9 @@ class NiceGuiNode(Node):
                         return
                     rows_for_store = [
                         next(
-                            (nname for nname, nd in self.topo_nodes.items()
-                             if nd.get('meta', {}).get('row_id') == rid
-                             and nd.get('meta', {}).get('row_role') == 'entry'),
+                            (nd.name for nd in self._topo_doc.nodes
+                             if nd.meta.get('row_id') == rid
+                             and nd.meta.get('row_role') == 'entry'),
                             f'ROW_{rid}_IN',
                         )
                         for rid, _, _ in mission_queue
@@ -2782,8 +2650,8 @@ class NiceGuiNode(Node):
         # Resolve row_id → (entry_node, exit_node) from current topo map.
         row_entry: dict[int, str] = {}
         row_exit:  dict[int, str] = {}
-        for nname, nd in self.topo_nodes.items():
-            meta = nd.get('meta', {})
+        for nd in self._topo_doc.nodes:
+            meta = nd.meta
             rid  = meta.get('row_id')
             role = meta.get('row_role', '')
             if rid is None:
@@ -2793,9 +2661,9 @@ class NiceGuiNode(Node):
             except (TypeError, ValueError):
                 continue
             if role == 'entry':
-                row_entry[rid_int] = nname
+                row_entry[rid_int] = nd.name
             elif role == 'exit':
-                row_exit[rid_int] = nname
+                row_exit[rid_int] = nd.name
 
         missing_entry = [rid for rid, _, _ in queue if rid not in row_entry]
         missing_exit  = [rid for rid, _, _ in queue if rid not in row_exit]
@@ -2941,7 +2809,7 @@ class NiceGuiNode(Node):
         if not self._topo_doc:
             return 'ERROR: no map loaded'
 
-        map_name = self._topo_doc.get('name', 'mixed_test_map')
+        map_name = self._topo_doc.name
         map_file = f'/workspace/maps/{map_name}'
 
         # Pick next available archive index
@@ -2953,46 +2821,20 @@ class NiceGuiNode(Node):
         try:
             # Read from disk so we archive the persisted state, not just memory
             if os.path.exists(map_file):
-                with open(map_file, encoding='utf-8') as f:
-                    on_disk = yaml.safe_load(f)
+                on_disk = parse_topo_yaml(map_file)
             else:
                 on_disk = copy.deepcopy(self._topo_doc)
 
-            with open(archive_path, 'w', encoding='utf-8') as f:
-                yaml.dump(on_disk, f, default_flow_style=False,
-                           allow_unicode=True, sort_keys=False)
+            dump_topo_yaml(on_disk, archive_path)
 
             # Build empty map doc preserving header fields.
-            # CRITICAL: carry forward `definitions` (BT XML bindings) and
-            # `actions` (action-server config for navigate_to_pose /
-            # limbic_row_follow). Without them, _persist_and_reload reloads a
-            # doc with no action config and every edge fails with
-            # "No action config for 'NavigateToPose'".
-            empty_doc = {
-                'meta':           {'last_updated': datetime.now(UTC).strftime('%d-%m-%Y_%H-%M-%S')},
-                'name':           map_name,
-                'metric_map':     self._topo_doc.get('metric_map', map_name),
-                'pointset':       map_name,
-                'transformation': copy.deepcopy(
-                    self._topo_doc.get('transformation', {})),
-                'definitions':    copy.deepcopy(
-                    self._topo_doc.get('definitions', {})),
-                'actions':        copy.deepcopy(
-                    self._topo_doc.get('actions', {})),
-                'nodes':          [],
-            }
-            with open(map_file, 'w', encoding='utf-8') as f:
-                yaml.dump(empty_doc, f, default_flow_style=False,
-                           allow_unicode=True, sort_keys=False)
-
-            self._topo_doc  = empty_doc
-            self.topo_nodes = {}
+            empty_doc = self._topo_doc.clone_empty(map_name)
+            dump_topo_yaml(empty_doc, map_file)
+            self._topo_doc = empty_doc
 
             # Republish so topo nav stack sees the cleared map immediately
             try:
-                msg = __import__('std_msgs.msg', fromlist=['String']).String()
-                msg.data = json.dumps(empty_doc, ensure_ascii=False)
-                self._topo_map_pub.publish(msg)
+                self._topo_map_pub.publish(_topo_to_msg(empty_doc))
             except Exception:
                 pass
 
@@ -3915,7 +3757,7 @@ class NiceGuiNode(Node):
                 'color:#57606a')
 
             async def _do_archive():
-                map_name = self._topo_doc.get('name', '?') if self._topo_doc else '?'
+                map_name = self._topo_doc.name if self._topo_doc else '?'
                 with ui.dialog() as dlg, ui.card():
                     ui.label('Archive and clear map').classes('font-semibold')
                     ui.label(
