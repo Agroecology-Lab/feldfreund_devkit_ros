@@ -938,7 +938,7 @@ class NiceGuiNode(Node):
     # ── node dropping ─────────────────────────────────────────────────────────
 
     def drop_topo_node(self, name: str, row_id: int | None,
-                       row_role: str | None) -> None:
+                       row_role: str = 'entry') -> None:
         name = re.sub(r'[^A-Z0-9_]', '', name.strip().upper().replace(' ', '_'))
         if not name:
             self.drop_status = 'ERROR: node name required'
@@ -964,7 +964,7 @@ class NiceGuiNode(Node):
             connect_to = None
         if not connect_to and self.topo_selected and self._topo_doc.has_node(self.topo_selected):
             connect_to = self.topo_selected
-        map_name  = self._topo_doc.name or 'mixed_test_map'
+        map_name  = self._topo_doc.name
         nav_frame = self._topo_doc.transformation.get('topo_frame_id', 'map')
         is_row    = row_id is not None
 
@@ -976,21 +976,34 @@ class NiceGuiNode(Node):
         gps = self.latest_gps
         gps_meta: dict = {}
         if gps is not None and gps.status.status >= 0:
-            gps_meta = {'gps_lat': round(gps.latitude, 7), 'gps_lon': round(gps.longitude, 7),
-                        'gps_fix_type': int(gps.status.status),
-                        'gps_hdop': None}
+            gps_meta = {
+                'gps_lat': round(gps.latitude, 7),
+                'gps_lon': round(gps.longitude, 7),
+                'gps_fix_type': int(gps.status.status),
+                'gps_hdop': None,
+            }
 
-        row_meta: dict = {'row_id': row_id, 'row_role': row_role or 'entry'} if is_row else {}
-        timestamp = datetime.now(UTC).strftime('%d-%m-%Y_%H-%M-%S')
-        node_meta_disk = {'map': map_name, 'node': name, 'pointset': map_name}
-        node_meta_ui   = {**node_meta_disk, 'dropped_by': 'webui',
-                          'timestamp': timestamp, **gps_meta, **row_meta}
+        row_meta: dict = {}
+        if is_row:
+            row_meta = {
+                'row_id': row_id,
+                'row_role': row_role,
+            }
 
         self._topo_doc.add_node(TopoNode(
             name=name,
             nav_frame=nav_frame,
-            pose=TopoPose(x=x, y=y),
-            meta=node_meta_ui,
+            x=x,
+            y=y,
+            meta={
+                'map': map_name,
+                'node': name,
+                'pointset': map_name,
+                'dropped_by': 'webui',
+                'timestamp': datetime.now(UTC).strftime('%d-%m-%Y_%H-%M-%S'),
+                **gps_meta,
+                **row_meta
+            },
             properties=TopoProperties(xy_goal_tolerance=xy_tol, yaw_goal_tolerance=yaw_tol),
             verts=[
                 Vector2(x=-vert_r, y=-vert_r),
@@ -1388,11 +1401,13 @@ class NiceGuiNode(Node):
         # consecutive nodes. IN→OUT row-follow edges are untouched.
         def _add_headland_edge(p: str, q: str) -> None:
             """Bidirectional nav_to_pose edge p<->q in both graph structures."""
+
+            edge_name = f'{p}_{q}'
+
             for a, b in ((p, q), (q, p)):
-                e = list(new_topo_nodes[a]['edges'])
-                if b not in e:
-                    e.append(b)
-                    new_topo_nodes[a] = {**new_topo_nodes[a], 'edges': e}
+                a_node = new_topo_nodes[a]
+                a_node.add_edge(TopoEdge(action=_NAV_ACTION, edge_id=edge_name, node=b))
+
             for node in new_topo_nodes.values():
                 if node.name not in (p, q):
                     continue
@@ -1404,22 +1419,15 @@ class NiceGuiNode(Node):
         for a_name, b_name in _headland_neighbour_pairs(all_pts):
             _add_headland_edge(a_name, b_name)
 
-        graph_splice: list = []
         if connect_to:
             first_in = row_names[added[0]][0]
             last_out = row_names[added[-1]][1]
 
             for tgt in (first_in, last_out):
-                c_e = list(new_topo_nodes[connect_to].edges)
-                if tgt not in c_e:
-                    c_e.append(tgt)
-                t_e = list(new_topo_nodes[tgt].edges)
-                if connect_to not in t_e:
-                    t_e.append(connect_to)
-                for node in new_topo_nodes.values():
-                    if node.name == tgt:
-                        node.add_edge(connect_to, action=_NAV_ACTION)
-                graph_splice.append((connect_to, tgt))
+                if tgt not in new_topo_nodes:
+                    continue
+                node = new_topo_nodes[tgt]
+                node.add_edge(connect_to, action=_NAV_ACTION)
 
         skip_str   = f' (skipped {len(skipped)} dup ids)' if skipped else ''
         splice_str = f' · spliced @ {connect_to}' if connect_to else ' · standalone'
@@ -1449,12 +1457,6 @@ class NiceGuiNode(Node):
                 if entry.name in existing:
                     continue
                 file_doc.nodes.append(entry)
-            for src, tgt in graph_splice:
-                for entry in file_doc.nodes:
-                    if entry.name != src:
-                        continue
-                    entry.add_edge(tgt, action=_NAV_ACTION)
-                    break
 
         self._persist_and_reload(
             _modify, 'f2c_save_status',
@@ -1646,10 +1648,6 @@ class NiceGuiNode(Node):
     # ── existing helpers below ───────────────────────────────────────────────
 
     def _patch_node_role(self, node_name: str, role: str) -> None:
-        if self._topo_doc.has_node(node_name):
-            nd = self._topo_doc.get_node(node_name)
-            nd.meta['row_role'] = role
-            nd.properties['row_role'] = role
         map_name = self._topo_doc.name
         map_file = f'/workspace/maps/{map_name}'
         def _write():
@@ -1657,11 +1655,9 @@ class NiceGuiNode(Node):
                 if not os.path.exists(map_file):
                     return
                 doc = parse_topo_yaml(map_file)
-                for entry in doc.nodes:
-                    if entry.name == node_name:
-                        entry.meta['row_role'] = role
-                        entry.properties['row_role'] = role
-                        break
+                if doc.has_node(node_name):
+                    node = doc.get_node(node_name)
+                    node.patch_role(role)
                 dump_topo_yaml(doc, map_file)
             except Exception as e:
                 self.get_logger().error(f'_patch_node_role failed: {e}')
@@ -1920,7 +1916,7 @@ class NiceGuiNode(Node):
             if odom is not None:
                 px, py  = odom.pose.pose.position.x, odom.pose.pose.position.y
                 gps_str = (f'\n{gps.latitude:.5f}\n{gps.longitude:.5f}'
-                           if gps and gps.status.status >= 0 else '')
+                        if gps and gps.status.status >= 0 else '')
                 pose_lbl.set_text(f'({px:.2f}, {py:.2f}){gps_str}')
             else:
                 pose_lbl.set_text('no odom')
@@ -1956,10 +1952,11 @@ class NiceGuiNode(Node):
 
             rp = self._robot_pose()
             rp_key = None if rp is None else (round(rp[0], 1), round(rp[1], 1),
-                                              round(rp[2], 2))
+                                            round(rp[2], 2))
             snap = {'sel': self.topo_selected, 'cur': self.topo_current,
                     'stat': self.topo_nav_status, 'nav': self.topo_navigating,
-                    'nodes': id(self._topo_doc.nodes), 'robot': rp_key}
+                    'nodes': set(self._topo_doc.nodes), 'robot': rp_key}
+            nonlocal _prev
             changed = {k for k, v in snap.items() if _prev.get(k) != v}
             if not changed:
                 return
@@ -1971,7 +1968,7 @@ class NiceGuiNode(Node):
             if changed & {'sel', 'cur', 'nodes'}:
                 map_html.set_content(
                     _build_svg(self._topo_doc, self.topo_selected,
-                               self.topo_current))
+                            self.topo_current))
                 inject_click_js()
 
             if changed & {'sel', 'nodes'}:
@@ -2003,7 +2000,7 @@ class NiceGuiNode(Node):
                 'color:#cf222e' if 'fail' in self.topo_nav_status else
                 'color:#1a7f37' if self.topo_nav_status == 'arrived' else 'color:#57606a')
             can_go = (bool(self.topo_selected) and not self.topo_navigating
-                      and not self.soft_estop_active)
+                    and not self.soft_estop_active)
             go_btn.set_enabled(can_go)
             stop_btn.set_enabled(self.topo_navigating)
             del_btn.set_enabled(bool(self.topo_selected))
@@ -2426,11 +2423,13 @@ class NiceGuiNode(Node):
                 ).props('color=negative no-caps flat')
 
             # ── available rows refresh ────────────────────────────────────────
-            _avail_prev = [None]
+            _avail_prev: list[set[TopoNode]] = [set()]
             def _refresh_available():
-                if id(self._topo_doc.nodes) == _avail_prev[0]:
+                nonlocal _avail_prev
+                snap = set(self._topo_doc.nodes)
+                if snap != _avail_prev[0]:
                     return
-                _avail_prev[0] = id(self._topo_doc.nodes)
+                _avail_prev[0] = snap
                 rows: dict[int, str] = {}
                 for nd in self._topo_doc.nodes:
                     meta = nd.meta
@@ -2829,11 +2828,6 @@ class NiceGuiNode(Node):
             dump_topo_yaml(on_disk, archive_path)
 
             # Build empty map doc preserving header fields.
-            # CRITICAL: carry forward `definitions` (BT XML bindings) and
-            # `actions` (action-server config for navigate_to_pose /
-            # limbic_row_follow). Without them, _persist_and_reload reloads a
-            # doc with no action config and every edge fails with
-            # "No action config for 'NavigateToPose'".
             empty_doc = self._topo_doc.clone_empty(map_name)
             dump_topo_yaml(empty_doc, map_file)
             self._topo_doc = empty_doc

@@ -90,6 +90,12 @@ class TopoNode:
         verts: list[Vector2] | None = None,
         meta: dict | None = None,
     ) -> None:
+        """Constructs a new topo node.
+
+        For convenience you can pass in an x/y pair instead of a full pose.
+        """
+
+
         if pose is not None:
             if x is not None or y is not None:
                 raise ValueError("cannot pass x and y if pose is provided")
@@ -144,10 +150,16 @@ class TopoNode:
         if isinstance(edge, NodeID):
             edge = TopoEdge(action=action or '', edge_id=f'{self._name}_{edge}', node=edge)
 
+        if edge.node == self._name:
+            return
+
         self._edges[edge.node] = edge
 
     def remove_edge(self, node_id: NodeID) -> None:
         self.remove_edges({node_id})
+
+    def is_connected_to(self, node_id: NodeID) -> bool:
+        return node_id in self._edges
 
     def remove_edges(self, node_ids: set[NodeID]) -> None:
         for node_id in node_ids:
@@ -168,6 +180,10 @@ class TopoNode:
             },
             'meta': self._meta,
         }
+
+    def patch_role(self, role: str) -> None:
+        self._properties['row_role'] = role
+        self._meta['row_role'] = role
 
 class TopoDoc:
     """Represents a topo document."""
@@ -272,6 +288,8 @@ class TopoDoc:
         }
 
     def clone_empty(self, map_name: str | None = None) -> 'TopoDoc':
+        """Clones the document and returns a new document with no nodes.
+        Retains metadata, actions, definitions, and transformation."""
         return TopoDoc(
             name=map_name or self._name,
             metric_map=self._metric_map,
