@@ -96,7 +96,7 @@
        joint on the drive roller is what the diff-drive plugin spins.
        ══════════════════════════════════════════════════════════════ -->
   <xacro:macro name="track" params="prefix y axis_y">
-    <!-- Belt body (visual + collision); fixed to base_link -->
+    <!-- Belt body (visual + collision) -->
     <link name="${prefix}_track_link">
       <visual>
         <origin xyz="0 0 0" rpy="0 0 0"/>
@@ -123,10 +123,11 @@
         <inertia ixx="0.8" ixy="0" ixz="0" iyy="2.0" iyz="0" izz="2.0"/>
       </inertial>
     </link>
-    <joint name="${prefix}_track_joint" type="fixed">
+    <joint name="${prefix}_track_joint" type="continuous">
       <parent link="base_link"/>
       <child  link="${prefix}_track_link"/>
       <origin xyz="0 ${y} 0" rpy="0 0 0"/>
+      <axis xyz="0 ${axis_y} 0"/>
     </joint>
 
     <!-- Drive roller (front) — full track height; forms the rounded front end -->
@@ -570,20 +571,8 @@
       <right_track><link>right_track_link</link></right_track>
 
       <tracks_separation>${track_sep}</tracks_separation>
-      <!-- Was <tracks_height> (typo'd, silently dropped/defaulted by
-           the plugin's LoadParam fallback). Correct element name per
-           the gz-sim TrackedVehicle schema is singular "track_height". -->
-      <track_height>${drive_radius}</track_height>  <!-- half-height to contact surface, not full box height -->
+      <tracks_height>${drive_radius}</tracks_height>
       <steering_efficiency>0.5</steering_efficiency>
-
-      <!-- Vehicle-level speed limit. min_velocity/max_velocity are NOT
-           TrackController parameters (they were previously placed there
-           and silently ignored) — they belong here, under
-           TrackedVehicle's <linear_velocity>. -->
-      <linear_velocity>
-        <min_velocity>-1.5</min_velocity>
-        <max_velocity>1.5</max_velocity>
-      </linear_velocity>
 
       <!-- Explicit global topic; without this the plugin defaults to
            /model/{entity_name}/cmd_vel which the bridge does not route. -->
@@ -597,6 +586,8 @@
     <plugin filename="gz-sim-track-controller-system"
             name="gz::sim::systems::TrackController">
       <link>left_track_link</link>
+      <min_velocity>-1.5</min_velocity>
+      <max_velocity>1.5</max_velocity>
     </plugin>
   </gazebo>
 
@@ -604,6 +595,8 @@
     <plugin filename="gz-sim-track-controller-system"
             name="gz::sim::systems::TrackController">
       <link>right_track_link</link>
+      <min_velocity>-1.5</min_velocity>
+      <max_velocity>1.5</max_velocity>
     </plugin>
   </gazebo>
 
@@ -634,7 +627,6 @@
       <wheel_separation>${track_sep}</wheel_separation>
       <wheel_radius>${drive_radius}</wheel_radius>
 
-      <!-- unused sink topic: never publish real cmd_vel here -->
       <topic>_unused_diffdrive_cmd_vel</topic>
 
       <odom_topic>odom</odom_topic>
