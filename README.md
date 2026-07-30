@@ -3,11 +3,11 @@
 
 An open-source, containerised ROS2 Jazzy stack for autonomous agricultural robotics. This repository provides the drivers and orchestration for the Sowbot platform, featuring RTK-GNSS localisation and ESP32-based hardware control.
 
-Development is led by the <a href="https://agroecologylab.org.uk" target="_blank">Agroecology Lab</a> building on the core developed by <a href="https://github.com/zauberzeug/" target="_blank">Zauberzeug</a>.
+Development is led by the <a href="https://agroecologylab.org.uk" target="_blank">Agroecology Lab</a> building on the core developed by <a href="https://zauberzeug.com/" target="_blank">Zauberzeug</a>.
 
-Reference open hardware stack(s) under development at [Sowbot.co.uk](https://sowbot.co.uk) in addition to orginal [Zauberzeug Field Friend](https://github.com/zauberzeug/)
-
-[Quick start](https://github.com/Agroecology-Lab/feldfreund_devkit_ros#quick-start) **Collaborators welcome.** See [CONTRIBUTING.md](CONTRIBUTING.md). 
+Reference open hardware stack(s) under development at [Sowbot.co.uk](https://sowbot.co.uk) 
+[Quick start](https://github.com/Agroecology-Lab/feldfreund_devkit_ros#quick-start) 
+**Collaborators welcome.** See [CONTRIBUTING.md](CONTRIBUTING.md). 
 
 Contact: [sowbot.co.uk](https://sowbot.co.uk)
 
@@ -31,8 +31,8 @@ Contact: [sowbot.co.uk](https://sowbot.co.uk)
 | M2a | fusioncore Nav2 bridge | `fusioncore_node` launched via `devkit.launch.py`. Nav2 topic remapping shim wired. Pending: end-to-end test on live hardware. | ~75% Done | 4 | 2026 |
 | M3 | Open-field row-crop scenario | Live node-drop in UI. F2C row plan generator implemented in `ui_node.py` (corners → swaths → topo rows via `_run_f2c()`). YAML written to `/workspace/maps/`, `switch_topological_map` with fallback. Topo map auto-generated at container start. Multi-row traversal across generated swaths confirmed in sim. Pending: tmap2 authoring from real field survey; F2C obstacle costmap integration. | ~70% Done | 4 | 2026 |
 | M4 | RTK-GNSS localisation | Full pipeline implemented: dual F9P, shims, UKF fusion, NTRIP. Lever-arm offsets in `fusioncore.yaml` are zeroed placeholders (commented `# measured` TODOs). Pending: antenna lever-arm measurement, live hardware test. | ~75% Done | 3 | 2026 |
-| M5 | Dual-SBC ROS 2 stack | `manage.py` detects crossover interface, builds `CYCLONEDDS_URI` peer config and injects into Docker. `neo.launch.py` and `devkit.launch.py` finalised for Limbic+Neo split. `zenoh_config.json` not present in repo (listed as pending). No `rmw_zenoh_cpp` launch args visible in current launch files — DDS peer path is the active one. | ~50% Done | 3 | 2026 |
-| M6 | Gazebo simulation | `sowbot_sim.launch.py` + `sim_nav.launch.py` fully restructured. `kill_fake_nav2_on_clock` implemented. `use_sim_time=True` now threaded through topo stack. **Multi-row mission following demonstrated end-to-end (see video above).** | ~90% Done | 4 | 2026 |
+| M5 | Dual-SBC ROS 2 stack | `manage.py` detects crossover interface, builds `CYCLONEDDS_URI` peer config and injects into Docker. `neo.launch.py` and `devkit.launch.py` finalised for Limbic+Neo split. DDS peer path is the active one. | ~90% Done | 3 | 2026 |
+| M6 | Gazebo simulation | `sowbot_sim.launch.py` + `sim_nav.launch.py` fully restructured. `kill_fake_nav2_on_clock` implemented. `use_sim_time=True` now threaded through topo stack. **Multi-row mission following demonstrated end-to-end (see video above).** |  Done | 4 | 2026 |
 | M7 | Sentor safety monitoring | `sowbot_monitor.yaml` fully authored (e-stop, bumpers, battery, camera, odom, neo_vision heartbeat, node monitors). `sentor_node.py` wired into `devkit.launch.py`. Pending: smoke-test on live hardware; battery voltage cutoff needs field confirmation (`# TODO: CONFIRM` in YAML). | ~75% Done | 3 | 2026 |
 | M8 | Visual crop-row navigation | `sowbot_row_follow` package implemented. ExG+Otsu, visual servo, `limbic_row_follow_node.py` as Nav2 action server. Cancel and heartbeat-loss safety. TSM row-swap hold with 6-second debounce implemented. Camera calibration params required before field use. Pending: camera calibration, field test. | ~75% Done | 3 | 2026 |
 | **PRODUCTION** | | | | | **~2027** |
