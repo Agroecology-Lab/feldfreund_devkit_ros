@@ -3266,7 +3266,7 @@ class NiceGuiNode(Node):
                         scale = float(plant_scale.value or 100) / 100.0
                         cat = scale_category.value or 'all'
                         model = plant_model.value or 'plant'
-                        weed_density = int(weed_density_scale.value) or 100 
+                        weed_density = int(weed_density_scale.value) if weed_density_scale.value is not None else 100
                         # Validate selected model exists on disk
                         model_dir = _CROP_MODELS_DIR / model
                         if not model_dir.is_dir() or not (model_dir / 'model.sdf').is_file():
