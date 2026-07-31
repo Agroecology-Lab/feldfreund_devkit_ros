@@ -3266,8 +3266,7 @@ class NiceGuiNode(Node):
                         scale = float(plant_scale.value or 100) / 100.0
                         cat = scale_category.value or 'all'
                         model = plant_model.value or 'plant'
-                        weed_density = int(weed_density_scale.value) or 100 #Grab weed_density value and convert to decimal TODO update with weed_density widget
-                        # density_cat = scale_category.value or 'all' # TODO add general plant selector 
+                        weed_density = int(weed_density_scale.value) or 100 
                         # Validate selected model exists on disk
                         model_dir = _CROP_MODELS_DIR / model
                         if not model_dir.is_dir() or not (model_dir / 'model.sdf').is_file():
@@ -3423,10 +3422,6 @@ class NiceGuiNode(Node):
                                 suffix='%'
                             ).classes('flex-1')
                             ui.label('on').classes('text-xs').style('color:#8c959f')
-                            # scale_category = ui.select(
-                            #     options=['all', 'crop', 'weed', 'irrigation'],
-                            #     value='all'
-                            # ).classes('w-28')
 
                 # Upload section
                 ui.html('<div class="sec-label mt-2">Upload new model</div>')
