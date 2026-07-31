@@ -973,10 +973,9 @@ if __name__ == '__main__':
 
     # Weeds cluster near crops; default to ~65% of the crop count for a visibly
     # weedy field (above Forest3D's built-in default of 50). Pass 0 to disable.
-    weed_density = (args.weed_density if args.weed_density is not None
+    weed_density = (int(density * (args.weed_density / 100)) if args.weed_density is not None
                     else int(density * 0.65))
     print(f"  Weed density: {weed_density}")
-
     write_forest3d_yaml(params, gps_lat, gps_lon, args.out, density,
                         args.models_path, weed_density)
     write_spawn_pose(spawn_world_x, spawn_world_y, args.spawn_z, args.spawn_out)
