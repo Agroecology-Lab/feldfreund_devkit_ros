@@ -3266,6 +3266,8 @@ class NiceGuiNode(Node):
                         scale = float(plant_scale.value or 100) / 100.0
                         cat = scale_category.value or 'all'
                         model = plant_model.value or 'plant'
+                        weed_density = int(weed_density_scale.value) or 100 #Grab weed_density value and convert to decimal TODO update with weed_density widget
+                        # density_cat = scale_category.value or 'all' # TODO add general plant selector 
                         # Validate selected model exists on disk
                         model_dir = _CROP_MODELS_DIR / model
                         if not model_dir.is_dir() or not (model_dir / 'model.sdf').is_file():
@@ -3284,7 +3286,8 @@ class NiceGuiNode(Node):
                              '--row-width', str(row_w_m),
                              '--plant-scale', str(scale),
                              '--scale-category', cat,
-                             '--crop-model', model],
+                             '--crop-model', model,
+                             '--weed-density', str(weed_density)],
                             capture_output=True, text=True, timeout=120, check=False
                         )
                         if r.returncode != 0:
@@ -3295,6 +3298,8 @@ class NiceGuiNode(Node):
                         summary = (f'world rebuilt (spacing={spacing_m:.2f}m, '
                                   f'row={row_w_m:.2f}m, '
                                   f'scale={scale:.2f} on {cat}, '
+                                  f'weed density={weed_density:.2f}, '
+
                                   f'model={model})')
                         _gazebo_lbl.set_text(f'{summary} — relaunch to view')
                         _gazebo_lbl.style('color:#1a7f37')
@@ -3341,10 +3346,10 @@ class NiceGuiNode(Node):
                         _gazebo_lbl.style('color:#cf222e')
 
                 # ── Plant Placement Controls ─────────────────────────────
-                # Configure plant spacing, row width, and model before
+                # Configure plant spacing, weed density row width, and model before
                 # rebuilding. Values are stored locally; --plant-spacing and
                 # --row-width are passed to topo_to_forest3d.py on rebuild.
-                # Passed as --plant-scale, --scale-category, and --crop-model.
+                # Passed as --plant-scale, --weed-density --scale-category, and --crop-model.
                 _CROP_MODELS_DIR = Path('/workspace/models/crop')
 
                 def _refresh_crop_models():
@@ -3407,6 +3412,21 @@ class NiceGuiNode(Node):
                             options=_refresh_crop_models(),
                             value=_refresh_crop_models()[0] if _refresh_crop_models() else None
                         ).classes('w-full')
+
+                # Row 3: weed_density + category (coming)
+                with ui.row().classes('w-full gap-4 mt-1'):
+                    with ui.column().classes('flex-1 gap-0'):
+                        ui.html('<div class="sec-label">Weed Density</div>')
+                        with ui.row().classes('items-center gap-1 w-full'):
+                            weed_density_scale = ui.number(
+                                value=100, min=0, max=100, step=5, precision=0,
+                                suffix='%'
+                            ).classes('flex-1')
+                            ui.label('on').classes('text-xs').style('color:#8c959f')
+                            # scale_category = ui.select(
+                            #     options=['all', 'crop', 'weed', 'irrigation'],
+                            #     value='all'
+                            # ).classes('w-28')
 
                 # Upload section
                 ui.html('<div class="sec-label mt-2">Upload new model</div>')
