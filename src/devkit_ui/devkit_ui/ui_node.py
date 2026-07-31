@@ -17,7 +17,7 @@ import threading
 import time
 import traceback
 import zipfile
-from collections.abc import Callable, Iterator
+from collections.abc import Callable
 from datetime import UTC, datetime
 from itertools import pairwise
 from operator import attrgetter
@@ -35,7 +35,6 @@ from geometry_msgs.msg import Twist
 from nav_msgs.msg import Odometry
 from nicegui import app, ui, ui_run
 from nicegui import run as ng_run
-from nicegui.events import ClickEventArguments
 from rclpy.executors import ExternalShutdownException
 from rclpy.node import Node
 from rclpy.qos import (
@@ -62,6 +61,7 @@ from tf2_ros.transform_listener import TransformListener
 
 # MISSION: store owns missions.yaml, scheduling, and run recording.
 from devkit_ui.actions import ACTIONS, action_ros_msgs
+from devkit_ui.constants import NODE_NAME
 from devkit_ui.missions import MissionStore
 from devkit_ui.models import (
     NodeID,
@@ -81,7 +81,12 @@ from devkit_ui.obstacles import (
     attach_mission_sidebar_controls,
     attach_nav_card,
 )
+from devkit_ui.pages.run.joystick_control_card import JoystickControlCard
+from devkit_ui.pages.run.node_map_card import NodeMapCard
 from devkit_ui.parse import dump_topo_yaml, parse_topo_json, parse_topo_yaml
+from devkit_ui.stores.global_store import global_store
+from devkit_ui.stores.run_store import run_store
+from devkit_ui.utils.topo_renderer import _build_robot_svg, _build_svg
 
 _TOPO_SRV_OK = False
 try:
@@ -162,73 +167,29 @@ def _headland_neighbour_pairs(coords: dict) -> list:
     return out
 _NAME_RE = re.compile(r'^[A-Z0-9_]+$')
 
-# ── Global CSS ────────────────────────────────────────────────────────────────
+# ── Import CSS ────────────────────────────────────────────────────────────────
 
-_GLOBAL_CSS = """
-<style>
-:root {
-  --bg:        #f6f8fa;
-  --bg-card:   #ffffff;
-  --border:    #d0d7de;
-  --txt:       #24292f;
-  --txt-dim:   #57606a;
-  --txt-muted: #8c959f;
-  --green:     #1a7f37;
-  --amber:     #9a6700;
-  --red:       #cf222e;
-  --blue:      #0969da;
-}
-body, .nicegui-content { background: var(--bg) !important; color: var(--txt); }
-.q-header { background: var(--bg-card) !important;
-            border-bottom: 1px solid var(--border) !important;
-            box-shadow: none !important; color: var(--txt) !important; }
-.q-card   { background: var(--bg-card) !important;
-            border: 1px solid var(--border) !important;
-            box-shadow: none !important; }
-.q-separator { background: var(--border) !important; }
-.q-tab__label { color: var(--txt) !important; }
-.q-tab--active .q-tab__label { color: var(--blue) !important; font-weight: 600; }
-.q-tab-panels { background: var(--bg) !important; }
+def load_css() -> str:
+    """Return the bundled app stylesheet from the package resources."""
+    # try:
+    #     return resources.files('devkit_ui').joinpath('css/app.css').read_text(encoding='utf-8')
+    # except FileNotFoundError:
+    #     return ''
 
-.sec-label {
-  font-size: 10px; font-weight: 600; letter-spacing: 0.08em;
-  text-transform: uppercase; color: var(--txt-muted);
-  font-family: 'Courier New', monospace; margin-bottom: 2px;
-}
-.dot-ok   { display:inline-block;width:7px;height:7px;border-radius:50%;background:#1a7f37;margin-right:6px; }
-.dot-warn { display:inline-block;width:7px;height:7px;border-radius:50%;background:#9a6700;margin-right:6px; }
-.dot-off  { display:inline-block;width:7px;height:7px;border-radius:50%;background:#d0d7de;margin-right:6px; }
+    _CSS_PATH = Path(__file__).parent / 'css' / 'base.css'
+    try:
+        return _CSS_PATH.read_text(encoding='utf-8')
+    except FileNotFoundError:
+        return ''
 
-.node-item {
-  display:block; padding:4px 8px; border-radius:4px;
-  font-family:'Courier New',monospace; font-size:11px;
-  cursor:pointer; border-left:3px solid transparent;
-  color:var(--txt-dim); transition:background 0.1s;
-}
-.node-item:hover { background:#f6f8fa; color:var(--txt); }
-.node-item.sel   { background:#fff8c5; color:var(--amber); border-left-color:var(--amber); }
-.node-item.row   { color:var(--blue); border-left-color:#d8e8fd; }
-.node-item.sel.row { background:#fff8c5; color:var(--amber); border-left-color:var(--amber); }
 
-.topo-node:hover { filter:brightness(0.85); cursor:pointer; }
-
-.nav-sidebar {
-  width:220px; flex-shrink:0;
-  display:flex; flex-direction:column; gap:6px; align-self:stretch;
-}
-
-.estop-btn {
-  min-width:120px !important; min-height:52px !important;
-  font-size:15px !important; font-weight:700 !important;
-}
-</style>
-"""
+_APP_CSS = load_css()
 
 # ── map parser ────────────────────────────────────────────────────────────────
 
 def _demo_doc() -> TopoDoc:
     return TopoDoc(
-        name="mixed_test_map",
+        name='mixed_test_map',
         nodes=[
             TopoNode(name='N1', pose=TopoPose(x=0.0, y=0.0), edges=['N2'], meta={}),
             TopoNode(name='N2', pose=TopoPose(x=3.0, y=0.0), edges=['N1', 'N3'], meta={}),
@@ -242,139 +203,9 @@ def _demo_doc() -> TopoDoc:
 
 # ── SVG renderer ──────────────────────────────────────────────────────────────
 
-_SVG_W, _SVG_H = 900, 480
-_MARGIN, _NODE_R = 56, 17
+# _SVG_W, _SVG_H = 900, 480
+# _MARGIN, _NODE_R = 56, 17
 _TF_STALENESS_LIMIT = 2.0  # s — map->base_link older than this: don't draw it
-
-
-def _node_transform(nodes: Iterator[TopoNode]):
-    """World->screen transform (tx, ty) + extents (dx, dy) for the node bbox.
-
-    Shared by _build_svg and _build_robot_svg so both layers map coordinates
-    identically.
-    """
-    xs, ys = [], []
-    for node in nodes:
-        xs.append(node.x)
-        ys.append(node.y)
-    dx = (max(xs) - min(xs)) or 1.0
-    dy = (max(ys) - min(ys)) or 1.0
-    x_min, y_min = min(xs), min(ys)
-
-    def tx(x):
-        return _MARGIN + (x - x_min) / dx * (_SVG_W - 2 * _MARGIN)
-    def ty(y):
-        return _SVG_H - _MARGIN - (y - y_min) / dy * (_SVG_H - 2 * _MARGIN)
-    return tx, ty, dx, dy
-
-
-def _build_robot_svg(nodes: Iterator[TopoNode], robot: tuple | None) -> str:
-    """Transparent overlay SVG with only the live robot marker (map frame).
-
-    Kept separate from _build_svg so robot movement updates this layer alone,
-    never replacing the clickable node DOM (which would drop its click handlers).
-    """
-    empty = (f'<svg width="100%" viewBox="0 0 {_SVG_W} {_SVG_H}" '
-             f'xmlns="http://www.w3.org/2000/svg"></svg>')
-    if not nodes or robot is None:
-        return empty
-    tx, ty, dx, dy = _node_transform(nodes)
-    rx, ry, ryaw = robot
-    mx, my = tx(rx), ty(ry)
-    al = 0.07 * max(dx, dy)
-    ex, ey = tx(rx + al * math.cos(ryaw)), ty(ry + al * math.sin(ryaw))
-    return (f'<svg width="100%" viewBox="0 0 {_SVG_W} {_SVG_H}" '
-            f'xmlns="http://www.w3.org/2000/svg">'
-            f'<line x1="{mx:.1f}" y1="{my:.1f}" x2="{ex:.1f}" y2="{ey:.1f}" '
-            f'stroke="#cf222e" stroke-width="3" stroke-linecap="round"/>'
-            f'<circle cx="{mx:.1f}" cy="{my:.1f}" r="7" fill="#cf222e" '
-            f'stroke="#ffffff" stroke-width="2"/></svg>')
-
-
-def _build_svg(doc: TopoDoc, selected: str | None, current: str | None) -> str:
-    if not doc.nodes:
-        return (f'<svg width="100%" viewBox="0 0 {_SVG_W} {_SVG_H}" '
-                f'style="background:#f6f8fa;border-radius:4px;border:1px solid #d0d7de">'
-                f'<text x="{_SVG_W//2}" y="{_SVG_H//2}" text-anchor="middle" '
-                f'fill="#8c959f" font-family="Courier New" font-size="13">No map loaded</text>'
-                f'</svg>')
-
-    tx, ty, _dx, _dy = _node_transform(doc.nodes)
-
-    parts: list[str] = [f'<rect width="{_SVG_W}" height="{_SVG_H}" fill="#f6f8fa" rx="4"/>']
-
-    drawn: set = set()
-    for nd in doc.nodes:
-        for tgt in nd.edges:
-            tgt_name = tgt.node
-            key = tuple(sorted([nd.name, tgt_name]))
-            if key in drawn or not doc.has_node(tgt_name):
-                continue
-            drawn.add(key)
-
-            tgt_node = doc.get_node(tgt_name)
-
-            is_row_edge = (nd.meta.get('row_id') is not None
-                           or tgt_node.meta.get('row_id') is not None)
-            parts.append(
-                f'<line x1="{tx(nd.x):.1f}" y1="{ty(nd.y):.1f}" '
-                f'x2="{tx(tgt_node.x):.1f}" y2="{ty(tgt_node.y):.1f}" '
-                f'stroke="{"#d8e8fd" if is_row_edge else "#d0d7de"}" '
-                f'stroke-width="{"2" if is_row_edge else "1"}" stroke-linecap="round"/>')
-
-    for nd in doc.nodes:
-        name = nd.name
-        cx, cy = tx(nd.x), ty(nd.y)
-        is_cur = name == current
-        is_sel = name == selected
-        is_row = nd.meta.get('row_id') is not None
-
-        # pylint: disable=multiple-statements
-        if is_cur:
-            fill, stroke, sw = '#dafbe1', '#1a7f37', 2
-        elif is_sel:
-            fill, stroke, sw = '#fff8c5', '#9a6700', 2
-        elif is_row:
-            fill, stroke, sw = '#d8e8fd', '#0969da', 1
-        elif nd.meta.get('dropped_by'):
-            fill, stroke, sw = '#f6f8fa', '#8c959f', 1
-        else:
-            fill, stroke, sw = '#ffffff', '#d0d7de', 1
-        # pylint: enable=multiple-statements
-
-        label_col = ('#1a7f37' if is_cur else '#9a6700' if is_sel
-                     else '#0969da' if is_row else '#57606a')
-
-        if is_cur:
-            parts.append(
-                f'<circle cx="{cx:.1f}" cy="{cy:.1f}" r="{_NODE_R+6}" '
-                f'fill="none" stroke="#1a7f37" stroke-width="1" opacity="0.4">'
-                f'<animate attributeName="r" values="{_NODE_R+6};{_NODE_R+13}" '
-                f'dur="2s" repeatCount="indefinite"/>'
-                f'<animate attributeName="opacity" values="0.4;0" '
-                f'dur="2s" repeatCount="indefinite"/></circle>')
-
-        parts.append(
-            f'<circle class="topo-node" data-node="{name}" '
-            f'cx="{cx:.1f}" cy="{cy:.1f}" r="{_NODE_R}" '
-            f'fill="{fill}" stroke="{stroke}" stroke-width="{sw}"/>')
-
-        if is_row:
-            parts.append(
-                f'<text x="{cx:.1f}" y="{cy+4:.1f}" text-anchor="middle" fill="#0969da" '
-                f'font-family="Courier New" font-size="8" font-weight="700" '
-                f'style="pointer-events:none">'
-                f'{nd.meta.get("row_role","?")[0].upper()}{nd.meta.get("row_id","")}'
-                f'</text>')
-
-        parts.append(
-            f'<text x="{cx:.1f}" y="{cy+_NODE_R+12:.1f}" text-anchor="middle" '
-            f'fill="{label_col}" font-family="Courier New" font-size="9" '
-            f'style="pointer-events:none">{name}</text>')
-
-    return (f'<svg id="topo-map" width="100%" viewBox="0 0 {_SVG_W} {_SVG_H}" '
-            f'xmlns="http://www.w3.org/2000/svg">{"".join(parts)}</svg>')
-
 
 # ── Fields2Cover geometry helpers ─────────────────────────────────────────────
 
@@ -590,7 +421,7 @@ def _run_f2c(corners_ll: list,
 class NiceGuiNode(Node):
 
     def __init__(self) -> None:
-        super().__init__('nicegui')
+        super().__init__(NODE_NAME)
 
         self.cmd_vel_publisher       = self.create_publisher(Twist,  'cmd_vel',       1)
         self.esp_enable_publisher    = self.create_publisher(Empty,  'esp/enable',    1)
@@ -764,7 +595,7 @@ class NiceGuiNode(Node):
         self.bumper_front_top_active    = False
         self.bumper_front_bottom_active = False
         self.bumper_back_active         = False
-        self.soft_estop_active          = False
+        # self.soft_estop_active          = False
         self.estop_front_active         = False
         self.estop_back_active          = False
         self.linear_velocity            = 0.0
@@ -1666,7 +1497,8 @@ class NiceGuiNode(Node):
     # ── UI shell ──────────────────────────────────────────────────────────────
 
     def content(self) -> None:
-        ui.add_head_html(_GLOBAL_CSS)
+        if _APP_CSS:
+            ui.add_head_html(f'<style>{_APP_CSS}</style>')
         with ui.tabs().classes('w-full') as tabs:
             tab_nav     = ui.tab('Nav',     icon='route')
             tab_mission = ui.tab('Mission', icon='checklist')
@@ -1689,50 +1521,15 @@ class NiceGuiNode(Node):
 
                 with ui.row().classes('w-full gap-3 items-stretch'):
 
-                    with ui.card().style('padding:16px 20px;flex-shrink:0'):
-                        ui.html('<div class="sec-label mb-3">Joystick</div>')
-                        with ui.row().classes('items-center gap-6'):
-                            def _debug_joystick_move(e):
-                                self.get_logger().info(
-                                    f'[joystick debug] raw e.x={e.x!r} e.y={e.y!r} '
-                                    f'(as float: x={float(e.x):+.3f} y={float(e.y):+.3f})')
-                                self.send_speed(float(e.y), float(e.x))
+                    self.joystick_card = JoystickControlCard(
+                        on_move=self.send_speed,
+                        on_stop=lambda: self.send_speed(0.0, 0.0),
+                        on_estop=self.toggle_estop
+                    )
 
-                            ui.joystick(
-                                color='#1a7f37', size=130,
-                                on_move=_debug_joystick_move,
-                                on_end=lambda _: self.send_speed(0.0, 0.0),
-                            )
-                            with ui.column().classes('gap-3 items-center'):
-                                def update_estop(e: ClickEventArguments) -> None:
-                                    assert isinstance(e.sender, ui.button)
-                                    self.toggle_estop()
-                                    if self.soft_estop_active:
-                                        e.sender.props('color=negative')
-                                        e.sender.text = 'STOPPED'
-                                    else:
-                                        e.sender.props('color=primary')
-                                        e.sender.text = 'E-Stop'
-                                ui.button('E-Stop', on_click=update_estop).props(
-                                    'color=primary outline no-caps').classes('estop-btn')
-                                pose_lbl = ui.label('—').classes('text-xs font-mono').style(
-                                    'color:#57606a;text-align:center;'
-                                    'max-width:130px;white-space:pre-line')
-
-                    with ui.card().classes('flex-1').style('padding:12px;min-width:0'):
-                        ui.html('<div class="sec-label mb-2">Node Map</div>')
-                        # Node map + robot marker overlay (same viewBox, so they
-                        # align). Overlay is pointer-events:none so clicks reach
-                        # the nodes; it updates on movement without rebuilding
-                        # the clickable node DOM.
-                        with ui.element('div').classes('relative w-full'):
-                            map_html = ui.html(
-                                _build_svg(self._topo_doc, None, None)
-                            ).classes('w-full')
-                            robot_html = ui.html(
-                                _build_robot_svg(self._topo_doc.nodes, None)
-                            ).classes('absolute top-0 left-0 w-full').style(
-                                'pointer-events:none')
+                    self.node_map_card = NodeMapCard(
+                        topo_doc = self._topo_doc
+                    )
 
                 with ui.row().classes('w-full gap-3 items-start'):
 
@@ -1917,9 +1714,10 @@ class NiceGuiNode(Node):
                 px, py  = odom.pose.pose.position.x, odom.pose.pose.position.y
                 gps_str = (f'\n{gps.latitude:.5f}\n{gps.longitude:.5f}'
                         if gps and gps.status.status >= 0 else '')
-                pose_lbl.set_text(f'({px:.2f}, {py:.2f}){gps_str}')
+                run_store.pose_lbl = f'({px:.2f}, {py:.2f}){gps_str}'
             else:
-                pose_lbl.set_text('no odom')
+                run_store.pose_lbl = 'no odom'
+
 
             cur = self.topo_current
             if cur and cur != '—':
@@ -1962,11 +1760,11 @@ class NiceGuiNode(Node):
                 return
             _prev.update(snap)
 
-            if changed & {'robot', 'nodes'}:
-                robot_html.set_content(_build_robot_svg(self._topo_doc.nodes, rp))
+            if changed & {'robot', 'nodes'} and run_store.robot_html:
+                run_store.robot_html.set_content(_build_robot_svg(self._topo_doc.nodes, rp))
 
-            if changed & {'sel', 'cur', 'nodes'}:
-                map_html.set_content(
+            if changed & {'sel', 'cur', 'nodes'} and run_store.map_html:
+                run_store.map_html.set_content(
                     _build_svg(self._topo_doc, self.topo_selected,
                             self.topo_current))
                 inject_click_js()
@@ -2000,7 +1798,7 @@ class NiceGuiNode(Node):
                 'color:#cf222e' if 'fail' in self.topo_nav_status else
                 'color:#1a7f37' if self.topo_nav_status == 'arrived' else 'color:#57606a')
             can_go = (bool(self.topo_selected) and not self.topo_navigating
-                    and not self.soft_estop_active)
+                    and not global_store.soft_estop_active)
             go_btn.set_enabled(can_go)
             stop_btn.set_enabled(self.topo_navigating)
             del_btn.set_enabled(bool(self.topo_selected))
@@ -2684,7 +2482,7 @@ class NiceGuiNode(Node):
         def _execute():
             success_overall = True
             for step_idx, (rid, entry_node, exit_node, action, params) in enumerate(steps):
-                if self._mission_cancel or self.soft_estop_active:
+                if self._mission_cancel or global_store.soft_estop_active:
                     status_lbl.set_text('Cancelled')
                     status_lbl.style('color:#9a6700')
                     success_overall = False
@@ -2705,7 +2503,7 @@ class NiceGuiNode(Node):
                     success_overall = False
                     break
 
-                if self._mission_cancel or self.soft_estop_active:
+                if self._mission_cancel or global_store.soft_estop_active:
                     status_lbl.set_text('Cancelled')
                     status_lbl.style('color:#9a6700')
                     success_overall = False
@@ -2786,7 +2584,7 @@ class NiceGuiNode(Node):
                 self.get_logger().warn(f'_send_goal_sync: timeout for {target}')
                 self.cancel_nav_goal()
                 return False
-            if self._mission_cancel or self.soft_estop_active:
+            if self._mission_cancel or global_store.soft_estop_active:
                 self.cancel_nav_goal()
                 done_event.wait(timeout=2.0)
                 return False
@@ -3198,7 +2996,7 @@ class NiceGuiNode(Node):
                         ]
                         # Log to a file (not DEVNULL) so a crashed launch is
                         # diagnosable — tail /tmp/gazebo_sim.log.
-                        _gz_log = open('/tmp/gazebo_sim.log', 'w',encoding="utf-8")
+                        _gz_log = open('/tmp/gazebo_sim.log', 'w',encoding='utf-8')
                         _gazebo_proc[0] = subprocess.Popen(
                             wrapped_cmd,
                             stdout=_gz_log, stderr=subprocess.STDOUT,
@@ -3328,7 +3126,7 @@ class NiceGuiNode(Node):
                     try:
                         _gazebo_proc[0] = subprocess.Popen(
                             _sim_cmd(),
-                            stdout=open('/tmp/gazebo_sim.log', 'w', encoding="utf-8"),
+                            stdout=open('/tmp/gazebo_sim.log', 'w', encoding='utf-8'),
                             stderr=subprocess.STDOUT,
                             env=_SIM_ENV,
                             start_new_session=True,
@@ -3536,7 +3334,7 @@ class NiceGuiNode(Node):
     <description>{name} plant model</description>
 </model>
 '''
-                        with open(model_dir / 'model.config', 'w', encoding="utf-8") as f:
+                        with open(model_dir / 'model.config', 'w', encoding='utf-8') as f:
                             f.write(model_config)
                         # Write model.sdf
                         model_sdf = f'''<?xml version="1.0" ?>
@@ -3558,7 +3356,7 @@ class NiceGuiNode(Node):
     </model>
 </sdf>
 '''
-                        with open(model_dir / 'model.sdf', 'w', encoding="utf-8") as f:
+                        with open(model_dir / 'model.sdf', 'w', encoding='utf-8') as f:
                             f.write(model_sdf)
                         # Refresh dropdown
                         new_models = _refresh_crop_models()
@@ -3632,7 +3430,7 @@ class NiceGuiNode(Node):
                                 'detector:=tsm',
                                 'image_topic:=/camera/image_raw',
                             ],
-                            stdout=open('/tmp/neo_sim.log', 'w', encoding="utf-8"),
+                            stdout=open('/tmp/neo_sim.log', 'w', encoding='utf-8'),
                             stderr=subprocess.STDOUT,
                             env=os.environ.copy(),
                             start_new_session=True,
@@ -3784,9 +3582,9 @@ class NiceGuiNode(Node):
                 'color=negative outline no-caps').classes('px-4')
 
     def toggle_estop(self) -> None:
-        self.soft_estop_active = not self.soft_estop_active
+        global_store.soft_estop_active = not global_store.soft_estop_active
         msg = Bool()
-        msg.data = self.soft_estop_active
+        msg.data = global_store.soft_estop_active
         self.estop_publisher.publish(msg)
 
     def send_speed(self, x: float, y: float) -> None:

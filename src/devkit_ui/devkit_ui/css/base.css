@@ -1,0 +1,127 @@
+:root {
+	--bg: #f6f8fa;
+	--bg-card: #ffffff;
+	--border: #d0d7de;
+	--txt: #24292f;
+	--txt-dim: #57606a;
+	--txt-muted: #8c959f;
+	--green: #1a7f37;
+	--amber: #9a6700;
+	--red: #cf222e;
+	--blue: #0969da;
+}
+
+body,
+.nicegui-content {
+	background: var(--bg) !important;
+	color: var(--txt);
+}
+.q-header {
+	background: var(--bg-card) !important;
+	border-bottom: 1px solid var(--border) !important;
+	box-shadow: none !important;
+	color: var(--txt) !important;
+}
+.q-card {
+	background: var(--bg-card) !important;
+	border: 1px solid var(--border) !important;
+	box-shadow: none !important;
+}
+.q-separator {
+	background: var(--border) !important;
+}
+.q-tab__label {
+	color: var(--txt) !important;
+}
+.q-tab--active .q-tab__label {
+	color: var(--blue) !important;
+	font-weight: 600;
+}
+.q-tab-panels {
+	background: var(--bg) !important;
+}
+
+.sec-label {
+	font-size: 10px;
+	font-weight: 600;
+	letter-spacing: 0.08em;
+	text-transform: uppercase;
+	color: var(--txt-muted);
+	font-family: 'Courier New', monospace;
+	margin-bottom: 2px;
+}
+.dot-ok {
+	display: inline-block;
+	width: 7px;
+	height: 7px;
+	border-radius: 50%;
+	background: #1a7f37;
+	margin-right: 6px;
+}
+.dot-warn {
+	display: inline-block;
+	width: 7px;
+	height: 7px;
+	border-radius: 50%;
+	background: #9a6700;
+	margin-right: 6px;
+}
+.dot-off {
+	display: inline-block;
+	width: 7px;
+	height: 7px;
+	border-radius: 50%;
+	background: #d0d7de;
+	margin-right: 6px;
+}
+
+.node-item {
+	display: block;
+	padding: 4px 8px;
+	border-radius: 4px;
+	font-family: 'Courier New', monospace;
+	font-size: 11px;
+	cursor: pointer;
+	border-left: 3px solid transparent;
+	color: var(--txt-dim);
+	transition: background 0.1s;
+}
+.node-item:hover {
+	background: #f6f8fa;
+	color: var(--txt);
+}
+.node-item.sel {
+	background: #fff8c5;
+	color: var(--amber);
+	border-left-color: var(--amber);
+}
+.node-item.row {
+	color: var(--blue);
+	border-left-color: #d8e8fd;
+}
+.node-item.sel.row {
+	background: #fff8c5;
+	color: var(--amber);
+	border-left-color: var(--amber);
+}
+
+.topo-node:hover {
+	filter: brightness(0.85);
+	cursor: pointer;
+}
+
+.nav-sidebar {
+	width: 220px;
+	flex-shrink: 0;
+	display: flex;
+	flex-direction: column;
+	gap: 6px;
+	align-self: stretch;
+}
+
+.estop-btn {
+	min-width: 120px !important;
+	min-height: 52px !important;
+	font-size: 15px !important;
+	font-weight: 700 !important;
+}
