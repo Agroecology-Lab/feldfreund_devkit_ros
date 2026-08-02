@@ -61,7 +61,7 @@ from tf2_ros.transform_listener import TransformListener
 
 # MISSION: store owns missions.yaml, scheduling, and run recording.
 from devkit_ui.actions import ACTIONS, action_ros_msgs
-from devkit_ui.constants import NODE_NAME
+from devkit_ui.constants import NAV_ACTION, NODE_NAME, ROW_ACTION
 from devkit_ui.missions import MissionStore
 from devkit_ui.models import (
     NodeID,
@@ -88,6 +88,7 @@ from devkit_ui.parse import dump_topo_yaml, parse_topo_json, parse_topo_yaml
 from devkit_ui.stores.global_store import global_store
 from devkit_ui.stores.run_store import run_store
 from devkit_ui.utils.topo_renderer import _build_robot_svg, _build_svg
+from devkit_ui.utils.track_manager import TrackManager
 
 _TOPO_SRV_OK = False
 try:
@@ -118,9 +119,6 @@ TMAP_QOS = QoSProfile(
     durability=DurabilityPolicy.TRANSIENT_LOCAL,
     history=HistoryPolicy.KEEP_LAST,
 )
-
-_ROW_ACTION = 'limbic_row_follow'
-_NAV_ACTION = 'navigate_to_pose'
 
 def _topo_to_msg(doc: TopoDoc) -> String:
     msg = String()
@@ -609,13 +607,12 @@ class NiceGuiNode(Node):
         self._nav_goal_handle               = None
         self.drop_status:     str           = ''
 
-        self._track_timer:   object  | None   = None
-        self._track_counter: int              = 0
-        self._track_prefix:  str              = ''
-        self._track_row_id:  int     | None   = None
-        self._track_is_row:  bool             = False
-        self._track_first:   bool             = True
-        self.track_status:   str              = ''
+        self._track_manager = TrackManager(
+            get_nodes_cb=lambda: self._topo_doc.nodes,
+            drop_node_cb=self.drop_topo_node,
+            patch_node_role_cb=self._patch_node_role,
+            create_timer_cb=self.create_timer
+        )
 
         self._f2c_swaths:     list  = []
         self._f2c_row_start:  int   = 1
@@ -801,9 +798,9 @@ class NiceGuiNode(Node):
         is_row    = row_id is not None
 
         if is_row:
-            edge_action, xy_tol, yaw_tol, vert_r = _ROW_ACTION, 0.1, 0.05, 0.5
+            edge_action, xy_tol, yaw_tol, vert_r = ROW_ACTION, 0.1, 0.05, 0.5
         else:
-            edge_action, xy_tol, yaw_tol, vert_r = _NAV_ACTION, 0.3, 0.1,  1.0
+            edge_action, xy_tol, yaw_tol, vert_r = NAV_ACTION, 0.3, 0.1,  1.0
 
         gps = self.latest_gps
         gps_meta: dict = {}
@@ -915,57 +912,6 @@ class NiceGuiNode(Node):
                 self.get_logger().error(f'drop_topo_node failed: {e} ({type(e)}\n{traceback.format_exc()})')
 
         threading.Thread(target=_publish_and_persist, daemon=True).start()
-
-    # ── track mode ────────────────────────────────────────────────────────────
-
-    def start_track(self, prefix: str, interval: float,
-                    row_id: int | None, row_role: str | None) -> None:
-        prefix = re.sub(r'[^A-Z0-9_]', '', prefix.strip().upper().replace(' ', '_'))
-        if not prefix:
-            self.track_status = 'ERROR: prefix required'
-            return
-        if self._track_timer is not None:
-            self.track_status = 'ERROR: already running'
-            return
-        existing = [n.name for n in self._topo_doc.nodes
-                    if n.name.startswith(prefix + '_') and n.name[len(prefix)+1:].isdigit()]
-        self._track_counter = (max(int(n[len(prefix)+1:]) for n in existing)
-                               if existing else 0)
-        self._track_prefix = prefix
-        self._track_row_id = row_id
-        self._track_is_row = row_id is not None
-        self._track_first  = True
-
-        def _drop() -> None:
-            self._track_counter += 1
-            node_name = f'{prefix}_{self._track_counter}'
-            if self._track_is_row:
-                role = 'entry' if self._track_first else 'middle'
-                self._track_first = False
-            else:
-                role = row_role
-            self.drop_topo_node(node_name, row_id, role)
-            self.track_status = f'recording  {node_name}  (#{self._track_counter})'
-
-        _drop()
-        self._track_timer = self.create_timer(interval, _drop)
-
-    def stop_track(self) -> None:
-        if self._track_timer is not None:
-            self._track_timer.cancel()
-            self._track_timer = None
-        if self._track_is_row and self._track_counter > 0:
-            last_name = f'{self._track_prefix}_{self._track_counter}'
-            self._patch_node_role(last_name, 'exit')
-            self.track_status = (f'stopped — {last_name} marked exit'
-                                 f'  (#{self._track_counter} nodes)')
-        else:
-            self.track_status = f'stopped at #{self._track_counter}'
-        self._track_counter = 0
-        self._track_prefix = ''
-        self._track_row_id  = None
-        self._track_is_row = False
-        self._track_first = True
 
     # ── shared topo-map persistence helper ────────────────────────────────────
 
@@ -1198,7 +1144,7 @@ class NiceGuiNode(Node):
                               'gps_fix_type': fix_type, 'gps_hdop': None,
                               'row_id': rid}
 
-            in_edges = [TopoEdge(action=_ROW_ACTION, edge_id=f'{in_name}_{out_name}', node=out_name)]
+            in_edges = [TopoEdge(action=ROW_ACTION, edge_id=f'{in_name}_{out_name}', node=out_name)]
             in_node = _disk_node(in_name,  ix, iy, 'entry', in_lat,  in_lon,  in_edges, rid)
             in_node.add_metadata(**ui_meta_common)
             out_node = _disk_node(out_name, ox, oy, 'exit',  out_lat, out_lon, [], rid)
@@ -1238,14 +1184,14 @@ class NiceGuiNode(Node):
 
             for a, b in ((p, q), (q, p)):
                 a_node = new_topo_nodes[a]
-                a_node.add_edge(TopoEdge(action=_NAV_ACTION, edge_id=edge_name, node=b))
+                a_node.add_edge(TopoEdge(action=NAV_ACTION, edge_id=edge_name, node=b))
 
             for node in new_topo_nodes.values():
                 if node.name not in (p, q):
                     continue
 
                 other = q if node.name == p else p
-                node.add_edge(other, action=_NAV_ACTION)
+                node.add_edge(other, action=NAV_ACTION)
 
         all_pts = dict(row_coords)   # {name: (x, y)}
         for a_name, b_name in _headland_neighbour_pairs(all_pts):
@@ -1259,7 +1205,7 @@ class NiceGuiNode(Node):
                 if tgt not in new_topo_nodes:
                     continue
                 node = new_topo_nodes[tgt]
-                node.add_edge(connect_to, action=_NAV_ACTION)
+                node.add_edge(connect_to, action=NAV_ACTION)
 
         skip_str   = f' (skipped {len(skipped)} dup ids)' if skipped else ''
         splice_str = f' · spliced @ {connect_to}' if connect_to else ' · standalone'
@@ -1337,16 +1283,16 @@ class NiceGuiNode(Node):
             inn = rows[rid].get('entry')
             outn = rows[rid].get('exit')
             if inn and outn and inn != outn:
-                wanted_edges.append((inn, outn, _ROW_ACTION))
-                wanted_edges.append((outn, inn, _ROW_ACTION))
+                wanted_edges.append((inn, outn, ROW_ACTION))
+                wanted_edges.append((outn, inn, ROW_ACTION))
 
         # Headland edges: same-end neighbours only, classified by geometry —
         # NOT by entry/exit label (snake ordering flips label vs physical end).
         # Shared with the build path so the two cannot diverge.
         if len(coords) >= 2:
             for a_name, b_name in _headland_neighbour_pairs(coords):
-                wanted_edges.append((a_name, b_name, _NAV_ACTION))
-                wanted_edges.append((b_name, a_name, _NAV_ACTION))
+                wanted_edges.append((a_name, b_name, NAV_ACTION))
+                wanted_edges.append((b_name, a_name, NAV_ACTION))
         else:
             self.get_logger().warn(
                 'repair: row nodes lack x/y coords — cannot classify headland '
@@ -1358,8 +1304,8 @@ class NiceGuiNode(Node):
             for tgt in (first_in, last_out):
                 if not tgt or tgt == connect_to:
                     continue
-                wanted_edges.append((connect_to, tgt, _NAV_ACTION))
-                wanted_edges.append((tgt, connect_to, _NAV_ACTION))
+                wanted_edges.append((connect_to, tgt, NAV_ACTION))
+                wanted_edges.append((tgt, connect_to, NAV_ACTION))
 
         new_topo_nodes = {node.name: node for node in self._topo_doc.nodes}
         added_count = 0
@@ -1522,21 +1468,21 @@ class NiceGuiNode(Node):
 
                 with ui.row().classes('w-full gap-3 items-stretch'):
 
-                    self.joystick_card = JoystickControlCard(
+                    JoystickControlCard(
                         on_move=self.send_speed,
                         on_stop=lambda: self.send_speed(0.0, 0.0),
                         on_estop=self.toggle_estop
                     )
 
-                    self.node_map_card = NodeMapCard(
+                    NodeMapCard(
                         topo_doc = self._topo_doc
                     )
 
                 with ui.row().classes('w-full gap-3 items-start'):
 
-                    self.track_card = TrackCard(
-                        on_start=self.start_track,
-                        on_stop=self.stop_track,
+                    TrackCard(
+                        on_start=self._track_manager.start,
+                        on_stop=self._track_manager.stop
                     )
 
                     with ui.card().classes('flex-1').style('padding:12px 14px'):
@@ -1694,28 +1640,11 @@ class NiceGuiNode(Node):
             else:
                 cur_drop_lbl.set_text('no current node')
                 cur_drop_lbl.style('color:#8c959f')
-            row_hint.set_text(_ROW_ACTION if row_id_input.value else _NAV_ACTION)
+            row_hint.set_text(ROW_ACTION if row_id_input.value else NAV_ACTION)
             row_hint.style('color:#0969da' if row_id_input.value else 'color:#8c959f')
             drop_status_lbl.set_text(self.drop_status)
             drop_status_lbl.style(
                 'color:#cf222e' if self.drop_status.startswith('ERROR') else 'color:#1a7f37')
-
-            if run_store.track_start_btn is not None:
-                running = self._track_timer is not None
-                run_store.track_start_btn.set_enabled(not running)
-                run_store.track_stop_btn.set_enabled(running)
-                if run_store.track_row_id.value:
-                    run_store.track_row_hint.set_text('entry→middle→exit auto')
-                    run_store.track_row_hint.style('color:#0969da')
-                    run_store.track_row_role.set_visibility(False)
-                else:
-                    run_store.track_row_hint.set_text(_NAV_ACTION)
-                    run_store.track_row_hint.style('color:#8c959f')
-                    run_store.track_row_role.set_visibility(True)
-                run_store.track_status_lbl.set_text(self.track_status)
-                run_store.track_status_lbl.style(
-                    'color:#cf222e' if self.track_status.startswith('ERROR') else
-                    'color:#1a7f37' if running else 'color:#57606a')
 
             rp = self._robot_pose()
             rp_key = None if rp is None else (round(rp[0], 1), round(rp[1], 1),
