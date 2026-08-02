@@ -83,6 +83,7 @@ from devkit_ui.obstacles import (
 )
 from devkit_ui.pages.run.joystick_control_card import JoystickControlCard
 from devkit_ui.pages.run.node_map_card import NodeMapCard
+from devkit_ui.pages.run.track_card import TrackCard
 from devkit_ui.parse import dump_topo_yaml, parse_topo_json, parse_topo_yaml
 from devkit_ui.stores.global_store import global_store
 from devkit_ui.stores.run_store import run_store
@@ -1533,43 +1534,10 @@ class NiceGuiNode(Node):
 
                 with ui.row().classes('w-full gap-3 items-start'):
 
-                    with ui.card().classes('flex-1').style('padding:12px 14px'):
-                        with ui.row().classes('items-baseline gap-2 mb-2'):
-                            ui.label('Track').classes('font-semibold')
-                            ui.label('auto-drop every N s').classes('text-xs').style(
-                                'color:#8c959f')
-                        with ui.row().classes('items-center gap-2 w-full'):
-                            track_prefix = ui.input(
-                                placeholder='Prefix e.g. ROW_A', label='Prefix',
-                            ).classes('flex-1')
-                            track_interval = ui.number(
-                                label='s', value=5, min=2, max=30, step=1, precision=0,
-                            ).classes('w-16')
-                        with ui.row().classes('items-center gap-2 w-full mt-1'):
-                            track_row_id = ui.number(
-                                label='Row ID', placeholder='blank=standard',
-                                min=1, step=1, precision=0,
-                            ).classes('w-28')
-                            track_row_role = ui.toggle(
-                                {'entry': 'Entry', 'exit': 'Exit'}, value='entry',
-                            ).props('dense')
-                            track_row_hint = ui.label('').classes('text-xs font-mono').style(
-                                'color:#8c959f')
-                        with ui.row().classes('items-center gap-2 mt-2'):
-                            track_start_btn = ui.button(
-                                'Start',
-                                on_click=lambda: self.start_track(
-                                    track_prefix.value,
-                                    float(track_interval.value or 5),
-                                    int(track_row_id.value) if track_row_id.value else None,
-                                    track_row_role.value,
-                                ),
-                            ).props('color=positive no-caps dense')
-                            track_stop_btn = ui.button(
-                                'Stop', on_click=self.stop_track,
-                            ).props('color=negative no-caps dense')
-                            track_status_lbl = ui.label('').classes(
-                                'text-xs font-mono ml-1').style('color:#57606a')
+                    self.track_card = TrackCard(
+                        on_start=self.start_track,
+                        on_stop=self.stop_track,
+                    )
 
                     with ui.card().classes('flex-1').style('padding:12px 14px'):
                         with ui.row().classes('items-baseline gap-2 mb-2'):
@@ -1732,21 +1700,22 @@ class NiceGuiNode(Node):
             drop_status_lbl.style(
                 'color:#cf222e' if self.drop_status.startswith('ERROR') else 'color:#1a7f37')
 
-            running = self._track_timer is not None
-            track_start_btn.set_enabled(not running)
-            track_stop_btn.set_enabled(running)
-            if track_row_id.value:
-                track_row_hint.set_text('entry→middle→exit auto')
-                track_row_hint.style('color:#0969da')
-                track_row_role.set_visibility(False)
-            else:
-                track_row_hint.set_text(_NAV_ACTION)
-                track_row_hint.style('color:#8c959f')
-                track_row_role.set_visibility(True)
-            track_status_lbl.set_text(self.track_status)
-            track_status_lbl.style(
-                'color:#cf222e' if self.track_status.startswith('ERROR') else
-                'color:#1a7f37' if running else 'color:#57606a')
+            if run_store.track_start_btn is not None:
+                running = self._track_timer is not None
+                run_store.track_start_btn.set_enabled(not running)
+                run_store.track_stop_btn.set_enabled(running)
+                if run_store.track_row_id.value:
+                    run_store.track_row_hint.set_text('entry→middle→exit auto')
+                    run_store.track_row_hint.style('color:#0969da')
+                    run_store.track_row_role.set_visibility(False)
+                else:
+                    run_store.track_row_hint.set_text(_NAV_ACTION)
+                    run_store.track_row_hint.style('color:#8c959f')
+                    run_store.track_row_role.set_visibility(True)
+                run_store.track_status_lbl.set_text(self.track_status)
+                run_store.track_status_lbl.style(
+                    'color:#cf222e' if self.track_status.startswith('ERROR') else
+                    'color:#1a7f37' if running else 'color:#57606a')
 
             rp = self._robot_pose()
             rp_key = None if rp is None else (round(rp[0], 1), round(rp[1], 1),
