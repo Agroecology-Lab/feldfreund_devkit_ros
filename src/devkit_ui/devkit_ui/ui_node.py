@@ -89,7 +89,6 @@ from devkit_ui.parse import dump_topo_yaml, parse_topo_json, parse_topo_yaml
 from devkit_ui.stores.global_store import global_store
 from devkit_ui.stores.run_store import run_store
 from devkit_ui.utils.topo_renderer import build_robot_svg, build_svg, inject_click_js
-from devkit_ui.utils.track_manager import TrackManager
 
 _TOPO_SRV_OK = False
 try:
@@ -599,13 +598,9 @@ class NiceGuiNode(Node):
         self._nav_goal_handle               = None
         self.drop_status:     str           = ''
 
-        self._track_manager = TrackManager(
-            get_nodes_cb=lambda: self._topo_doc.nodes,
-            drop_node_cb=self.drop_topo_node,
-            patch_node_role_cb=self._patch_node_role,
-            create_timer_cb=self.create_timer,
-            destroy_timer_cb=self.destroy_timer,
-        )
+        self._track_timer:   object  | None   = None
+        self._track_counter: int              = 0
+        self._track_first:   bool             = True
 
         self._f2c_swaths:     list  = []
         self._f2c_row_start:  int   = 1
@@ -910,6 +905,68 @@ class NiceGuiNode(Node):
 
         threading.Thread(target=_publish_and_persist, daemon=True).start()
         return True
+
+    # ── track mode ────────────────────────────────────────────────────────────
+
+    def start_track(self, prefix: str, interval: float,
+                    row_id: int | None, row_role: str | None) -> None:
+        prefix = re.sub(r'[^A-Z0-9_]', '', prefix.strip().upper().replace(' ', '_'))
+        if not prefix:
+            run_store.track_running = False
+            run_store.track_status = 'ERROR: prefix required'
+            return
+        if self._track_timer is not None:
+            run_store.track_running = True
+            run_store.track_status = 'ERROR: already running'
+            return
+        existing = [n.name for n in self._topo_doc.nodes
+                    if n.name.startswith(prefix + '_') and n.name[len(prefix)+1:].isdigit()]
+        self._track_counter = (max(int(n[len(prefix)+1:]) for n in existing)
+                               if existing else 0)
+        self._track_first  = True
+
+        run_store.track_prefix = prefix
+        run_store.track_interval = interval
+        run_store.track_row_id = row_id
+        run_store.track_row_role = row_role or 'entry'
+        run_store.track_running = True
+        run_store.track_status = ''
+
+        is_row = row_id is not None
+
+        def _drop() -> None:
+            self._track_counter += 1
+            node_name = f'{prefix}_{self._track_counter}'
+            if is_row:
+                role = 'entry' if self._track_first else 'middle'
+                self._track_first = False
+            else:
+                role = row_role
+            self.drop_topo_node(node_name, row_id, role)
+            run_store.track_status = f'recording  {node_name}  (#{self._track_counter})'
+
+        _drop()
+        self._track_timer = self.create_timer(interval, _drop)
+
+    def stop_track(self) -> None:
+        if self._track_timer is not None:
+            self._track_timer.cancel()
+            self._track_timer = None
+        is_row = run_store.track_row_id is not None
+        if is_row and self._track_counter > 0:
+            last_name = f'{run_store.track_prefix}_{self._track_counter}'
+            self._patch_node_role(last_name, 'exit')
+            status = (f'stopped — {last_name} marked exit'
+                      f'  (#{self._track_counter} nodes)')
+        else:
+            status = f'stopped at #{self._track_counter}'
+        run_store.track_running = False
+        run_store.track_status = status
+        self._track_counter = 0
+        self._track_first = True
+        run_store.track_prefix = ''
+        run_store.track_row_id = None
+        run_store.track_row_role = 'entry'
 
     # ── shared topo-map persistence helper ────────────────────────────────────
 
@@ -1479,8 +1536,8 @@ class NiceGuiNode(Node):
                 with ui.row().classes('w-full gap-3 items-start'):
 
                     TrackCard(
-                        on_start=self._track_manager.start,
-                        on_stop=self._track_manager.stop
+                        on_start=self.start_track,
+                        on_stop=self.stop_track
                     )
 
                     with ui.card().classes('flex-1').style('padding:12px 14px'):
