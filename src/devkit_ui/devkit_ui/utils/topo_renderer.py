@@ -1,6 +1,8 @@
 import math
 from collections.abc import Iterator
 
+from nicegui import ui
+
 from devkit_ui.models import TopoDoc, TopoNode
 
 _SVG_W, _SVG_H = 900, 480
@@ -10,7 +12,7 @@ _MARGIN, _NODE_R = 56, 17
 def _node_transform(nodes: Iterator[TopoNode]):
     """World->screen transform (tx, ty) + extents (dx, dy) for the node bbox.
 
-    Shared by _build_svg and _build_robot_svg so both layers map coordinates
+    Shared by build_svg and build_robot_svg so both layers map coordinates
     identically.
     """
     xs, ys = [], []
@@ -28,10 +30,10 @@ def _node_transform(nodes: Iterator[TopoNode]):
     return tx, ty, dx, dy
 
 
-def _build_robot_svg(nodes: Iterator[TopoNode], robot: tuple | None) -> str:
+def build_robot_svg(nodes: Iterator[TopoNode], robot: tuple | None) -> str:
     """Transparent overlay SVG with only the live robot marker (map frame).
 
-    Kept separate from _build_svg so robot movement updates this layer alone,
+    Kept separate from build_svg so robot movement updates this layer alone,
     never replacing the clickable node DOM (which would drop its click handlers).
     """
     empty = (f'<svg width="100%" viewBox="0 0 {_SVG_W} {_SVG_H}" '
@@ -51,7 +53,7 @@ def _build_robot_svg(nodes: Iterator[TopoNode], robot: tuple | None) -> str:
             f'stroke="#ffffff" stroke-width="2"/></svg>')
 
 
-def _build_svg(doc: TopoDoc, selected: str | None, current: str | None) -> str:
+def build_svg(doc: TopoDoc, selected: str | None, current: str | None) -> str:
     if not doc.nodes:
         return (f'<svg width="100%" viewBox="0 0 {_SVG_W} {_SVG_H}" '
                 f'style="background:#f6f8fa;border-radius:4px;border:1px solid #d0d7de">'
@@ -134,3 +136,20 @@ def _build_svg(doc: TopoDoc, selected: str | None, current: str | None) -> str:
 
     return (f'<svg id="topo-map" width="100%" viewBox="0 0 {_SVG_W} {_SVG_H}" '
             f'xmlns="http://www.w3.org/2000/svg">{"".join(parts)}</svg>')
+
+
+def inject_click_js() -> None:
+    # Event delegation: a single document-level listener (attached once,
+    # guarded) that resolves clicks to the nearest .topo-node. Survives
+    # map redraws — unlike per-element onclick, which gets wiped every
+    # time the SVG is rebuilt (on current-node change), leaving the
+    # nodes unclickable.
+    ui.run_javascript("""
+        if (!window.__topoDelegated) {
+            window.__topoDelegated = true;
+            document.addEventListener('click', (e) => {
+                const el = e.target.closest('.topo-node');
+                if (el) emitEvent('topo_node_clicked', {node: el.dataset.node});
+            });
+        }
+    """)

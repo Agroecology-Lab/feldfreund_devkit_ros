@@ -12,13 +12,11 @@ class TrackManager:
                  patch_node_role_cb: Callable[[str, str], None],
                  create_timer_cb: Callable[[float, Callable], Any]):
 
-        # Callbacks to interact with the main application logic
         self._get_nodes = get_nodes_cb
         self._drop_node = drop_node_cb
         self._patch_node_role = patch_node_role_cb
         self._create_timer = create_timer_cb
 
-        # Encapsulated state (Notice they are no longer polluting your main page)
         self._timer = None
         self._counter = 0
         self._prefix = ''

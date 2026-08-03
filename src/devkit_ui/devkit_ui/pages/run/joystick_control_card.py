@@ -32,14 +32,13 @@ class JoystickControlCard(ui.card):
                 )
 
                 with ui.column().classes('gap-3 items-center'):
+                    # Emergency stop
                     self.estop_btn = ui.button(
                         on_click=lambda _: self.on_estop()
                     ).props('outline no-caps').classes('estop-btn')
 
                     def sync_estop_state(is_active: bool) -> str:
-                        # Side-effect: update the color prop
                         self.estop_btn.props(f'color={"negative" if is_active else "primary"}')
-                        # Return the text that bind_text_from is expecting
                         return 'STOPPED' if is_active else 'E-Stop'
 
                     self.estop_btn.bind_text_from(
@@ -47,7 +46,7 @@ class JoystickControlCard(ui.card):
                         backward=sync_estop_state
                     )
 
-                    # pose_lbl
+                    # Pose label
                     ui.label().bind_text_from(run_store, 'pose_lbl').classes(
                         'text-xs font-mono text-[#57606a] text-center max-w-[130px] whitespace-pre-line'
                     )

@@ -2,7 +2,7 @@ from nicegui import ui
 
 from devkit_ui.models import TopoDoc
 from devkit_ui.stores.run_store import run_store
-from devkit_ui.utils.topo_renderer import _build_robot_svg, _build_svg
+from devkit_ui.utils.topo_renderer import build_robot_svg, build_svg
 
 
 class NodeMapCard(ui.card):
@@ -13,6 +13,9 @@ class NodeMapCard(ui.card):
 
         self.classes('flex-1')
 
+        run_store.map_svg = build_svg(self._topo_doc, None, None)
+        run_store.robot_svg = build_robot_svg(self._topo_doc.nodes, None)
+
         with self:
             ui.label('Node Map').classes('sec-label')
 
@@ -21,10 +24,8 @@ class NodeMapCard(ui.card):
             # the nodes; it updates on movement without rebuilding
             # the clickable node DOM.
             with ui.element('div').classes('relative w-full'):
-                run_store.map_html = ui.html(
-                    _build_svg(self._topo_doc, None, None)
-                ).classes('w-full')
+                ui.html().classes('w-full').bind_content_from(run_store, 'map_svg')
 
-                run_store.robot_html = ui.html(
-                    _build_robot_svg(self._topo_doc.nodes, None)
-                ).classes('absolute top-0 left-0 w-full').style('pointer-events:none')
+                ui.html().classes('absolute top-0 left-0 w-full') \
+                    .style('pointer-events:none') \
+                    .bind_content_from(run_store, 'robot_svg')

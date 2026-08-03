@@ -1,11 +1,8 @@
-from nicegui import ui
-
-
 class RunStore:
     pose_lbl: str = '—'
 
-    map_html: ui.html | None = None
-    robot_html: ui.html | None = None
+    map_svg: str = ''
+    robot_svg: str = ''
 
     # Track data
     track_prefix: str = ''

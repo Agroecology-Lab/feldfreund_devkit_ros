@@ -19,6 +19,7 @@ import traceback
 import zipfile
 from collections.abc import Callable
 from datetime import UTC, datetime
+from importlib import resources
 from itertools import pairwise
 from operator import attrgetter
 from pathlib import Path
@@ -87,7 +88,7 @@ from devkit_ui.pages.run.track_card import TrackCard
 from devkit_ui.parse import dump_topo_yaml, parse_topo_json, parse_topo_yaml
 from devkit_ui.stores.global_store import global_store
 from devkit_ui.stores.run_store import run_store
-from devkit_ui.utils.topo_renderer import _build_robot_svg, _build_svg
+from devkit_ui.utils.topo_renderer import build_robot_svg, build_svg, inject_click_js
 from devkit_ui.utils.track_manager import TrackManager
 
 _TOPO_SRV_OK = False
@@ -170,14 +171,8 @@ _NAME_RE = re.compile(r'^[A-Z0-9_]+$')
 
 def load_css() -> str:
     """Return the bundled app stylesheet from the package resources."""
-    # try:
-    #     return resources.files('devkit_ui').joinpath('css/app.css').read_text(encoding='utf-8')
-    # except FileNotFoundError:
-    #     return ''
-
-    _CSS_PATH = Path(__file__).parent / 'css' / 'base.css'
     try:
-        return _CSS_PATH.read_text(encoding='utf-8')
+        return resources.files('devkit_ui').joinpath('css/app.css').read_text(encoding='utf-8')
     except FileNotFoundError:
         return ''
 
@@ -202,8 +197,6 @@ def _demo_doc() -> TopoDoc:
 
 # ── SVG renderer ──────────────────────────────────────────────────────────────
 
-# _SVG_W, _SVG_H = 900, 480
-# _MARGIN, _NODE_R = 56, 17
 _TF_STALENESS_LIMIT = 2.0  # s — map->base_link older than this: don't draw it
 
 # ── Fields2Cover geometry helpers ─────────────────────────────────────────────
@@ -594,7 +587,6 @@ class NiceGuiNode(Node):
         self.bumper_front_top_active    = False
         self.bumper_front_bottom_active = False
         self.bumper_back_active         = False
-        # self.soft_estop_active          = False
         self.estop_front_active         = False
         self.estop_back_active          = False
         self.linear_velocity            = 0.0
@@ -1603,22 +1595,6 @@ class NiceGuiNode(Node):
                 self.topo_selected = n
         ui.on('topo_node_clicked', on_node_clicked)
 
-        def inject_click_js() -> None:
-            # Event delegation: a single document-level listener (attached once,
-            # guarded) that resolves clicks to the nearest .topo-node. Survives
-            # map redraws — unlike per-element onclick, which gets wiped every
-            # time the SVG is rebuilt (on current-node change), leaving the
-            # nodes unclickable.
-            ui.run_javascript("""
-                if (!window.__topoDelegated) {
-                    window.__topoDelegated = true;
-                    document.addEventListener('click', (e) => {
-                        const el = e.target.closest('.topo-node');
-                        if (el) emitEvent('topo_node_clicked', {node: el.dataset.node});
-                    });
-                }
-            """)
-
         _prev: dict = {}
 
         def refresh_nav() -> None:
@@ -1658,13 +1634,15 @@ class NiceGuiNode(Node):
                 return
             _prev.update(snap)
 
-            if changed & {'robot', 'nodes'} and run_store.robot_html:
-                run_store.robot_html.set_content(_build_robot_svg(self._topo_doc.nodes, rp))
+            if changed & {'robot', 'nodes'}:
+                run_store.robot_svg = build_robot_svg(self._topo_doc.nodes, rp)
 
-            if changed & {'sel', 'cur', 'nodes'} and run_store.map_html:
-                run_store.map_html.set_content(
-                    _build_svg(self._topo_doc, self.topo_selected,
-                            self.topo_current))
+            if changed & {'sel', 'cur', 'nodes'}:
+                run_store.map_svg = build_svg(
+                    self._topo_doc,
+                    self.topo_selected,
+                    self.topo_current
+                )
                 inject_click_js()
 
             if changed & {'sel', 'nodes'}:
