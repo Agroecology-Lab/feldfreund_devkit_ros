@@ -41,7 +41,7 @@ class TrackCard(ui.card):
                     min=1, step=1, precision=0,
                 ).classes('w-28').bind_value(
                     run_store, 'track_row_id',
-                    backward=lambda val: int(val) if val not in (None, '') else None
+                    forward=lambda val: int(val) if val not in (None, '') else None
                 )
 
                 # Toggle role

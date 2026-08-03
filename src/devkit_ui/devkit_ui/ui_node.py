@@ -603,7 +603,8 @@ class NiceGuiNode(Node):
             get_nodes_cb=lambda: self._topo_doc.nodes,
             drop_node_cb=self.drop_topo_node,
             patch_node_role_cb=self._patch_node_role,
-            create_timer_cb=self.create_timer
+            create_timer_cb=self.create_timer,
+            destroy_timer_cb=self.destroy_timer,
         )
 
         self._f2c_swaths:     list  = []
@@ -759,23 +760,23 @@ class NiceGuiNode(Node):
     # ── node dropping ─────────────────────────────────────────────────────────
 
     def drop_topo_node(self, name: str, row_id: int | None,
-                       row_role: str = 'entry') -> None:
+                       row_role: str = 'entry') -> bool:
         name = re.sub(r'[^A-Z0-9_]', '', name.strip().upper().replace(' ', '_'))
         if not name:
             self.drop_status = 'ERROR: node name required'
-            return
+            return False
         if not _NAME_RE.match(name):
             self.drop_status = f'ERROR: invalid name "{name}"'
-            return
+            return False
         if self._topo_doc.has_node(name):
             self.drop_status = f'ERROR: {name} already exists'
-            return
+            return False
         if self.latest_odom is None and not self._is_sim:
             self.drop_status = 'ERROR: no odometry'
-            return
+            return False
         if not self._topo_doc:
             self.drop_status = 'ERROR: map not loaded'
-            return
+            return False
 
         x = round(self.latest_odom.pose.pose.position.x, 3) if self.latest_odom else 0.0
         y = round(self.latest_odom.pose.pose.position.y, 3) if self.latest_odom else 0.0
@@ -808,6 +809,10 @@ class NiceGuiNode(Node):
         if is_row:
             row_meta = {
                 'row_id': row_id,
+                'row_role': row_role,
+            }
+        elif row_role is not None:
+            row_meta = {
                 'row_role': row_role,
             }
 
@@ -904,6 +909,7 @@ class NiceGuiNode(Node):
                 self.get_logger().error(f'drop_topo_node failed: {e} ({type(e)}\n{traceback.format_exc()})')
 
         threading.Thread(target=_publish_and_persist, daemon=True).start()
+        return True
 
     # ── shared topo-map persistence helper ────────────────────────────────────
 

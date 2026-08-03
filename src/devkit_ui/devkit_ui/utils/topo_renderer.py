@@ -126,7 +126,7 @@ def build_svg(doc: TopoDoc, selected: str | None, current: str | None) -> str:
                 f'<text x="{cx:.1f}" y="{cy+4:.1f}" text-anchor="middle" fill="#0969da" '
                 f'font-family="Courier New" font-size="8" font-weight="700" '
                 f'style="pointer-events:none">'
-                f'{nd.meta.get("row_role","?")[0].upper()}{nd.meta.get("row_id","")}'
+                f'{(nd.meta.get("row_role") or "?")[0].upper()}{nd.meta.get("row_id","")}'
                 f'</text>')
 
         parts.append(
