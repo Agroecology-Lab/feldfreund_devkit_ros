@@ -1,2 +1,3 @@
 class GlobalStore:
-    soft_estop_active: bool = False
+    def __init__(self) -> None:
+        self.soft_estop_active: bool = False
