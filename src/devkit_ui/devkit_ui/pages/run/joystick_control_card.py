@@ -2,17 +2,21 @@ from collections.abc import Callable
 
 from nicegui import ui
 
-from devkit_ui.stores.global_store import global_store
-from devkit_ui.stores.run_store import run_store
+from devkit_ui.stores.global_store import GlobalStore
+from devkit_ui.stores.run_store import RunStore
 
 
 class JoystickControlCard(ui.card):
     def __init__(self,
+                 global_store: GlobalStore,
+                 state: RunStore.Joystick,
                  on_move: Callable[[float, float], None],
                  on_stop: Callable[[], None],
                  on_estop: Callable[[], None]):
         super().__init__()
 
+        self._global_store = global_store
+        self._state = state
         self.on_move = on_move
         self.on_stop = on_stop
         self.on_estop = on_estop
@@ -41,11 +45,11 @@ class JoystickControlCard(ui.card):
                         return 'STOPPED' if is_active else 'E-Stop'
 
                     self.estop_btn.bind_text_from(
-                        global_store, 'soft_estop_active',
+                        self._global_store, 'soft_estop_active',
                         backward=sync_estop_state
                     )
 
                     # Pose label
-                    ui.label().bind_text_from(run_store, 'pose_lbl').classes(
+                    ui.label().bind_text_from(self._state, 'pose_lbl').classes(
                         'text-xs font-mono text-[#57606a] text-center max-w-[130px] whitespace-pre-line'
                     )

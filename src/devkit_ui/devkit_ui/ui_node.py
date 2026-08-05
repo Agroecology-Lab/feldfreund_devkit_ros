@@ -86,8 +86,8 @@ from devkit_ui.pages.run.joystick_control_card import JoystickControlCard
 from devkit_ui.pages.run.node_map_card import NodeMapCard
 from devkit_ui.pages.run.track_card import TrackCard
 from devkit_ui.parse import dump_topo_yaml, parse_topo_json, parse_topo_yaml
-from devkit_ui.stores.global_store import global_store
-from devkit_ui.stores.run_store import run_store
+from devkit_ui.stores.global_store import GlobalStore
+from devkit_ui.stores.run_store import RunStore
 from devkit_ui.utils.topo_renderer import build_robot_svg, build_svg, inject_click_js
 
 _TOPO_SRV_OK = False
@@ -633,6 +633,11 @@ class NiceGuiNode(Node):
 
         self._pose_fail_log_t = 0.0
 
+        self._global_store = GlobalStore()
+        self._run_store = RunStore()
+        self._run_store.node_map.map_svg = build_svg(self._topo_doc, None, None)
+        self._run_store.node_map.robot_svg = build_robot_svg(self._topo_doc.nodes, None)
+
         @ui.page('/')
         def page():
             self.content()
@@ -908,12 +913,12 @@ class NiceGuiNode(Node):
                     row_id: int | None, row_role: str | None) -> None:
         prefix = re.sub(r'[^A-Z0-9_]', '', prefix.strip().upper().replace(' ', '_'))
         if not prefix:
-            run_store.track_running = False
-            run_store.track_status = 'ERROR: prefix required'
+            self._run_store.track.running = False
+            self._run_store.track.status = 'ERROR: prefix required'
             return
         if self._track_timer is not None:
-            run_store.track_running = True
-            run_store.track_status = 'ERROR: already running'
+            self._run_store.track.running = True
+            self._run_store.track.status = 'ERROR: already running'
             return
         existing = [n.name for n in self._topo_doc.nodes
                     if n.name.startswith(prefix + '_') and n.name[len(prefix)+1:].isdigit()]
@@ -921,12 +926,12 @@ class NiceGuiNode(Node):
                                if existing else 0)
         self._track_first  = True
 
-        run_store.track_prefix = prefix
-        run_store.track_interval = interval
-        run_store.track_row_id = row_id
-        run_store.track_row_role = row_role or 'entry'
-        run_store.track_running = True
-        run_store.track_status = ''
+        self._run_store.track.prefix = prefix
+        self._run_store.track.interval = interval
+        self._run_store.track.row_id = row_id
+        self._run_store.track.row_role = row_role or 'entry'
+        self._run_store.track.running = True
+        self._run_store.track.status = ''
 
         is_row = row_id is not None
 
@@ -939,7 +944,7 @@ class NiceGuiNode(Node):
             else:
                 role = row_role
             self.drop_topo_node(node_name, row_id, role)
-            run_store.track_status = f'recording  {node_name}  (#{self._track_counter})'
+            self._run_store.track.status = f'recording  {node_name}  (#{self._track_counter})'
 
         _drop()
         self._track_timer = self.create_timer(interval, _drop)
@@ -948,20 +953,20 @@ class NiceGuiNode(Node):
         if self._track_timer is not None:
             self._track_timer.cancel()
             self._track_timer = None
-        is_row = run_store.track_row_id is not None
+        is_row = self._run_store.track.row_id is not None
         if is_row and self._track_counter > 0:
-            last_name = f'{run_store.track_prefix}_{self._track_counter}'
+            last_name = f'{self._run_store.track.prefix}_{self._track_counter}'
             self._patch_node_role(last_name, 'exit')
-            run_store.track_status = (f'stopped — {last_name} marked exit'
+            self._run_store.track.status = (f'stopped — {last_name} marked exit'
                                       f'  (#{self._track_counter} nodes)')
         else:
-            run_store.track_status = f'stopped at #{self._track_counter}'
-        run_store.track_running = False
+            self._run_store.track.status = f'stopped at #{self._track_counter}'
+        self._run_store.track.running = False
         self._track_counter = 0
         self._track_first = True
-        run_store.track_prefix = ''
-        run_store.track_row_id = None
-        run_store.track_row_role = 'entry'
+        self._run_store.track.prefix = ''
+        self._run_store.track.row_id = None
+        self._run_store.track.row_role = 'entry'
 
     # ── shared topo-map persistence helper ────────────────────────────────────
 
@@ -1519,18 +1524,21 @@ class NiceGuiNode(Node):
                 with ui.row().classes('w-full gap-3 items-stretch'):
 
                     JoystickControlCard(
+                        global_store=self._global_store,
+                        state=self._run_store.joystick,
                         on_move=self.send_speed,
                         on_stop=lambda: self.send_speed(0.0, 0.0),
                         on_estop=self.toggle_estop
                     )
 
                     NodeMapCard(
-                        topo_doc = self._topo_doc
+                        state=self._run_store.node_map,
                     )
 
                 with ui.row().classes('w-full gap-3 items-start'):
 
                     TrackCard(
+                        state=self._run_store.track,
                         on_start=self.start_track,
                         on_stop=self.stop_track
                     )
@@ -1662,9 +1670,9 @@ class NiceGuiNode(Node):
                 px, py  = odom.pose.pose.position.x, odom.pose.pose.position.y
                 gps_str = (f'\n{gps.latitude:.5f}\n{gps.longitude:.5f}'
                         if gps and gps.status.status >= 0 else '')
-                run_store.pose_lbl = f'({px:.2f}, {py:.2f}){gps_str}'
+                self._run_store.joystick.pose_lbl = f'({px:.2f}, {py:.2f}){gps_str}'
             else:
-                run_store.pose_lbl = 'no odom'
+                self._run_store.joystick.pose_lbl = 'no odom'
 
 
             cur = self.topo_current
@@ -1693,10 +1701,10 @@ class NiceGuiNode(Node):
             _prev.update(snap)
 
             if changed & {'robot', 'nodes'}:
-                run_store.robot_svg = build_robot_svg(self._topo_doc.nodes, rp)
+                self._run_store.node_map.robot_svg = build_robot_svg(self._topo_doc.nodes, rp)
 
             if changed & {'sel', 'cur', 'nodes'}:
-                run_store.map_svg = build_svg(
+                self._run_store.node_map.map_svg = build_svg(
                     self._topo_doc,
                     self.topo_selected,
                     self.topo_current
@@ -1732,7 +1740,7 @@ class NiceGuiNode(Node):
                 'color:#cf222e' if 'fail' in self.topo_nav_status else
                 'color:#1a7f37' if self.topo_nav_status == 'arrived' else 'color:#57606a')
             can_go = (bool(self.topo_selected) and not self.topo_navigating
-                    and not global_store.soft_estop_active)
+                    and not self._global_store.soft_estop_active)
             go_btn.set_enabled(can_go)
             stop_btn.set_enabled(self.topo_navigating)
             del_btn.set_enabled(bool(self.topo_selected))
@@ -2416,7 +2424,7 @@ class NiceGuiNode(Node):
         def _execute():
             success_overall = True
             for step_idx, (rid, entry_node, exit_node, action, params) in enumerate(steps):
-                if self._mission_cancel or global_store.soft_estop_active:
+                if self._mission_cancel or self._global_store.soft_estop_active:
                     status_lbl.set_text('Cancelled')
                     status_lbl.style('color:#9a6700')
                     success_overall = False
@@ -2437,7 +2445,7 @@ class NiceGuiNode(Node):
                     success_overall = False
                     break
 
-                if self._mission_cancel or global_store.soft_estop_active:
+                if self._mission_cancel or self._global_store.soft_estop_active:
                     status_lbl.set_text('Cancelled')
                     status_lbl.style('color:#9a6700')
                     success_overall = False
@@ -2518,7 +2526,7 @@ class NiceGuiNode(Node):
                 self.get_logger().warn(f'_send_goal_sync: timeout for {target}')
                 self.cancel_nav_goal()
                 return False
-            if self._mission_cancel or global_store.soft_estop_active:
+            if self._mission_cancel or self._global_store.soft_estop_active:
                 self.cancel_nav_goal()
                 done_event.wait(timeout=2.0)
                 return False
@@ -3516,9 +3524,9 @@ class NiceGuiNode(Node):
                 'color=negative outline no-caps').classes('px-4')
 
     def toggle_estop(self) -> None:
-        global_store.soft_estop_active = not global_store.soft_estop_active
+        self._global_store.soft_estop_active = not self._global_store.soft_estop_active
         msg = Bool()
-        msg.data = global_store.soft_estop_active
+        msg.data = self._global_store.soft_estop_active
         self.estop_publisher.publish(msg)
 
     def send_speed(self, x: float, y: float) -> None:

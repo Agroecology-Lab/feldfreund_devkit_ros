@@ -1,15 +1,26 @@
+from dataclasses import dataclass
+
+
 class RunStore:
-    pose_lbl: str = '—'
+    @dataclass
+    class Joystick:
+        pose_lbl: str = 'no odom'
 
-    map_svg: str = ''
-    robot_svg: str = ''
+    @dataclass
+    class NodeMap:
+        map_svg: str = ''
+        robot_svg: str = ''
 
-    # Track data
-    track_prefix: str = ''
-    track_interval: float = 5.0
-    track_row_id: int | None = None
-    track_row_role: str = 'entry'
-    track_running: bool = False
-    track_status: str = ''
+    @dataclass
+    class Track:
+        prefix: str = ''
+        interval: float = 5.0
+        row_id: int | None = None
+        row_role: str = 'entry'
+        running: bool = False
+        status: str = ''
 
-run_store = RunStore()
+    def __init__(self) -> None:
+        self.joystick = self.Joystick()
+        self.node_map = self.NodeMap()
+        self.track = self.Track()
