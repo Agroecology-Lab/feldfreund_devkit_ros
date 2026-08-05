@@ -1,3 +1,4 @@
+import html
 import math
 from collections.abc import Iterator
 
@@ -36,6 +37,7 @@ def build_robot_svg(nodes: Iterator[TopoNode], robot: tuple | None) -> str:
     Kept separate from build_svg so robot movement updates this layer alone,
     never replacing the clickable node DOM (which would drop its click handlers).
     """
+    nodes = list(nodes)
     empty = (f'<svg width="100%" viewBox="0 0 {_SVG_W} {_SVG_H}" '
             f'xmlns="http://www.w3.org/2000/svg"></svg>')
     if not nodes or robot is None:
@@ -117,22 +119,27 @@ def build_svg(doc: TopoDoc, selected: str | None, current: str | None) -> str:
                 f'dur="2s" repeatCount="indefinite"/></circle>')
 
         parts.append(
-            f'<circle class="topo-node" data-node="{name}" '
+            f'<circle class="topo-node" data-node="{html.escape(str(name), quote=True)}" '
             f'cx="{cx:.1f}" cy="{cy:.1f}" r="{_NODE_R}" '
             f'fill="{fill}" stroke="{stroke}" stroke-width="{sw}"/>')
 
         if is_row:
+            role = str(nd.meta.get('row_role') or '?')
+            row_id = str(nd.meta.get('row_id', ''))
+            label_text = f"{role[0].upper()}{row_id}"
+            escaped_text = html.escape(label_text, quote=True)
+
             parts.append(
                 f'<text x="{cx:.1f}" y="{cy+4:.1f}" text-anchor="middle" fill="#0969da" '
                 f'font-family="Courier New" font-size="8" font-weight="700" '
                 f'style="pointer-events:none">'
-                f'{(nd.meta.get("row_role") or "?")[0].upper()}{nd.meta.get("row_id","")}'
+                f'{escaped_text}'
                 f'</text>')
 
         parts.append(
             f'<text x="{cx:.1f}" y="{cy+_NODE_R+12:.1f}" text-anchor="middle" '
             f'fill="{label_col}" font-family="Courier New" font-size="9" '
-            f'style="pointer-events:none">{name}</text>')
+            f'style="pointer-events:none">{html.escape(str(name), quote=True)}</text>')
 
     return (f'<svg id="topo-map" width="100%" viewBox="0 0 {_SVG_W} {_SVG_H}" '
             f'xmlns="http://www.w3.org/2000/svg">{"".join(parts)}</svg>')
