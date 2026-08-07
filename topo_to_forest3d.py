@@ -27,6 +27,11 @@ try:
 except ImportError:
     yaml = None
 
+# Weeds are placed per crop plant. A weedy field carries several weeds for
+# every crop, so --weed-density 100 (i.e. 100%) maps to this many weeds per
+# plant rather than one. Raise for a denser field, lower for a cleaner one.
+WEEDS_PER_CROP = 3
+
 
 def load_topo(path):
     text = Path(path).read_text()
@@ -908,9 +913,11 @@ if __name__ == '__main__':
     ap.add_argument('--models-path', type=str, default=None,
                     help='Path to Forest3D models directory')
     ap.add_argument('--weed-density', type=int, default=None,
-                    help='Number of weed models (weed/ category) to scatter, '
-                         'clustered near crops. Defaults to ~40%% of the crop '
-                         'density; 0 disables weeds for a clean field.')
+                    help='Weed density as a percentage of the crop count '
+                         '(0-100): 100% scatters WEEDS_PER_CROP weeds per '
+                         f'crop plant (currently {WEEDS_PER_CROP}). Defaults '
+                         'to ~65%% of the crop count; 0 disables weeds for a '
+                         'clean field.')
     ap.add_argument('--generate', action='store_true',
                     help='Also run forest3d generate after writing config')
     ap.add_argument('--world-out', default=None,
@@ -971,11 +978,17 @@ if __name__ == '__main__':
     density = args.density if args.density is not None else derived_density
     print(f"  Plants/row: {plants_per_row}  ->  density cap: {density}")
 
-    # Weeds cluster near crops; default to ~65% of the crop count for a visibly
-    # weedy field (above Forest3D's built-in default of 50). Pass 0 to disable.
-    weed_density = (int(density * (args.weed_density / 100)) if args.weed_density is not None
-                    else int(density * 0.65))
-    print(f"  Weed density: {weed_density}")
+    # Weeds cluster near crops. Scale them against the crop count so a real
+    # weedy field (several weeds per plant) is achievable: --weed-density is a
+    # percentage (0-100) multiplied by WEEDS_PER_CROP. Default to ~65% of the
+    # crop count for a visibly weedy field (above Forest3D's built-in default
+    # of 50). Pass 0 to disable weeds.
+    weed_density = (int(density * WEEDS_PER_CROP * (args.weed_density / 100))
+                    if args.weed_density is not None
+                    else int(density * 0.65 * WEEDS_PER_CROP))
+    print(f"  Weed density: {weed_density} "
+          f"({args.weed_density if args.weed_density is not None else 65}% of "
+          f"{density} crops at {WEEDS_PER_CROP}x)")
     write_forest3d_yaml(params, gps_lat, gps_lon, args.out, density,
                         args.models_path, weed_density)
     write_spawn_pose(spawn_world_x, spawn_world_y, args.spawn_z, args.spawn_out)

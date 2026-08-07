@@ -3034,11 +3034,13 @@ class NiceGuiNode(Node):
                             _gazebo_lbl.set_text(f'rebuild failed: {err[-200:]}')
                             _gazebo_lbl.style('color:#cf222e')
                             return
+                        m = re.search(r'Weed density:\s*(\d+)', r.stdout or '')
+                        weed_count = m.group(1) if m else '?'
                         summary = (f'world rebuilt (spacing={spacing_m:.2f}m, '
                                   f'row={row_w_m:.2f}m, '
                                   f'scale={scale:.2f} on {cat}, '
-                                  f'weed density={weed_density:.2f}, '
-
+                                  f'weed density={weed_density}% '
+                                  f'({weed_count} weeds), '
                                   f'model={model})')
                         _gazebo_lbl.set_text(f'{summary} — relaunch to view')
                         _gazebo_lbl.style('color:#1a7f37')
