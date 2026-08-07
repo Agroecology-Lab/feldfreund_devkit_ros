@@ -32,6 +32,17 @@ except ImportError:
 # plant rather than one. Raise for a denser field, lower for a cleaner one.
 WEEDS_PER_CROP = 3
 
+# Fallback GPS origin when a topo map carries no gps_lat/gps_lon tags at all
+# (e.g. the synthetic virtual_maize_field map, which has no real-world
+# georeference). Without SOME origin, gz-sim-navsat-system falls back to its
+# own hardcoded (0, 0) — see patch_world_spherical_coordinates' docstring —
+# and every /gnss/fix is rejected as out of range. Using Field 27's actual
+# recorded position (https://zenodo.org/records/7805321) instead of (0, 0)
+# keeps sim-mode GNSS behaviour consistent with the real recon.csv data this
+# workspace already uses (see maps/recon_logs/recon.csv).
+DEFAULT_FIELD_LAT = 9.0450940
+DEFAULT_FIELD_LON = 77.7920240
+
 
 def load_topo(path):
     text = Path(path).read_text()
@@ -255,7 +266,11 @@ def compute_field_params(rows, headland_width, default_row_width, plant_spacing,
         gps_lat = ref_lat - (ref_y / m_per_deg_lat)
         gps_lon = ref_lon - (ref_x / m_per_deg_lon) if m_per_deg_lon else ref_lon
     else:
-        gps_lat = gps_lon = None
+        # No GPS-tagged node anywhere in this map (synthetic/no-GPS map) —
+        # fall back to Field 27's location rather than leaving this None,
+        # which upstream would otherwise resolve to gz-sim-navsat-system's
+        # own (0, 0) default. See DEFAULT_FIELD_LAT/LON above.
+        gps_lat, gps_lon = DEFAULT_FIELD_LAT, DEFAULT_FIELD_LON
 
     # Resolution must be fine enough that CropRowTerrain's half_row_idx >= 1
     # (i.e. the row profile covers at least one cell on each side of centre).
