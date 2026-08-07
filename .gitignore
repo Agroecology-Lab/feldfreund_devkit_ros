@@ -45,3 +45,7 @@ uploads/**
 
 # Agri-Field-Dataset (1.9GB download, not versioned)
 Agri-Field-Dataset/
+
+# Runtime maps/missions and scratch patch files — not source
+maps/
+*.patch

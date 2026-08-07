@@ -1,0 +1,34 @@
+<?xml version="1.0"?>
+<?xml-model href="http://download.ros.org/schema/package_format3.xsd" schematypens="http://www.w3.org/2001/XMLSchema"?>
+<package format="3">
+  <name>devkit_f2c_planner</name>
+  <version>0.0.1</version>
+  <description>
+    Field2Cover planning core: lat/lon&lt;-&gt;local-XY projection and swath
+    generation, with shapely-based obstacle post-clipping. Extracted out of
+    devkit_ui so it has no NiceGUI/UI dependency and can be reused by any
+    caller that needs coverage paths (manual missions in devkit_ui, the
+    terrain-aware pipeline). No ROS node of its own — pure library.
+  </description>
+  <maintainer email="ros@zauberzeug.com">Zauberzeug GmbH</maintainer>
+  <license>MIT License</license>
+
+  <buildtool_depend>ament_python</buildtool_depend>
+
+  <test_depend>ament_copyright</test_depend>
+  <test_depend>ament_flake8</test_depend>
+  <test_depend>ament_pep257</test_depend>
+  <test_depend>python3-pytest</test_depend>
+
+  <!-- fields2cover and shapely get built/installed via the Dockerfile, not
+       apt/pip here — declared for documentation, matching how they were
+       already handled before this package existed (see the "generated in
+       the Dockerfile" comment that used to sit above the import in
+       ui_node.py). -->
+  <exec_depend>fields2cover</exec_depend>
+  <exec_depend>python3-shapely</exec_depend>
+
+  <export>
+    <build_type>ament_python</build_type>
+  </export>
+</package>

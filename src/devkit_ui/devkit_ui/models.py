@@ -218,7 +218,13 @@ class TopoDoc:
         self._meta: dict = meta or {}
         self._actions: dict = actions or {}
         self._definitions: dict = definitions or {}
-        self._transformation: dict = transformation or {}
+
+        # topological_navigation's localisation2.py does a bare
+        # tmap["transformation"]["topo_frame_id"] lookup with no fallback,
+        # so this key must always be present on any doc we hand off,
+        # whether freshly constructed, parsed from disk, or cloned.
+        self._transformation: dict = dict(transformation or {})
+        self._transformation.setdefault('topo_frame_id', 'map')
 
     def ensure_meta(self, map_name: str | None) -> None:
         """Ensures that the metadata on the document is valid."""
@@ -249,6 +255,16 @@ class TopoDoc:
     def definitions(self) -> dict:
         return self._definitions
 
+    def seed_actions(self, actions: dict, definitions: dict) -> None:
+        """Backfill actions/definitions from a template doc (e.g. the
+        installed mixed_actions_map.yaml) when this doc has none of its
+        own. Used when clearing/re-seeding a map that was itself loaded
+        from an actions-less authored source, so navigation2.py always
+        gets a real NavigateToPose/limbic_row_follow action config
+        instead of silently running with none."""
+        self._actions = copy.deepcopy(actions)
+        self._definitions = copy.deepcopy(definitions)
+
     @property
     def transformation(self) -> dict:
         return self._transformation
@@ -264,6 +280,20 @@ class TopoDoc:
                 edge_id=edge.edge_id,
                 node=node.name,
             ))
+
+    def insert_node(self, node: TopoNode) -> None:
+        """Add a node exactly as given, with no reverse-edge backfill.
+
+        Unlike add_node(), which assumes it's dropping a single node onto
+        an existing graph and back-fills the reverse edge on each
+        neighbour, this is for callers that pass in nodes whose edges are
+        already fully and correctly wired (in both directions, where
+        that's wanted) before the call — e.g. a batch of new nodes that
+        reference each other. add_node() would KeyError on a sibling not
+        yet inserted, and would silently add reverse edges the caller
+        didn't ask for onto pre-existing nodes.
+        """
+        self._nodes[node.name] = node
 
     def remove_node(self, name: NodeID) -> None:
         self.remove_nodes({name})

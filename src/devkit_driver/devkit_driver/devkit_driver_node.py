@@ -19,6 +19,7 @@ from devkit_driver.modules import (
     EStopHandler,
     ImuHandler,
     OdomHandler,
+    ReconDEMLogger,
     RobotBrainHandler,
     TwistHandler,
 )
@@ -43,6 +44,10 @@ class DevkitDriver(Node):
         # Odometry is standard across both modes
         self._odom_handler = OdomHandler(self, self.system.odometer)
 
+        # Opt-in RTK recon logging for DEM building (see issue #110);
+        # subscribes to /gnss/fix + /odom directly, no hardware attr needed.
+        self._recon_dem_logger = ReconDEMLogger(self)
+
         if hasattr(self.system.feldfreund, 'bms'):
             self._bms_handler = BMSHandler(self, self.system.feldfreund.bms)
 
@@ -60,6 +65,14 @@ class DevkitDriver(Node):
             self._imu_handler = ImuHandler(self, self.system.feldfreund.imu)
         else:
             self.get_logger().info('IMU not detected (no imu attribute); skipping ImuHandler.')
+
+    def destroy_node(self) -> None:
+        # ReconDEMLogger holds an open CSV file handle for the process
+        # lifetime (see recon_dem_logger.py) — nothing else releases it.
+        try:
+            self._recon_dem_logger.close()
+        finally:
+            super().destroy_node()
 
 
 def main() -> None:
@@ -112,6 +125,9 @@ def ros_main(system: System) -> None:
     except (ExternalShutdownException, KeyboardInterrupt):
         pass
     finally:
+        # destroy_node() (closes the ReconDEMLogger CSV handle, see its
+        # override above) — rclpy.shutdown() alone never calls this.
+        devkit_driver.destroy_node()
         if rclpy.ok():
             rclpy.shutdown()
 

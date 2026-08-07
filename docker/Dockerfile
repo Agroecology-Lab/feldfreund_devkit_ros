@@ -184,6 +184,15 @@ RUN --mount=type=cache,target=/root/.cache/pip \
       "opencv-python-headless==4.12.0.88" \
       -r /tmp/requirements.txt
 
+# 5.1b Force numpy + scikit-image
+# CAUTION: "numpy<3.0.0" has no upper bound below 2.3, which conflicts with
+# the opencv-python-headless>=2,<2.3 pin above — pip may resolve numpy 2.3+
+# here and silently violate that constraint. Placed before Stage 10 so
+# cv_bridge is at least built from source against whatever numpy lands here,
+# but if you need the <2.3 guarantee, pin "numpy>=2,<2.3" instead.
+RUN pip install --break-system-packages --force-reinstall --ignore-installed \
+      --no-cache-dir "numpy<3.0.0" scikit-image
+
 # 5.2 CPU-only PyTorch + YOLOX
 RUN --mount=type=cache,target=/root/.cache/pip \
     pip install --break-system-packages "transforms3d>=0.4.2" && \
@@ -256,7 +265,7 @@ RUN clone() { \
     clone -b aoc_refactor https://github.com/LCAS/topological_navigation src/topological_navigation & pids="$pids $!"; \
     clone -b main      https://github.com/samuk/caatingarobotics src/caatingarobotics & pids="$pids $!"; \
     clone              https://github.com/manankharwar/fusioncore src/fusioncore & pids="$pids $!"; \
-    clone -b ros2-gz   https://github.com/FieldRobotEvent/virtual_maize_field src/virtual_maize_field & pids="$pids $!"; \
+    #clone -b ros2-gz   https://github.com/FieldRobotEvent/virtual_maize_field src/virtual_maize_field & pids="$pids $!"; \
     clone -b master    https://github.com/LCAS/sentor src/sentor & pids="$pids $!"; \
     clone -b main      https://github.com/nilseuropa/ros2graph_explorer src/ros2graph_explorer & pids="$pids $!"; \
     clone -b main      https://github.com/Supull/ros2grapher.git src/ros2grapher & pids="$pids $!"; \
@@ -276,6 +285,7 @@ RUN sed -i 's/default_value="Test Rover"/default_value=""/' \
 COPY ./src/devkit_driver    ./src/devkit_driver
 COPY ./src/devkit_bringup    ./src/devkit_bringup
 COPY ./src/devkit_ui        ./src/devkit_ui
+COPY ./src/devkit_f2c_planner  ./src/devkit_f2c_planner
 COPY ./src/devkit_simulation   ./src/devkit_simulation
 
 # devkit_simulation now lives in this repo (src/devkit_simulation, copied above).
@@ -311,7 +321,7 @@ RUN apt-get update && \
           ros-jazzy-nav2-bringup \
           ros-jazzy-navigation2 \
           ros-jazzy-opennav-docking \
-          ros-jazzy-fields2cover \
+          fields2cover \
           tf_transformations \
           interactive_markers \
           topological_navigation \
