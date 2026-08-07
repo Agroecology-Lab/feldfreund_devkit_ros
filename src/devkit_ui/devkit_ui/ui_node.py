@@ -17,8 +17,9 @@ import threading
 import time
 import traceback
 import zipfile
-from collections.abc import Callable, Iterator
+from collections.abc import Callable
 from datetime import UTC, datetime
+from importlib import resources
 from itertools import pairwise
 from operator import attrgetter
 from pathlib import Path
@@ -35,7 +36,6 @@ from geometry_msgs.msg import Twist
 from nav_msgs.msg import Odometry
 from nicegui import app, ui, ui_run
 from nicegui import run as ng_run
-from nicegui.events import ClickEventArguments
 from rclpy.executors import ExternalShutdownException
 from rclpy.node import Node
 from rclpy.qos import (
@@ -62,6 +62,7 @@ from tf2_ros.transform_listener import TransformListener
 
 # MISSION: store owns missions.yaml, scheduling, and run recording.
 from devkit_ui.actions import ACTIONS, action_ros_msgs
+from devkit_ui.constants import NAV_ACTION, NODE_NAME, ROW_ACTION
 from devkit_ui.missions import MissionStore
 from devkit_ui.models import (
     NodeID,
@@ -81,7 +82,13 @@ from devkit_ui.obstacles import (
     attach_mission_sidebar_controls,
     attach_nav_card,
 )
+from devkit_ui.pages.run.joystick_control_card import JoystickControlCard
+from devkit_ui.pages.run.node_map_card import NodeMapCard
+from devkit_ui.pages.run.track_card import TrackCard
 from devkit_ui.parse import dump_topo_yaml, parse_topo_json, parse_topo_yaml
+from devkit_ui.stores.global_store import GlobalStore
+from devkit_ui.stores.run_store import RunStore
+from devkit_ui.utils.topo_renderer import build_robot_svg, build_svg, inject_click_js
 
 _TOPO_SRV_OK = False
 try:
@@ -112,9 +119,6 @@ TMAP_QOS = QoSProfile(
     durability=DurabilityPolicy.TRANSIENT_LOCAL,
     history=HistoryPolicy.KEEP_LAST,
 )
-
-_ROW_ACTION = 'limbic_row_follow'
-_NAV_ACTION = 'navigate_to_pose'
 
 def _topo_to_msg(doc: TopoDoc) -> String:
     msg = String()
@@ -162,73 +166,23 @@ def _headland_neighbour_pairs(coords: dict) -> list:
     return out
 _NAME_RE = re.compile(r'^[A-Z0-9_]+$')
 
-# ── Global CSS ────────────────────────────────────────────────────────────────
+# ── Import CSS ────────────────────────────────────────────────────────────────
 
-_GLOBAL_CSS = """
-<style>
-:root {
-  --bg:        #f6f8fa;
-  --bg-card:   #ffffff;
-  --border:    #d0d7de;
-  --txt:       #24292f;
-  --txt-dim:   #57606a;
-  --txt-muted: #8c959f;
-  --green:     #1a7f37;
-  --amber:     #9a6700;
-  --red:       #cf222e;
-  --blue:      #0969da;
-}
-body, .nicegui-content { background: var(--bg) !important; color: var(--txt); }
-.q-header { background: var(--bg-card) !important;
-            border-bottom: 1px solid var(--border) !important;
-            box-shadow: none !important; color: var(--txt) !important; }
-.q-card   { background: var(--bg-card) !important;
-            border: 1px solid var(--border) !important;
-            box-shadow: none !important; }
-.q-separator { background: var(--border) !important; }
-.q-tab__label { color: var(--txt) !important; }
-.q-tab--active .q-tab__label { color: var(--blue) !important; font-weight: 600; }
-.q-tab-panels { background: var(--bg) !important; }
+def load_css() -> str:
+    """Return the bundled app stylesheet from the package resources."""
+    try:
+        return resources.files('devkit_ui').joinpath('css/app.css').read_text(encoding='utf-8')
+    except FileNotFoundError:
+        return ''
 
-.sec-label {
-  font-size: 10px; font-weight: 600; letter-spacing: 0.08em;
-  text-transform: uppercase; color: var(--txt-muted);
-  font-family: 'Courier New', monospace; margin-bottom: 2px;
-}
-.dot-ok   { display:inline-block;width:7px;height:7px;border-radius:50%;background:#1a7f37;margin-right:6px; }
-.dot-warn { display:inline-block;width:7px;height:7px;border-radius:50%;background:#9a6700;margin-right:6px; }
-.dot-off  { display:inline-block;width:7px;height:7px;border-radius:50%;background:#d0d7de;margin-right:6px; }
 
-.node-item {
-  display:block; padding:4px 8px; border-radius:4px;
-  font-family:'Courier New',monospace; font-size:11px;
-  cursor:pointer; border-left:3px solid transparent;
-  color:var(--txt-dim); transition:background 0.1s;
-}
-.node-item:hover { background:#f6f8fa; color:var(--txt); }
-.node-item.sel   { background:#fff8c5; color:var(--amber); border-left-color:var(--amber); }
-.node-item.row   { color:var(--blue); border-left-color:#d8e8fd; }
-.node-item.sel.row { background:#fff8c5; color:var(--amber); border-left-color:var(--amber); }
-
-.topo-node:hover { filter:brightness(0.85); cursor:pointer; }
-
-.nav-sidebar {
-  width:220px; flex-shrink:0;
-  display:flex; flex-direction:column; gap:6px; align-self:stretch;
-}
-
-.estop-btn {
-  min-width:120px !important; min-height:52px !important;
-  font-size:15px !important; font-weight:700 !important;
-}
-</style>
-"""
+_APP_CSS = load_css()
 
 # ── map parser ────────────────────────────────────────────────────────────────
 
 def _demo_doc() -> TopoDoc:
     return TopoDoc(
-        name="mixed_test_map",
+        name='mixed_test_map',
         nodes=[
             TopoNode(name='N1', pose=TopoPose(x=0.0, y=0.0), edges=['N2'], meta={}),
             TopoNode(name='N2', pose=TopoPose(x=3.0, y=0.0), edges=['N1', 'N3'], meta={}),
@@ -242,139 +196,7 @@ def _demo_doc() -> TopoDoc:
 
 # ── SVG renderer ──────────────────────────────────────────────────────────────
 
-_SVG_W, _SVG_H = 900, 480
-_MARGIN, _NODE_R = 56, 17
 _TF_STALENESS_LIMIT = 2.0  # s — map->base_link older than this: don't draw it
-
-
-def _node_transform(nodes: Iterator[TopoNode]):
-    """World->screen transform (tx, ty) + extents (dx, dy) for the node bbox.
-
-    Shared by _build_svg and _build_robot_svg so both layers map coordinates
-    identically.
-    """
-    xs, ys = [], []
-    for node in nodes:
-        xs.append(node.x)
-        ys.append(node.y)
-    dx = (max(xs) - min(xs)) or 1.0
-    dy = (max(ys) - min(ys)) or 1.0
-    x_min, y_min = min(xs), min(ys)
-
-    def tx(x):
-        return _MARGIN + (x - x_min) / dx * (_SVG_W - 2 * _MARGIN)
-    def ty(y):
-        return _SVG_H - _MARGIN - (y - y_min) / dy * (_SVG_H - 2 * _MARGIN)
-    return tx, ty, dx, dy
-
-
-def _build_robot_svg(nodes: Iterator[TopoNode], robot: tuple | None) -> str:
-    """Transparent overlay SVG with only the live robot marker (map frame).
-
-    Kept separate from _build_svg so robot movement updates this layer alone,
-    never replacing the clickable node DOM (which would drop its click handlers).
-    """
-    empty = (f'<svg width="100%" viewBox="0 0 {_SVG_W} {_SVG_H}" '
-             f'xmlns="http://www.w3.org/2000/svg"></svg>')
-    if not nodes or robot is None:
-        return empty
-    tx, ty, dx, dy = _node_transform(nodes)
-    rx, ry, ryaw = robot
-    mx, my = tx(rx), ty(ry)
-    al = 0.07 * max(dx, dy)
-    ex, ey = tx(rx + al * math.cos(ryaw)), ty(ry + al * math.sin(ryaw))
-    return (f'<svg width="100%" viewBox="0 0 {_SVG_W} {_SVG_H}" '
-            f'xmlns="http://www.w3.org/2000/svg">'
-            f'<line x1="{mx:.1f}" y1="{my:.1f}" x2="{ex:.1f}" y2="{ey:.1f}" '
-            f'stroke="#cf222e" stroke-width="3" stroke-linecap="round"/>'
-            f'<circle cx="{mx:.1f}" cy="{my:.1f}" r="7" fill="#cf222e" '
-            f'stroke="#ffffff" stroke-width="2"/></svg>')
-
-
-def _build_svg(doc: TopoDoc, selected: str | None, current: str | None) -> str:
-    if not doc.nodes:
-        return (f'<svg width="100%" viewBox="0 0 {_SVG_W} {_SVG_H}" '
-                f'style="background:#f6f8fa;border-radius:4px;border:1px solid #d0d7de">'
-                f'<text x="{_SVG_W//2}" y="{_SVG_H//2}" text-anchor="middle" '
-                f'fill="#8c959f" font-family="Courier New" font-size="13">No map loaded</text>'
-                f'</svg>')
-
-    tx, ty, _dx, _dy = _node_transform(doc.nodes)
-
-    parts: list[str] = [f'<rect width="{_SVG_W}" height="{_SVG_H}" fill="#f6f8fa" rx="4"/>']
-
-    drawn: set = set()
-    for nd in doc.nodes:
-        for tgt in nd.edges:
-            tgt_name = tgt.node
-            key = tuple(sorted([nd.name, tgt_name]))
-            if key in drawn or not doc.has_node(tgt_name):
-                continue
-            drawn.add(key)
-
-            tgt_node = doc.get_node(tgt_name)
-
-            is_row_edge = (nd.meta.get('row_id') is not None
-                           or tgt_node.meta.get('row_id') is not None)
-            parts.append(
-                f'<line x1="{tx(nd.x):.1f}" y1="{ty(nd.y):.1f}" '
-                f'x2="{tx(tgt_node.x):.1f}" y2="{ty(tgt_node.y):.1f}" '
-                f'stroke="{"#d8e8fd" if is_row_edge else "#d0d7de"}" '
-                f'stroke-width="{"2" if is_row_edge else "1"}" stroke-linecap="round"/>')
-
-    for nd in doc.nodes:
-        name = nd.name
-        cx, cy = tx(nd.x), ty(nd.y)
-        is_cur = name == current
-        is_sel = name == selected
-        is_row = nd.meta.get('row_id') is not None
-
-        # pylint: disable=multiple-statements
-        if is_cur:
-            fill, stroke, sw = '#dafbe1', '#1a7f37', 2
-        elif is_sel:
-            fill, stroke, sw = '#fff8c5', '#9a6700', 2
-        elif is_row:
-            fill, stroke, sw = '#d8e8fd', '#0969da', 1
-        elif nd.meta.get('dropped_by'):
-            fill, stroke, sw = '#f6f8fa', '#8c959f', 1
-        else:
-            fill, stroke, sw = '#ffffff', '#d0d7de', 1
-        # pylint: enable=multiple-statements
-
-        label_col = ('#1a7f37' if is_cur else '#9a6700' if is_sel
-                     else '#0969da' if is_row else '#57606a')
-
-        if is_cur:
-            parts.append(
-                f'<circle cx="{cx:.1f}" cy="{cy:.1f}" r="{_NODE_R+6}" '
-                f'fill="none" stroke="#1a7f37" stroke-width="1" opacity="0.4">'
-                f'<animate attributeName="r" values="{_NODE_R+6};{_NODE_R+13}" '
-                f'dur="2s" repeatCount="indefinite"/>'
-                f'<animate attributeName="opacity" values="0.4;0" '
-                f'dur="2s" repeatCount="indefinite"/></circle>')
-
-        parts.append(
-            f'<circle class="topo-node" data-node="{name}" '
-            f'cx="{cx:.1f}" cy="{cy:.1f}" r="{_NODE_R}" '
-            f'fill="{fill}" stroke="{stroke}" stroke-width="{sw}"/>')
-
-        if is_row:
-            parts.append(
-                f'<text x="{cx:.1f}" y="{cy+4:.1f}" text-anchor="middle" fill="#0969da" '
-                f'font-family="Courier New" font-size="8" font-weight="700" '
-                f'style="pointer-events:none">'
-                f'{nd.meta.get("row_role","?")[0].upper()}{nd.meta.get("row_id","")}'
-                f'</text>')
-
-        parts.append(
-            f'<text x="{cx:.1f}" y="{cy+_NODE_R+12:.1f}" text-anchor="middle" '
-            f'fill="{label_col}" font-family="Courier New" font-size="9" '
-            f'style="pointer-events:none">{name}</text>')
-
-    return (f'<svg id="topo-map" width="100%" viewBox="0 0 {_SVG_W} {_SVG_H}" '
-            f'xmlns="http://www.w3.org/2000/svg">{"".join(parts)}</svg>')
-
 
 # ── Fields2Cover geometry helpers ─────────────────────────────────────────────
 
@@ -590,7 +412,7 @@ def _run_f2c(corners_ll: list,
 class NiceGuiNode(Node):
 
     def __init__(self) -> None:
-        super().__init__('nicegui')
+        super().__init__(NODE_NAME)
 
         self.cmd_vel_publisher       = self.create_publisher(Twist,  'cmd_vel',       1)
         self.esp_enable_publisher    = self.create_publisher(Empty,  'esp/enable',    1)
@@ -764,7 +586,6 @@ class NiceGuiNode(Node):
         self.bumper_front_top_active    = False
         self.bumper_front_bottom_active = False
         self.bumper_back_active         = False
-        self.soft_estop_active          = False
         self.estop_front_active         = False
         self.estop_back_active          = False
         self.linear_velocity            = 0.0
@@ -779,11 +600,7 @@ class NiceGuiNode(Node):
 
         self._track_timer:   object  | None   = None
         self._track_counter: int              = 0
-        self._track_prefix:  str              = ''
-        self._track_row_id:  int     | None   = None
-        self._track_is_row:  bool             = False
         self._track_first:   bool             = True
-        self.track_status:   str              = ''
 
         self._f2c_swaths:     list  = []
         self._f2c_row_start:  int   = 1
@@ -815,6 +632,11 @@ class NiceGuiNode(Node):
         self._mission_run_id:    str | None = None   # active MissionStore id
 
         self._pose_fail_log_t = 0.0
+
+        self._global_store = GlobalStore()
+        self._run_store = RunStore()
+        self._run_store.node_map.map_svg = build_svg(self._topo_doc, None, None)
+        self._run_store.node_map.robot_svg = build_robot_svg(self._topo_doc.nodes, None)
 
         @ui.page('/')
         def page():
@@ -969,9 +791,9 @@ class NiceGuiNode(Node):
         is_row    = row_id is not None
 
         if is_row:
-            edge_action, xy_tol, yaw_tol, vert_r = _ROW_ACTION, 0.1, 0.05, 0.5
+            edge_action, xy_tol, yaw_tol, vert_r = ROW_ACTION, 0.1, 0.05, 0.5
         else:
-            edge_action, xy_tol, yaw_tol, vert_r = _NAV_ACTION, 0.3, 0.1,  1.0
+            edge_action, xy_tol, yaw_tol, vert_r = NAV_ACTION, 0.3, 0.1,  1.0
 
         gps = self.latest_gps
         gps_meta: dict = {}
@@ -1083,6 +905,7 @@ class NiceGuiNode(Node):
                 self.get_logger().error(f'drop_topo_node failed: {e} ({type(e)}\n{traceback.format_exc()})')
 
         threading.Thread(target=_publish_and_persist, daemon=True).start()
+        return
 
     # ── track mode ────────────────────────────────────────────────────────────
 
@@ -1090,30 +913,38 @@ class NiceGuiNode(Node):
                     row_id: int | None, row_role: str | None) -> None:
         prefix = re.sub(r'[^A-Z0-9_]', '', prefix.strip().upper().replace(' ', '_'))
         if not prefix:
-            self.track_status = 'ERROR: prefix required'
+            self._run_store.track.running = False
+            self._run_store.track.status = 'ERROR: prefix required'
             return
         if self._track_timer is not None:
-            self.track_status = 'ERROR: already running'
+            self._run_store.track.running = True
+            self._run_store.track.status = 'ERROR: already running'
             return
         existing = [n.name for n in self._topo_doc.nodes
                     if n.name.startswith(prefix + '_') and n.name[len(prefix)+1:].isdigit()]
         self._track_counter = (max(int(n[len(prefix)+1:]) for n in existing)
                                if existing else 0)
-        self._track_prefix = prefix
-        self._track_row_id = row_id
-        self._track_is_row = row_id is not None
         self._track_first  = True
+
+        self._run_store.track.prefix = prefix
+        self._run_store.track.interval = interval
+        self._run_store.track.row_id = row_id
+        self._run_store.track.row_role = row_role or 'entry'
+        self._run_store.track.running = True
+        self._run_store.track.status = ''
+
+        is_row = row_id is not None
 
         def _drop() -> None:
             self._track_counter += 1
             node_name = f'{prefix}_{self._track_counter}'
-            if self._track_is_row:
+            if is_row:
                 role = 'entry' if self._track_first else 'middle'
                 self._track_first = False
             else:
                 role = row_role
             self.drop_topo_node(node_name, row_id, role)
-            self.track_status = f'recording  {node_name}  (#{self._track_counter})'
+            self._run_store.track.status = f'recording  {node_name}  (#{self._track_counter})'
 
         _drop()
         self._track_timer = self.create_timer(interval, _drop)
@@ -1122,18 +953,20 @@ class NiceGuiNode(Node):
         if self._track_timer is not None:
             self._track_timer.cancel()
             self._track_timer = None
-        if self._track_is_row and self._track_counter > 0:
-            last_name = f'{self._track_prefix}_{self._track_counter}'
+        is_row = self._run_store.track.row_id is not None
+        if is_row and self._track_counter > 0:
+            last_name = f'{self._run_store.track.prefix}_{self._track_counter}'
             self._patch_node_role(last_name, 'exit')
-            self.track_status = (f'stopped — {last_name} marked exit'
-                                 f'  (#{self._track_counter} nodes)')
+            self._run_store.track.status = (f'stopped — {last_name} marked exit'
+                                      f'  (#{self._track_counter} nodes)')
         else:
-            self.track_status = f'stopped at #{self._track_counter}'
+            self._run_store.track.status = f'stopped at #{self._track_counter}'
+        self._run_store.track.running = False
         self._track_counter = 0
-        self._track_prefix = ''
-        self._track_row_id  = None
-        self._track_is_row = False
         self._track_first = True
+        self._run_store.track.prefix = ''
+        self._run_store.track.row_id = None
+        self._run_store.track.row_role = 'entry'
 
     # ── shared topo-map persistence helper ────────────────────────────────────
 
@@ -1366,7 +1199,7 @@ class NiceGuiNode(Node):
                               'gps_fix_type': fix_type, 'gps_hdop': None,
                               'row_id': rid}
 
-            in_edges = [TopoEdge(action=_ROW_ACTION, edge_id=f'{in_name}_{out_name}', node=out_name)]
+            in_edges = [TopoEdge(action=ROW_ACTION, edge_id=f'{in_name}_{out_name}', node=out_name)]
             in_node = _disk_node(in_name,  ix, iy, 'entry', in_lat,  in_lon,  in_edges, rid)
             in_node.add_metadata(**ui_meta_common)
             out_node = _disk_node(out_name, ox, oy, 'exit',  out_lat, out_lon, [], rid)
@@ -1406,14 +1239,14 @@ class NiceGuiNode(Node):
 
             for a, b in ((p, q), (q, p)):
                 a_node = new_topo_nodes[a]
-                a_node.add_edge(TopoEdge(action=_NAV_ACTION, edge_id=edge_name, node=b))
+                a_node.add_edge(TopoEdge(action=NAV_ACTION, edge_id=edge_name, node=b))
 
             for node in new_topo_nodes.values():
                 if node.name not in (p, q):
                     continue
 
                 other = q if node.name == p else p
-                node.add_edge(other, action=_NAV_ACTION)
+                node.add_edge(other, action=NAV_ACTION)
 
         all_pts = dict(row_coords)   # {name: (x, y)}
         for a_name, b_name in _headland_neighbour_pairs(all_pts):
@@ -1427,7 +1260,7 @@ class NiceGuiNode(Node):
                 if tgt not in new_topo_nodes:
                     continue
                 node = new_topo_nodes[tgt]
-                node.add_edge(connect_to, action=_NAV_ACTION)
+                node.add_edge(connect_to, action=NAV_ACTION)
 
         skip_str   = f' (skipped {len(skipped)} dup ids)' if skipped else ''
         splice_str = f' · spliced @ {connect_to}' if connect_to else ' · standalone'
@@ -1505,16 +1338,16 @@ class NiceGuiNode(Node):
             inn = rows[rid].get('entry')
             outn = rows[rid].get('exit')
             if inn and outn and inn != outn:
-                wanted_edges.append((inn, outn, _ROW_ACTION))
-                wanted_edges.append((outn, inn, _ROW_ACTION))
+                wanted_edges.append((inn, outn, ROW_ACTION))
+                wanted_edges.append((outn, inn, ROW_ACTION))
 
         # Headland edges: same-end neighbours only, classified by geometry —
         # NOT by entry/exit label (snake ordering flips label vs physical end).
         # Shared with the build path so the two cannot diverge.
         if len(coords) >= 2:
             for a_name, b_name in _headland_neighbour_pairs(coords):
-                wanted_edges.append((a_name, b_name, _NAV_ACTION))
-                wanted_edges.append((b_name, a_name, _NAV_ACTION))
+                wanted_edges.append((a_name, b_name, NAV_ACTION))
+                wanted_edges.append((b_name, a_name, NAV_ACTION))
         else:
             self.get_logger().warn(
                 'repair: row nodes lack x/y coords — cannot classify headland '
@@ -1526,8 +1359,8 @@ class NiceGuiNode(Node):
             for tgt in (first_in, last_out):
                 if not tgt or tgt == connect_to:
                     continue
-                wanted_edges.append((connect_to, tgt, _NAV_ACTION))
-                wanted_edges.append((tgt, connect_to, _NAV_ACTION))
+                wanted_edges.append((connect_to, tgt, NAV_ACTION))
+                wanted_edges.append((tgt, connect_to, NAV_ACTION))
 
         new_topo_nodes = {node.name: node for node in self._topo_doc.nodes}
         added_count = 0
@@ -1666,7 +1499,8 @@ class NiceGuiNode(Node):
     # ── UI shell ──────────────────────────────────────────────────────────────
 
     def content(self) -> None:
-        ui.add_head_html(_GLOBAL_CSS)
+        if _APP_CSS:
+            ui.add_head_html(f'<style>{_APP_CSS}</style>')
         with ui.tabs().classes('w-full') as tabs:
             tab_nav     = ui.tab('Nav',     icon='route')
             tab_mission = ui.tab('Mission', icon='checklist')
@@ -1689,90 +1523,25 @@ class NiceGuiNode(Node):
 
                 with ui.row().classes('w-full gap-3 items-stretch'):
 
-                    with ui.card().style('padding:16px 20px;flex-shrink:0'):
-                        ui.html('<div class="sec-label mb-3">Joystick</div>')
-                        with ui.row().classes('items-center gap-6'):
-                            def _debug_joystick_move(e):
-                                self.get_logger().info(
-                                    f'[joystick debug] raw e.x={e.x!r} e.y={e.y!r} '
-                                    f'(as float: x={float(e.x):+.3f} y={float(e.y):+.3f})')
-                                self.send_speed(float(e.y), float(e.x))
+                    JoystickControlCard(
+                        global_store=self._global_store,
+                        state=self._run_store.joystick,
+                        on_move=self.send_speed,
+                        on_stop=lambda: self.send_speed(0.0, 0.0),
+                        on_estop=self.toggle_estop
+                    )
 
-                            ui.joystick(
-                                color='#1a7f37', size=130,
-                                on_move=_debug_joystick_move,
-                                on_end=lambda _: self.send_speed(0.0, 0.0),
-                            )
-                            with ui.column().classes('gap-3 items-center'):
-                                def update_estop(e: ClickEventArguments) -> None:
-                                    assert isinstance(e.sender, ui.button)
-                                    self.toggle_estop()
-                                    if self.soft_estop_active:
-                                        e.sender.props('color=negative')
-                                        e.sender.text = 'STOPPED'
-                                    else:
-                                        e.sender.props('color=primary')
-                                        e.sender.text = 'E-Stop'
-                                ui.button('E-Stop', on_click=update_estop).props(
-                                    'color=primary outline no-caps').classes('estop-btn')
-                                pose_lbl = ui.label('—').classes('text-xs font-mono').style(
-                                    'color:#57606a;text-align:center;'
-                                    'max-width:130px;white-space:pre-line')
-
-                    with ui.card().classes('flex-1').style('padding:12px;min-width:0'):
-                        ui.html('<div class="sec-label mb-2">Node Map</div>')
-                        # Node map + robot marker overlay (same viewBox, so they
-                        # align). Overlay is pointer-events:none so clicks reach
-                        # the nodes; it updates on movement without rebuilding
-                        # the clickable node DOM.
-                        with ui.element('div').classes('relative w-full'):
-                            map_html = ui.html(
-                                _build_svg(self._topo_doc, None, None)
-                            ).classes('w-full')
-                            robot_html = ui.html(
-                                _build_robot_svg(self._topo_doc.nodes, None)
-                            ).classes('absolute top-0 left-0 w-full').style(
-                                'pointer-events:none')
+                    NodeMapCard(
+                        state=self._run_store.node_map,
+                    )
 
                 with ui.row().classes('w-full gap-3 items-start'):
 
-                    with ui.card().classes('flex-1').style('padding:12px 14px'):
-                        with ui.row().classes('items-baseline gap-2 mb-2'):
-                            ui.label('Track').classes('font-semibold')
-                            ui.label('auto-drop every N s').classes('text-xs').style(
-                                'color:#8c959f')
-                        with ui.row().classes('items-center gap-2 w-full'):
-                            track_prefix = ui.input(
-                                placeholder='Prefix e.g. ROW_A', label='Prefix',
-                            ).classes('flex-1')
-                            track_interval = ui.number(
-                                label='s', value=5, min=2, max=30, step=1, precision=0,
-                            ).classes('w-16')
-                        with ui.row().classes('items-center gap-2 w-full mt-1'):
-                            track_row_id = ui.number(
-                                label='Row ID', placeholder='blank=standard',
-                                min=1, step=1, precision=0,
-                            ).classes('w-28')
-                            track_row_role = ui.toggle(
-                                {'entry': 'Entry', 'exit': 'Exit'}, value='entry',
-                            ).props('dense')
-                            track_row_hint = ui.label('').classes('text-xs font-mono').style(
-                                'color:#8c959f')
-                        with ui.row().classes('items-center gap-2 mt-2'):
-                            track_start_btn = ui.button(
-                                'Start',
-                                on_click=lambda: self.start_track(
-                                    track_prefix.value,
-                                    float(track_interval.value or 5),
-                                    int(track_row_id.value) if track_row_id.value else None,
-                                    track_row_role.value,
-                                ),
-                            ).props('color=positive no-caps dense')
-                            track_stop_btn = ui.button(
-                                'Stop', on_click=self.stop_track,
-                            ).props('color=negative no-caps dense')
-                            track_status_lbl = ui.label('').classes(
-                                'text-xs font-mono ml-1').style('color:#57606a')
+                    TrackCard(
+                        state=self._run_store.track,
+                        on_start=self.start_track,
+                        on_stop=self.stop_track
+                    )
 
                     with ui.card().classes('flex-1').style('padding:12px 14px'):
                         with ui.row().classes('items-baseline gap-2 mb-2'):
@@ -1892,22 +1661,6 @@ class NiceGuiNode(Node):
                 self.topo_selected = n
         ui.on('topo_node_clicked', on_node_clicked)
 
-        def inject_click_js() -> None:
-            # Event delegation: a single document-level listener (attached once,
-            # guarded) that resolves clicks to the nearest .topo-node. Survives
-            # map redraws — unlike per-element onclick, which gets wiped every
-            # time the SVG is rebuilt (on current-node change), leaving the
-            # nodes unclickable.
-            ui.run_javascript("""
-                if (!window.__topoDelegated) {
-                    window.__topoDelegated = true;
-                    document.addEventListener('click', (e) => {
-                        const el = e.target.closest('.topo-node');
-                        if (el) emitEvent('topo_node_clicked', {node: el.dataset.node});
-                    });
-                }
-            """)
-
         _prev: dict = {}
 
         def refresh_nav() -> None:
@@ -1917,9 +1670,10 @@ class NiceGuiNode(Node):
                 px, py  = odom.pose.pose.position.x, odom.pose.pose.position.y
                 gps_str = (f'\n{gps.latitude:.5f}\n{gps.longitude:.5f}'
                         if gps and gps.status.status >= 0 else '')
-                pose_lbl.set_text(f'({px:.2f}, {py:.2f}){gps_str}')
+                self._run_store.joystick.pose_lbl = f'({px:.2f}, {py:.2f}){gps_str}'
             else:
-                pose_lbl.set_text('no odom')
+                self._run_store.joystick.pose_lbl = 'no odom'
+
 
             cur = self.topo_current
             if cur and cur != '—':
@@ -1928,27 +1682,11 @@ class NiceGuiNode(Node):
             else:
                 cur_drop_lbl.set_text('no current node')
                 cur_drop_lbl.style('color:#8c959f')
-            row_hint.set_text(_ROW_ACTION if row_id_input.value else _NAV_ACTION)
+            row_hint.set_text(ROW_ACTION if row_id_input.value else NAV_ACTION)
             row_hint.style('color:#0969da' if row_id_input.value else 'color:#8c959f')
             drop_status_lbl.set_text(self.drop_status)
             drop_status_lbl.style(
                 'color:#cf222e' if self.drop_status.startswith('ERROR') else 'color:#1a7f37')
-
-            running = self._track_timer is not None
-            track_start_btn.set_enabled(not running)
-            track_stop_btn.set_enabled(running)
-            if track_row_id.value:
-                track_row_hint.set_text('entry→middle→exit auto')
-                track_row_hint.style('color:#0969da')
-                track_row_role.set_visibility(False)
-            else:
-                track_row_hint.set_text(_NAV_ACTION)
-                track_row_hint.style('color:#8c959f')
-                track_row_role.set_visibility(True)
-            track_status_lbl.set_text(self.track_status)
-            track_status_lbl.style(
-                'color:#cf222e' if self.track_status.startswith('ERROR') else
-                'color:#1a7f37' if running else 'color:#57606a')
 
             rp = self._robot_pose()
             rp_key = None if rp is None else (round(rp[0], 1), round(rp[1], 1),
@@ -1963,12 +1701,14 @@ class NiceGuiNode(Node):
             _prev.update(snap)
 
             if changed & {'robot', 'nodes'}:
-                robot_html.set_content(_build_robot_svg(self._topo_doc.nodes, rp))
+                self._run_store.node_map.robot_svg = build_robot_svg(self._topo_doc.nodes, rp)
 
             if changed & {'sel', 'cur', 'nodes'}:
-                map_html.set_content(
-                    _build_svg(self._topo_doc, self.topo_selected,
-                            self.topo_current))
+                self._run_store.node_map.map_svg = build_svg(
+                    self._topo_doc,
+                    self.topo_selected,
+                    self.topo_current
+                )
                 inject_click_js()
 
             if changed & {'sel', 'nodes'}:
@@ -2000,7 +1740,7 @@ class NiceGuiNode(Node):
                 'color:#cf222e' if 'fail' in self.topo_nav_status else
                 'color:#1a7f37' if self.topo_nav_status == 'arrived' else 'color:#57606a')
             can_go = (bool(self.topo_selected) and not self.topo_navigating
-                    and not self.soft_estop_active)
+                    and not self._global_store.soft_estop_active)
             go_btn.set_enabled(can_go)
             stop_btn.set_enabled(self.topo_navigating)
             del_btn.set_enabled(bool(self.topo_selected))
@@ -2684,7 +2424,7 @@ class NiceGuiNode(Node):
         def _execute():
             success_overall = True
             for step_idx, (rid, entry_node, exit_node, action, params) in enumerate(steps):
-                if self._mission_cancel or self.soft_estop_active:
+                if self._mission_cancel or self._global_store.soft_estop_active:
                     status_lbl.set_text('Cancelled')
                     status_lbl.style('color:#9a6700')
                     success_overall = False
@@ -2705,7 +2445,7 @@ class NiceGuiNode(Node):
                     success_overall = False
                     break
 
-                if self._mission_cancel or self.soft_estop_active:
+                if self._mission_cancel or self._global_store.soft_estop_active:
                     status_lbl.set_text('Cancelled')
                     status_lbl.style('color:#9a6700')
                     success_overall = False
@@ -2786,7 +2526,7 @@ class NiceGuiNode(Node):
                 self.get_logger().warn(f'_send_goal_sync: timeout for {target}')
                 self.cancel_nav_goal()
                 return False
-            if self._mission_cancel or self.soft_estop_active:
+            if self._mission_cancel or self._global_store.soft_estop_active:
                 self.cancel_nav_goal()
                 done_event.wait(timeout=2.0)
                 return False
@@ -3198,7 +2938,7 @@ class NiceGuiNode(Node):
                         ]
                         # Log to a file (not DEVNULL) so a crashed launch is
                         # diagnosable — tail /tmp/gazebo_sim.log.
-                        _gz_log = open('/tmp/gazebo_sim.log', 'w',encoding="utf-8")
+                        _gz_log = open('/tmp/gazebo_sim.log', 'w',encoding='utf-8')
                         _gazebo_proc[0] = subprocess.Popen(
                             wrapped_cmd,
                             stdout=_gz_log, stderr=subprocess.STDOUT,
@@ -3332,7 +3072,7 @@ class NiceGuiNode(Node):
                     try:
                         _gazebo_proc[0] = subprocess.Popen(
                             _sim_cmd(),
-                            stdout=open('/tmp/gazebo_sim.log', 'w', encoding="utf-8"),
+                            stdout=open('/tmp/gazebo_sim.log', 'w', encoding='utf-8'),
                             stderr=subprocess.STDOUT,
                             env=_SIM_ENV,
                             start_new_session=True,
@@ -3551,7 +3291,7 @@ class NiceGuiNode(Node):
     <description>{name} plant model</description>
 </model>
 '''
-                        with open(model_dir / 'model.config', 'w', encoding="utf-8") as f:
+                        with open(model_dir / 'model.config', 'w', encoding='utf-8') as f:
                             f.write(model_config)
                         # Write model.sdf
                         model_sdf = f'''<?xml version="1.0" ?>
@@ -3573,7 +3313,7 @@ class NiceGuiNode(Node):
     </model>
 </sdf>
 '''
-                        with open(model_dir / 'model.sdf', 'w', encoding="utf-8") as f:
+                        with open(model_dir / 'model.sdf', 'w', encoding='utf-8') as f:
                             f.write(model_sdf)
                         # Refresh dropdown
                         new_models = _refresh_crop_models()
@@ -3647,7 +3387,7 @@ class NiceGuiNode(Node):
                                 'detector:=tsm',
                                 'image_topic:=/camera/image_raw',
                             ],
-                            stdout=open('/tmp/neo_sim.log', 'w', encoding="utf-8"),
+                            stdout=open('/tmp/neo_sim.log', 'w', encoding='utf-8'),
                             stderr=subprocess.STDOUT,
                             env=os.environ.copy(),
                             start_new_session=True,
@@ -3799,9 +3539,9 @@ class NiceGuiNode(Node):
                 'color=negative outline no-caps').classes('px-4')
 
     def toggle_estop(self) -> None:
-        self.soft_estop_active = not self.soft_estop_active
+        self._global_store.soft_estop_active = not self._global_store.soft_estop_active
         msg = Bool()
-        msg.data = self.soft_estop_active
+        msg.data = self._global_store.soft_estop_active
         self.estop_publisher.publish(msg)
 
     def send_speed(self, x: float, y: float) -> None:
