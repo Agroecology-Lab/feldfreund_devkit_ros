@@ -42,3 +42,6 @@ uploads/**
 !uploads/soil_custom/
 !uploads/soil_custom/textures/
 !uploads/**/.gitkeep
+
+# Agri-Field-Dataset (1.9GB download, not versioned)
+Agri-Field-Dataset/
