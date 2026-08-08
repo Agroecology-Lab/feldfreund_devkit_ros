@@ -1002,7 +1002,7 @@ if __name__ == '__main__':
                     help='Smallest furrow width (m) to accept before the '
                          '40%%-of-spacing auto-correction kicks in. '
                          "Forest3D's hard floor is 0.1 m regardless.")
-    ap.add_argument('--plant-spacing', type=float, default=10.0,
+    ap.add_argument('--plant-spacing', type=float, default=1.0,
                     help='Spacing between plants along a row (m). Forest3D '
                          'places int(row_length / plant_spacing) plants per row.')
     ap.add_argument('--plant-scale', type=float, default=1.0,

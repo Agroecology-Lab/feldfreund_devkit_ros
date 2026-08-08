@@ -46,7 +46,7 @@ KEYFILE="$WORLD.key"
 
 SET=$(grep -A7 "^settings:" /workspace/forest3d.yaml 2>/dev/null || true)
 get() { echo "$SET" | grep -m1 -E "^  $1:" | awk '{print $2}'; }
-PS=${PS_ARG:-$(get plant_spacing)};     [ -n "$PS" ]    || PS=10.0
+PS=${PS_ARG:-$(get plant_spacing)};     [ -n "$PS" ]    || PS=1.0
 RW=${RW_ARG:-$(get row_width)};         [ -n "$RW" ]    || RW=0.9
 SC=${SC_ARG:-$(get plant_scale)};       [ -n "$SC" ]    || SC=1.0
 CAT=${CAT_ARG:-$(get scale_category)};  [ -n "$CAT" ]   || CAT=all

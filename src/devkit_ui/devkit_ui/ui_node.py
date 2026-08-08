@@ -3000,7 +3000,7 @@ class NiceGuiNode(Node):
                         _gazebo_lbl.set_text('rebuilding world from map…')
                         _gazebo_lbl.style('color:#57606a')
                         # Get plant placement values (cm → m conversion)
-                        spacing_m = float(plant_spacing.value or 80) / 100.0
+                        spacing_m = float(plant_spacing.value or 100) / 100.0
                         row_w_m = float(row_width_input.value or 80) / 100.0
                         scale = float(plant_scale.value or 100) / 100.0
                         cat = scale_category.value or 'all'
@@ -3106,7 +3106,7 @@ class NiceGuiNode(Node):
                     with ui.column().classes('flex-1 gap-0'):
                         ui.html('<div class="sec-label">Plant Spacing</div>')
                         plant_spacing = ui.number(
-                            value=1000, min=10, max=1000, step=5, precision=0,
+                            value=100, min=10, max=1000, step=5, precision=0,
                             suffix='cm'
                         ).classes('w-full')
                     with ui.column().classes('flex-1 gap-0'):
@@ -3120,7 +3120,7 @@ class NiceGuiNode(Node):
 
                 def _check_spacing_warning():
                     rw = float(row_width_input.value or 80)
-                    ps = float(plant_spacing.value or 80)
+                    ps = float(plant_spacing.value or 100)
                     if rw >= ps:
                         spacing_warn_lbl.set_text('Warning: row width >= plant spacing')
                     else:
