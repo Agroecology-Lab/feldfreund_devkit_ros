@@ -1,10 +1,14 @@
 #!/usr/bin/env python3
 """agri_field_to_terrain.py — whole-field terrain for the Sowbot Gazebo sim.
 
-Turns one field's `elevation_grid/<field>.ply` into a terrain mesh that drops
+Turns one field's `surfaces_3D/<field>.ply` into a terrain mesh that drops
 into the ground model (`models/ground/mesh/terrain.{obj,stl}`). The mesh covers
 the entire field, follows the real field boundary (polygons_2D/<field>.xml),
 and is scaled uniformly to convert km-scale fields to sim metres.
+
+`surfaces_3D` is the dense ~25 m point cloud; it is resampled onto a regular
+grid (the decimation) before Delaunay triangulation so the exported mesh stays
+light enough for DART collision.
 
 Usage:
     python3 agri_field_to_terrain.py --dataset Agri-Field-Dataset \
@@ -16,15 +20,16 @@ import re
 from pathlib import Path
 
 import numpy as np
-from scipy.interpolate import RegularGridInterpolator
+from scipy.interpolate import LinearNDInterpolator
 from shapely.geometry import Point, Polygon
 from stl import mesh as stl_mesh
 
 SCALE = 0.01  # 1:100 — km-scale field down to sim metres (all axes)
+GRID = 200.0  # resample spacing in real metres (decimation of surfaces_3D)
 
 
-def read_elevation_grid(ply_path):
-    """Read a binary elevation_grid PLY into (xs, ys, Z) grid arrays."""
+def read_surface(ply_path):
+    """Read the vertex section of a surfaces_3D PLY into an (N, 3) array."""
     with open(ply_path, 'rb') as f:
         header = []
         while True:
@@ -37,12 +42,7 @@ def read_elevation_grid(ply_path):
         n_verts = next(int(h.split()[-1]) for h in header
                        if h.startswith('element vertex'))
         rest = f.read()
-    verts = np.frombuffer(rest, dtype='<f4', count=n_verts * 3).reshape(n_verts, 3)
-    xs = np.unique(verts[:, 0])
-    ys = np.unique(verts[:, 1])
-    Z = np.full((len(ys), len(xs)), np.nan, dtype=np.float64)
-    Z[np.searchsorted(ys, verts[:, 1]), np.searchsorted(xs, verts[:, 0])] = verts[:, 2]
-    return xs, ys, Z
+    return np.frombuffer(rest, dtype='<f4', count=n_verts * 3).reshape(n_verts, 3)
 
 
 def read_field_polygon(dataset, field):
@@ -57,18 +57,21 @@ def read_field_polygon(dataset, field):
     return Polygon(verts)
 
 
-def build_whole_field_mesh(interp, xs, ys, polygon):
-    """Build a mesh covering the entire field polygon, scaled uniformly.
+def sample_field(surface, polygon, grid):
+    """Sample the surface point cloud on a regular grid inside the polygon.
 
-    Uses the native grid points inside the polygon plus densified boundary
-    points, Delaunay-triangulated and filtered to the polygon so the terrain
-    follows the real field shape.
+    Returns (points, z) where points are the (N, 2) XY positions. Densified
+    boundary points are included so the mesh edge follows the field shape.
     """
-    from scipy.spatial import Delaunay
-    xx, yy = np.meshgrid(xs, ys)
-    interior = [(x, y) for x, y in zip(xx.ravel(), yy.ravel())
-                if polygon.contains(Point(x, y))]
-    spacing = np.median(np.diff(xs))
+    xmin, ymin, xmax, ymax = polygon.bounds
+    gx = np.arange(xmin, xmax, grid)
+    gy = np.arange(ymin, ymax, grid)
+    xx, yy = np.meshgrid(gx, gy)
+    pts = np.column_stack([xx.ravel(), yy.ravel()])
+    inside = np.array([polygon.contains(Point(p)) for p in pts])
+    pts = pts[inside]
+
+    spacing = np.median(np.diff(gx))
     boundary = set()
     coords = list(polygon.exterior.coords)[:-1]
     for a, b in zip(coords, coords[1:] + coords[:1]):
@@ -77,18 +80,34 @@ def build_whole_field_mesh(interp, xs, ys, polygon):
         for k in range(n):
             boundary.add((a[0] + (b[0] - a[0]) * k / n,
                           a[1] + (b[1] - a[1]) * k / n))
-    pts = np.array(interior + list(boundary))
-    zz = interp((pts[:, 1], pts[:, 0]))
-    tri = Delaunay(pts)
-    centroids = pts[tri.simplices].mean(axis=1)
+    boundary = np.array(list(boundary))
+    points = np.vstack([pts, boundary])
+
+    interp = LinearNDInterpolator(surface[:, :2], surface[:, 2])
+    z = interp(points)
+    # LinearNDInterpolator returns NaN outside the point cloud; fill with
+    # nearest-neighbour for the few boundary points that may fall in a gap.
+    if np.isnan(z).any():
+        good = ~np.isnan(z)
+        from scipy.interpolate import NearestNDInterpolator
+        nn = NearestNDInterpolator(points[good], z[good])
+        z[~good] = nn(points[~good])
+    return points, z
+
+
+def triangulate(points, z, polygon):
+    """Delaunay-triangulate the sampled points, keeping triangles inside the
+    field polygon. Returns (vertices, uvs, faces) in real metres."""
+    from scipy.spatial import Delaunay
+    tri = Delaunay(points)
+    centroids = points[tri.simplices].mean(axis=1)
     keep = np.array([polygon.contains(Point(c)) for c in centroids])
-    cells = tri.simplices[keep]
-    vertices = np.column_stack([pts * SCALE, zz * SCALE])
-    # UVs: map the field XY onto the texture across the field bounds.
-    lo = pts.min(axis=0)
-    rng = pts.max(axis=0) - lo
-    uvs = (pts - lo) / rng
-    return vertices, uvs, cells
+    faces = tri.simplices[keep]
+    vertices = np.column_stack([points * SCALE, z * SCALE])
+    lo = points.min(axis=0)
+    rng = points.max(axis=0) - lo
+    uvs = (points - lo) / rng
+    return vertices, uvs, faces
 
 
 def center_and_shift(vertices, z_ref):
@@ -136,32 +155,35 @@ def write_stl(path, vertices, faces):
 def main():
     ap = argparse.ArgumentParser(description=__doc__)
     ap.add_argument('--dataset', required=True,
-                    help='Agri-Field-Dataset root (dir containing elevation_grid/)')
+                    help='Agri-Field-Dataset root (dir containing surfaces_3D/)')
     ap.add_argument('--field', type=int, required=True,
-                    help='Field number (e.g. 27 -> elevation_grid/field27.ply)')
+                    help='Field number (e.g. 27 -> surfaces_3D/field27.ply)')
     ap.add_argument('--out', required=True,
                     help='Ground model dir to write mesh/terrain.obj + .stl')
+    ap.add_argument('--grid', type=float, default=GRID,
+                    help='Resample spacing in real metres (decimation; '
+                         f'default {GRID:.0f} m)')
     args = ap.parse_args()
 
-    ply = Path(args.dataset) / 'elevation_grid' / f'field{args.field}.ply'
+    ply = Path(args.dataset) / 'surfaces_3D' / f'field{args.field}.ply'
     if not ply.exists():
         raise SystemExit(f"ERROR: {ply} not found")
 
     polygon = read_field_polygon(args.dataset, args.field)
-    xs, ys, Z = read_elevation_grid(ply)
-    print(f"Field {args.field}: grid {len(xs)}x{len(ys)} "
-          f"spacing ~{np.median(np.diff(xs)):.0f} m, "
-          f"elevation {np.nanmin(Z):.0f}..{np.nanmax(Z):.0f} m")
+    surface = read_surface(ply)
+    print(f"Field {args.field}: {len(surface):,} surface points, "
+          f"elevation {surface[:, 2].min():.0f}..{surface[:, 2].max():.0f} m")
 
-    interp = RegularGridInterpolator(
-        (ys, xs), Z, method='linear', bounds_error=False, fill_value=None)
-    vertices, uvs, faces = build_whole_field_mesh(interp, xs, ys, polygon)
-    print(f"Whole field: {len(vertices)} verts, {len(faces)} faces "
-          f"(scale x{SCALE})")
+    points, z = sample_field(surface, polygon, args.grid)
+    vertices, uvs, faces = triangulate(points, z, polygon)
+    print(f"Whole field: {len(vertices):,} verts, {len(faces):,} faces "
+          f"(resampled at {args.grid:.0f} m, scale x{SCALE})")
 
     # Put the field centroid (robot/crop spawn area) at height 0 so the
     # Forest3D plants (spawned at z~0) sit on the surface.
-    z_ref = float(interp((polygon.centroid.y, polygon.centroid.x))) * SCALE
+    from scipy.interpolate import NearestNDInterpolator
+    nn = NearestNDInterpolator(surface[:, :2], surface[:, 2])
+    z_ref = float(nn((polygon.centroid.x, polygon.centroid.y))) * SCALE
     center_and_shift(vertices, z_ref)
     normals = calculate_normals(vertices, faces)
 
@@ -177,7 +199,7 @@ def main():
     print(f"Terrain: X={np.ptp(vertices[:,0]):.2f} "
           f"Y={np.ptp(vertices[:,1]):.2f} "
           f"Z={np.ptp(vertices[:,2]):.2f} m, "
-          f"{len(vertices)} verts")
+          f"{len(vertices):,} verts")
 
 
 if __name__ == '__main__':
