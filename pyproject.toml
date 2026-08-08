@@ -21,6 +21,7 @@ module = [
     "geometry_msgs.*",
     "nav_msgs.*",
     "gps_msgs.*",
+    "rosgraph_msgs.*",
     "tf2_ros.*",
     "pyquaternion",
 ]
@@ -59,6 +60,7 @@ ignored-modules = [
     "ament_index_python",
     "tf2_ros",
     "gps_msgs",
+    "rosgraph_msgs",
 ]
 
 [tool.ruff]
