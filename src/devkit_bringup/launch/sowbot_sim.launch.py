@@ -478,6 +478,49 @@ def generate_launch_description():
         output='screen',
     )
 
+    # ── Fix map->odom (after world-gen writes spawn_pose.txt) ─────────────────
+    # sim_nav.launch.py publishes map->odom at container boot, BEFORE
+    # spawn_pose.txt exists (worldgen only runs when the user presses Launch
+    # Sim), so _read_spawn_xy() falls back to identity (0,0,0). With identity,
+    # fusioncore's odom->base_footprint — whose odom frame is anchored at the
+    # robot's spawn point, so it sits near (0,0) at spawn — gets read as the
+    # robot's MAP-frame position. That is off by the entire spawn offset: the
+    # robot believes it is at map (0,0) while actually being at the spawn node
+    # (e.g. R1_IN at (0,-3.528)). Every goal, the costmap and the UI topo map
+    # are then wrong by that vector.
+    #
+    # worldgen writes spawn_pose.txt, so by the time world_gen exits we know
+    # the real spawn. Kill the stale boot-time static and republish map->odom
+    # with the spawn offset. tf2's static buffer keeps the first transform it
+    # saw for a frame pair, so the stale one MUST be killed before republishing
+    # — a second concurrent publisher for map->odom is ignored.
+    fix_map_to_odom = ExecuteProcess(
+        cmd=[
+            '/bin/bash', '-c',
+            'SPAWN_FILE=/workspace/spawn_pose.txt; '
+            'if [ ! -f "$SPAWN_FILE" ]; then '
+            '  echo "[map_to_odom_fixer] WARNING: $SPAWN_FILE missing — '
+            'leaving boot-time identity map->odom (alignment will be wrong)"; '
+            'else '
+            '  read -r SPAWN_X SPAWN_Y SPAWN_Z < "$SPAWN_FILE"; '
+            '  echo "[map_to_odom_fixer] spawn ($SPAWN_X, $SPAWN_Y) from $SPAWN_FILE"; '
+            '  echo "[map_to_odom_fixer] killing stale boot-time map->odom static"; '
+            '  pkill -f "static_transform_publishe[r].*__node:=map_to_odom_static" || true; '
+            '  sleep 1; '
+            '  exec ros2 run tf2_ros static_transform_publisher '
+            '    --x "$SPAWN_X" --y "$SPAWN_Y" --z 0 '
+            '    --qx 0 --qy 0 --qz 0 --qw 1 '
+            '    --frame-id map --child-frame-id odom '
+            '    --ros-args -r __node:=map_to_odom_fixed; '
+            'fi'
+        ],
+        name='map_to_odom_fixer',
+        output='screen',
+    )
+    start_map_to_odom_fixer_after_worldgen = RegisterEventHandler(
+        OnProcessExit(target_action=world_gen, on_exit=[fix_map_to_odom]),
+    )
+
     # ── fusioncore (UKF localisation, t+35s) ──────────────────────────────────
     # MOVED here from sim_nav.launch.py. fusioncore consumes sim-time-stamped
     # sensors (/gnss/fix, /imu/data bridged from Gazebo, /odom/wheels relayed
@@ -543,5 +586,6 @@ def generate_launch_description():
         start_nav2_lifecycle_after_worldgen,
         start_fusioncore_after_worldgen,
         start_fusion_to_global_relay_after_worldgen,
+        start_map_to_odom_fixer_after_worldgen,
         kill_bootstrap_tfs,
     ])
