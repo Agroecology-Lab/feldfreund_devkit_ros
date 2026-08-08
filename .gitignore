@@ -39,6 +39,8 @@ src/ublox_dgnss/
 # Imported soil/texture assets (large binaries) — keep the dir, not contents.
 uploads/**
 !uploads/.gitkeep
+!uploads/terrain/
+!uploads/terrain/**
 !uploads/soil_custom/
 !uploads/soil_custom/textures/
 !uploads/**/.gitkeep
