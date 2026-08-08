@@ -343,14 +343,43 @@ def generate_launch_description():
         output='screen',
     )
 
+    # ── World generation (input-keyed, cached) ───────────────────────────────
+    # The Gazebo world is derived FROM the topo map by the Forest3D pipeline,
+    # and Gazebo reads it only at launch. The placement inputs are read from
+    # the "settings:" block of the last forest3d.yaml the UI wrote
+    # (plant_spacing, weed_density, etc.), defaulting to the pipeline's
+    # defaults when none exists yet, so Launch Sim replays the exact
+    # generation the user configured instead of silently resetting values.
+    # The world is cached: a hash of (resolved settings, topo map, crop/weed
+    # model files, uploaded terrain, and the generator script itself) is
+    # stored next to the world; if it still matches on the next press the
+    # expensive 40-60s regeneration is skipped and gz starts instantly. The
+    # key file lives beside the world in install/ (same container lifetime),
+    # so a fresh `manage.py up --sim` always regenerates once. sim_launch is
+    # gated on this step's exit so gz sim never races a half-written world.
+    # The logic lives in /workspace/worldgen.sh (mounted by manage.py) so the
+    # Launch Sim button and the UI Rebuild button share one implementation.
+    world_gen = ExecuteProcess(
+        cmd=['/bin/bash', '/workspace/worldgen.sh'],
+        name='world_gen',
+        output='screen',
+    )
+
     start_sim_after_preflight = RegisterEventHandler(
         OnProcessExit(
             target_action=preflight_pkill,
-            on_exit=[sim_launch, bridge_watchdog],
+            on_exit=[world_gen, bridge_watchdog],
         )
     )
 
-    # ── Nav2 (t+35s) ──────────────────────────────────────────────────────────
+    start_sim_after_worldgen = RegisterEventHandler(
+        OnProcessExit(
+            target_action=world_gen,
+            on_exit=[sim_launch],
+        )
+    )
+
+    # ── Nav2 (t+35s after world-gen) ─────────────────────────────────────────
     # 35s gives gz sim time to start, the robot to spawn, and ros_gz_bridge
     # to come up and start publishing /clock with RELIABLE QoS.  By the time
     # Nav2 initialises, /clock is live and all TF frames carry Gazebo
@@ -359,13 +388,22 @@ def generate_launch_description():
     # itself taking longer with the heavier xacro. This is a band-aid — the
     # fixed sleep still races if spawn gets slower again; polling /clock
     # instead of sleeping is the fix that stops needing retuning.)
+    #
+    # NOTE: the timers are anchored on world_gen's exit, not on t=0 of the
+    # launch — world generation now runs inside this file (see world_gen
+    # above) and can take 30-45s, so a t=0 timer would fire long before gz
+    # sim even starts. Anchoring on world_gen's exit keeps the original
+    # "35s after gz sim starts" behaviour.
     nav2_params = os.path.join(devkit_launch_pkg, 'config', 'nav2_params_sim.yaml')
     nav2 = TimerAction(
         period=35.0,
         actions=_nav2_sim_nodes(nav2_params, use_sim_time=True),
     )
+    start_nav2_after_worldgen = RegisterEventHandler(
+        OnProcessExit(target_action=world_gen, on_exit=[nav2]),
+    )
 
-    # ── Nav2 lifecycle manager (t+40s) ────────────────────────────────────────
+    # ── Nav2 lifecycle manager (t+40s after world-gen) ────────────────────────
     # Started 5s AFTER the Nav2 server nodes above, not in the same batch.
     # Previously this raced controller_server/behavior_server/bt_navigator's
     # process startup, since ros2 launch forks everything in a TimerAction
@@ -379,6 +417,9 @@ def generate_launch_description():
     nav2_lifecycle = TimerAction(
         period=40.0,
         actions=[_nav2_lifecycle_manager_node(nav2_params, use_sim_time=True)],
+    )
+    start_nav2_lifecycle_after_worldgen = RegisterEventHandler(
+        OnProcessExit(target_action=world_gen, on_exit=[nav2_lifecycle]),
     )
 
     # Kill the wall-time bootstrap TF publishers from sim_nav.launch.py once
@@ -467,6 +508,9 @@ def generate_launch_description():
         fusioncore_node,
         fusioncore_configure,
     ])
+    start_fusioncore_after_worldgen = RegisterEventHandler(
+        OnProcessExit(target_action=world_gen, on_exit=[fusioncore_bringup]),
+    )
 
     # /fusion/odom -> /odometry/global (limbic_row_follow subscribes to the
     # latter; same nav_msgs/Odometry type both ends).
@@ -480,6 +524,9 @@ def generate_launch_description():
             output='screen',
         ),
     ])
+    start_fusion_to_global_relay_after_worldgen = RegisterEventHandler(
+        OnProcessExit(target_action=world_gen, on_exit=[fusion_to_global_relay]),
+    )
 
     return LaunchDescription([
         gz_resource_path,
@@ -491,9 +538,10 @@ def generate_launch_description():
         z_arg,
         preflight_pkill,
         start_sim_after_preflight,
-        nav2,
-        nav2_lifecycle,
-        fusioncore_bringup,
-        fusion_to_global_relay,
+        start_sim_after_worldgen,
+        start_nav2_after_worldgen,
+        start_nav2_lifecycle_after_worldgen,
+        start_fusioncore_after_worldgen,
+        start_fusion_to_global_relay_after_worldgen,
         kill_bootstrap_tfs,
     ])

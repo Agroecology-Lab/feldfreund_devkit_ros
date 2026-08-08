@@ -2979,13 +2979,12 @@ class NiceGuiNode(Node):
                 # studded in the inter-row gaps of the R*_IN/OUT nodes. Gazebo
                 # reads the world only at launch, so a running sim must be
                 # stopped and relaunched to see a rebuild — we refuse mid-run
-                # rather than silently no-op. The generator script is mounted
-                # at /workspace/topo_to_forest3d.py by manage.py.
+                # rather than silently no-op. Uses the shared worldgen.sh
+                # (also called by Launch Sim) so Rebuild and Launch Sim agree
+                # on the cache key and never regenerate each other's world.
                 _MAP_FILE   = '/workspace/maps/maize_map'
-                _WORLD_FILE = ('/workspace/install/devkit_simulation/share/'
-                               'devkit_simulation/worlds/maize.world')
 
-                def _rebuild_world():
+                async def _rebuild_world():
                     if _gazebo_proc[0] is not None and _gazebo_proc[0].poll() is None:
                         _gazebo_lbl.set_text(
                             'stop the sim before rebuilding — Gazebo reads the '
@@ -3006,7 +3005,7 @@ class NiceGuiNode(Node):
                         scale = float(plant_scale.value or 100) / 100.0
                         cat = scale_category.value or 'all'
                         model = plant_model.value or 'plant'
-                        weed_density = int(weed_density_scale.value) if weed_density_scale.value is not None else 100
+                        weed_density = int(weed_density_scale.value) if weed_density_scale.value is not None else 10
                         # Validate selected model exists on disk
                         model_dir = _CROP_MODELS_DIR / model
                         if not model_dir.is_dir() or not (model_dir / 'model.sdf').is_file():
@@ -3014,20 +3013,17 @@ class NiceGuiNode(Node):
                                 f'model "{model}" not found — upload it first')
                             _gazebo_lbl.style('color:#cf222e')
                             return
-                        r = subprocess.run(
-                            ['python3', '/workspace/topo_to_forest3d.py',
-                             '--topo', _MAP_FILE,
-                             '--out', '/workspace/forest3d.yaml',
-                             '--generate',
-                             '--world-out', _WORLD_FILE,
-                             '--models-path', '/workspace/models',
+                        r = await ng_run.io_bound(
+                            subprocess.run,
+                            ['bash', '/workspace/worldgen.sh',
                              '--plant-spacing', str(spacing_m),
                              '--row-width', str(row_w_m),
                              '--plant-scale', str(scale),
                              '--scale-category', cat,
                              '--crop-model', model,
                              '--weed-density', str(weed_density)],
-                            capture_output=True, text=True, timeout=120, check=False
+                            capture_output=True, text=True, timeout=120,
+                            check=False
                         )
                         if r.returncode != 0:
                             err = (r.stderr or r.stdout or 'unknown error').strip()
@@ -3110,7 +3106,7 @@ class NiceGuiNode(Node):
                     with ui.column().classes('flex-1 gap-0'):
                         ui.html('<div class="sec-label">Plant Spacing</div>')
                         plant_spacing = ui.number(
-                            value=80, min=10, max=300, step=5, precision=0,
+                            value=1000, min=10, max=1000, step=5, precision=0,
                             suffix='cm'
                         ).classes('w-full')
                     with ui.column().classes('flex-1 gap-0'):
@@ -3160,7 +3156,7 @@ class NiceGuiNode(Node):
                         ui.html('<div class="sec-label">Weed Density</div>')
                         with ui.row().classes('items-center gap-1 w-full'):
                             weed_density_scale = ui.number(
-                                value=100, min=0, max=100, step=5, precision=0,
+                                value=10, min=0, max=100, step=5, precision=0,
                                 suffix='%'
                             ).classes('flex-1')
                             ui.label('on').classes('text-xs').style('color:#8c959f')

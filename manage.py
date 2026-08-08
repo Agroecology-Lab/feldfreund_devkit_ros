@@ -388,31 +388,18 @@ class DevkitManager:
         topo_world = ("/workspace/install/devkit_simulation/share/"
                       "devkit_simulation/worlds/maize.world")
         world_gen = (
-            # Bootstrap node positions only if no map has been authored yet.
+            # Map bootstrap only. The Gazebo world is derived from the topo map
+            # by sowbot_sim.launch.py (world_gen step), so it is regenerated
+            # whenever the user presses Launch Sim — not baked on every boot.
+            # This keeps boot fast and makes the world always match the map at
+            # the moment Gazebo actually starts.
             "([ -f /workspace/maps/maize_map ] || ("
             "ros2 run virtual_maize_field generate_world fre22_task_navigation_mini 2>/dev/null && "
             "python3 /workspace/get_maize_topo.py "
             "--csv /root/.ros/virtual_maize_field/gt_map.csv "
             f"--out /workspace/maps/maize_map --name maize_map --rows 6 "
             f"--lat {datum_lat} --lon {datum_lon} --alt {datum_alt})) && "
-            # Derive the Gazebo world from whatever map now exists. rm -f first
-            # in case a stale symlink from an older build still occupies the path.
-            f"rm -f {topo_world} && "
-            "python3 /workspace/topo_to_forest3d.py "
-            "--topo /workspace/maps/maize_map "
-            f"--out /workspace/forest3d.yaml "
-            # 5.0m: row_discovery_node's own worst-case straight-line
-            # excursion past a row end is headland_clearance_m (0.5m) +
-            # max_search_distance_m (1.5m) = 2.0m — this must stay
-            # comfortably UNDER the world's actual headland margin, or
-            # discovery mode drives the robot off the edge of the
-            # generated ground plane the moment TURN_2's open-loop
-            # alignment is even slightly off. If either number changes,
-            # check the other.
-            "--headland 5.0 "
-            "--generate "
-            f"--world-out {topo_world} "
-            "--models-path /workspace/models && "
+            "echo '[world] map ready' && "
         ) if is_sim == 'true' else ""
 
         # In sim mode launch sowbot_sim (real Nav2 + topo nav + UI) instead of
@@ -451,6 +438,9 @@ class DevkitManager:
             '--env', 'TMAP2_FILE=/workspace/maps/maize_map',
             '-v', f'{self.root_dir}/get_maize_topo.py:/workspace/get_maize_topo.py:ro',
             '-v', f'{self.root_dir}/topo_to_forest3d.py:/workspace/topo_to_forest3d.py:ro',
+            # Shared world generator (cache + generation) used by both the
+            # Launch Sim button and the UI Rebuild button.
+            '-v', f'{self.root_dir}/worldgen.sh:/workspace/worldgen.sh:ro',
         ]
         cyclonedds_uri = self._cyclonedds_uri(cfg, is_sim == 'true')
         docker_cmd = [*self._base_docker_cmd(env_file, cyclonedds_uri, limbic_flags), ros_command]
