@@ -43,8 +43,8 @@ WEEDS_PER_CROP = 3
 # back-solved origin trips FusionCore's outlier gate and silently rejects
 # every subsequent real GPS fix for the rest of the run. Do not change this
 # without updating those in lockstep.
-DEFAULT_FIELD_LAT = 9.0450717
-DEFAULT_FIELD_LON = 77.7920577
+DEFAULT_FIELD_LAT = 48.0046000
+DEFAULT_FIELD_LON = 3.6644000
 
 
 def load_topo(path):
