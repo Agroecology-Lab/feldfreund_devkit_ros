@@ -367,8 +367,8 @@ class DevkitManager:
         # between that shim and this map's back-solved origin trips
         # FusionCore's outlier gate and silently rejects every subsequent
         # real GPS fix for the rest of the run. Keep these in lockstep.
-        datum_lat = cfg.get('FIELD_DATUM_LAT', '9.045094')
-        datum_lon = cfg.get('FIELD_DATUM_LON', '77.792024')
+        datum_lat = cfg.get('FIELD_DATUM_LAT', '9.0450717')
+        datum_lon = cfg.get('FIELD_DATUM_LON', '77.7920577')
         datum_alt = cfg.get('FIELD_DATUM_ALT', '100.404')
 
         # --sim is our own flag; don't forward it to ros2 launch.

@@ -120,6 +120,21 @@ try:
 except ImportError:
     pass
 
+# Field 27's actual GPS extent, derived from maps/recon_logs/recon.csv
+# (lat/lon columns, all 4345 samples): lat 9.0449504-9.0451929, lon
+# 77.7918803-77.7922351 — a ~27m x ~39m field. FIELD27_CENTER is the
+# bounding-box midpoint (matches the mean of all points here, since the
+# recon path covers the field fairly evenly). FIELD27_BOUNDS pads that
+# extent by 15% on each side so leaflet's fitBounds() shows the whole
+# field with a small margin, rather than butting the boundary against the
+# map edge. This value MUST stay in lockstep with DEFAULT_FIELD_LAT/LON in
+# topo_to_forest3d.py, FIELD_DATUM_LAT/LON's default in manage.py, and
+# --anchor-lat/lon's default in maps/recon_logs/test_contour_planning.py —
+# see _FAKE_GPS_LAT/LON below for why a mismatch there is dangerous, not
+# just cosmetic.
+FIELD27_CENTER = (9.0450717, 77.7920577)
+FIELD27_BOUNDS = ((9.0449140, 77.7918271), (9.0452293, 77.7922883))
+
 SAFETY_QOS = QoSProfile(
     depth=1,
     reliability=ReliabilityPolicy.RELIABLE,
@@ -374,12 +389,12 @@ class NiceGuiNode(Node):
         # The sim flag is the authoritative signal, plumbed from
         # manage.py's is_sim through devkit.launch.py -> ui.launch.py, so we
         # never publish this on hardware. The India datum matches the
-        # leaflet centre / F2C fallback used elsewhere in this UI.
+        # leaflet centre / F2C fallback used elsewhere in this UI — see
+        # FIELD27_CENTER above.
         _FAKE_GPS_TOPIC = '/gnss/fix_sim_shim'
         self.declare_parameter('sim', False)
         self._is_sim = bool(self.get_parameter('sim').value)
-        self._FAKE_GPS_LAT = 9.045094
-        self._FAKE_GPS_LON = 77.792024
+        self._FAKE_GPS_LAT, self._FAKE_GPS_LON = FIELD27_CENTER
         self._FAKE_GPS_ALT = 40.0
         # Sentinel marking our own synthetic fixes. Kept even though the
         # shim is off /gnss/fix now: store_fake_gps still uses it to make
@@ -1752,9 +1767,15 @@ class NiceGuiNode(Node):
                 ui.html('<div class="sec-label mb-2">Field boundary — click to draw</div>')
                 gps_center = (
                     (self.latest_gps.latitude, self.latest_gps.longitude)
-                    if self.latest_gps else (9.045094, 77.792024)
+                    if self.latest_gps else FIELD27_CENTER
                 )
                 mission_map = ui.leaflet(center=gps_center, zoom=18).classes('w-full h-96')
+                if not self.latest_gps:
+                    # No live fix yet — fit the whole field extent rather
+                    # than just zooming in on its centre point, so the
+                    # boundary-drawing view actually shows the field.
+                    mission_map.run_map_method(
+                        'fitBounds', [list(FIELD27_BOUNDS[0]), list(FIELD27_BOUNDS[1])])
                 mission_map.tile_layer(
                     url_template='https://server.arcgisonline.com/ArcGIS/rest/services/'
                                  'World_Imagery/MapServer/tile/{z}/{y}/{x}',
@@ -2707,7 +2728,9 @@ class NiceGuiNode(Node):
                 ui.button('Configure', on_click=lambda: self.esp_configure_publisher.publish(Empty())).props('outline no-caps').classes('px-4')
         with ui.card().classes('w-full mt-3'):
             ui.label('GPS').classes('font-semibold mb-2')
-            leaflet = ui.leaflet(center=(9.045094, 77.792024), zoom=18).classes('w-full h-80')
+            leaflet = ui.leaflet(center=FIELD27_CENTER, zoom=18).classes('w-full h-80')
+            leaflet.run_map_method(
+                'fitBounds', [list(FIELD27_BOUNDS[0]), list(FIELD27_BOUNDS[1])])
             marker  = leaflet.marker(latlng=leaflet.center)
             gps_status_lbl = ui.label('—').classes('text-xs font-mono mt-1').style('color:#57606a')
             _FIX_LABELS = {-1: 'NO FIX', 0: 'AUTONOMOUS', 1: 'SBAS',

@@ -73,10 +73,10 @@ def main() -> int:
     ap = argparse.ArgumentParser(description=__doc__,
                                   formatter_class=argparse.RawDescriptionHelpFormatter)
     ap.add_argument('recon_csv', help='Path to recon.csv (stamp,lat,lon,alt,x,y)')
-    ap.add_argument('--anchor-lat', type=float, default=9.045094,
+    ap.add_argument('--anchor-lat', type=float, default=9.0450717,
                      help='lat that recon.csv\'s x=0,y=0 corresponds to '
                           '(default: the sim GPS datum used elsewhere in this repo)')
-    ap.add_argument('--anchor-lon', type=float, default=77.792024)
+    ap.add_argument('--anchor-lon', type=float, default=77.7920577)
     ap.add_argument('--boundary-pad-m', type=float, default=0.5,
                      help='pad the recon points\' bbox outward by this much '
                           'to build a test field boundary (default 0.5m)')
