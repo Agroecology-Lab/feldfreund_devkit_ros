@@ -48,7 +48,7 @@ from scipy.interpolate import RBFInterpolator
 from shapely.geometry import LineString, Point
 from skimage import measure
 
-from devkit_f2c_planner.f2c_planner import _f2c_xy_to_latlon
+from devkit_f2c_planner.f2c_planner import _f2c_latlon_to_xy, _f2c_xy_to_latlon
 from devkit_ui.terrain_mask import traversability_mask_to_latlon_rings
 
 # Candidate RBFInterpolator `smoothing` values tried by _choose_smoothing().
@@ -77,13 +77,21 @@ _MAX_POINTS_FOR_CV = 2000
 _MAX_GRID_CELLS = 4_000_000
 
 
-def load_recon_points(csv_path: str | Path) -> tuple[np.ndarray, np.ndarray]:
+def load_recon_points(csv_path: str | Path) -> tuple[np.ndarray, np.ndarray, np.ndarray]:
     """Read recon_dem_logger.py's CSV.
 
     Returns:
         xy: (N, 2) array of local x,y metres (the same columns
             recon_dem_logger.py writes from /odom — no re-projection here).
+            This is recon_dem_logger.py's own /odom-anchored frame, NOT
+            necessarily anchored at any particular lat/lon — callers that
+            need xy in a frame anchored at a specific lat/lon (e.g.
+            corners_ll[0], to match f2c_planner's contract that origin_xy
+            and corners_ll[0] share an anchor) must re-project using
+            latlon below, not use this xy directly.
         elevation: (N,) array of altitude, metres.
+        latlon: (N, 2) array of lat,lon — the real-world position of each
+            xy point, for re-anchoring into a different local frame.
 
     Raises:
         ValueError: if the CSV has fewer than 3 points — RBFInterpolator
@@ -91,12 +99,14 @@ def load_recon_points(csv_path: str | Path) -> tuple[np.ndarray, np.ndarray]:
             usefully be flagged as a bad fit for slope, so callers should
             treat this as "recon drive too short, log more points".
     """
-    xs, ys, alts = [], [], []
+    xs, ys, alts, lats, lons = [], [], [], [], []
     with open(csv_path, newline='', encoding='utf-8') as f:
         for row in csv.DictReader(f):
             xs.append(float(row['x']))
             ys.append(float(row['y']))
             alts.append(float(row['alt']))
+            lats.append(float(row['lat']))
+            lons.append(float(row['lon']))
 
     if len(xs) < 3:
         raise ValueError(
@@ -105,7 +115,8 @@ def load_recon_points(csv_path: str | Path) -> tuple[np.ndarray, np.ndarray]:
 
     xy = np.column_stack([xs, ys])
     elevation = np.asarray(alts)
-    return xy, elevation
+    latlon = np.column_stack([lats, lons])
+    return xy, elevation, latlon
 
 
 def build_elevation_grid(
@@ -300,10 +311,16 @@ def recon_csv_to_obstacle_rings(
     """End to end: recon CSV -> obstacle_rings ready for f2c_planner._run_f2c().
 
     anchor_lat/anchor_lon MUST be the same anchor _run_f2c() will use for
-    corners_ll[0] — see traversability_mask_to_latlon_rings()'s warning on
+    corners_ll[0]. Recon points are re-anchored onto anchor_lat/lon (via
+    their own lat/lon columns) before the elevation grid is built, so
+    origin_xy ends up in the same frame corners_ll[0] projects to,
+    regardless of whatever frame recon_dem_logger.py originally logged
+    xy in — see traversability_mask_to_latlon_rings()'s warning on
     mismatched anchors silently misaligning the rings against the field.
     """
-    xy, elevation = load_recon_points(csv_path)
+    _xy_native, elevation, latlon = load_recon_points(csv_path)
+    xy = np.array([_f2c_latlon_to_xy(lat, lon, anchor_lat, anchor_lon)
+                   for lat, lon in latlon])
     elevation_grid, origin_xy, _smoothing_used = build_elevation_grid(
         xy, elevation, resolution_m)
     traversable = elevation_to_traversable(elevation_grid, resolution_m, max_slope_deg)

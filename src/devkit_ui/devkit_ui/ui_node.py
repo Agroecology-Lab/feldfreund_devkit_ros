@@ -24,6 +24,8 @@ from itertools import pairwise
 from operator import attrgetter
 from pathlib import Path
 
+import numpy as np
+
 # The following imports get generated in the Dockerfile, they aren't available to pylint
 # pylint: disable=import-error
 import rclpy
@@ -318,11 +320,23 @@ def _plan_contour_rows(corners_ll: list, obstacle_rings: list, tool_width: float
     rather than silently falling back, since a missing/too-short recon log
     is a setup mistake worth fixing, not a legitimate "flat field" case.
     """
-    xy, elevation = load_recon_points(recon_path)
+    xy_native, elevation, latlon = load_recon_points(recon_path)
+    lat0, lon0 = corners_ll[0]
+    # Recon points are logged in recon_dem_logger.py's own /odom-anchored
+    # frame, unrelated to whatever frame the user's drawn boundary
+    # (corners_ll) happens to be in. Re-anchor them onto corners_ll[0] via
+    # their own lat/lon columns before building the elevation grid, so
+    # origin_xy ends up in the same frame field_centroid_xy() computed
+    # centroid_xy in below — without this, centroid_xy is checked against
+    # an elevation grid built around a completely different, unrelated
+    # local origin, which can easily land outside the grid entirely (this
+    # is what produced the "centroid falls outside the elevation grid"
+    # case with the France field-27 data: the fake India test field was
+    # small enough that this mismatch went unnoticed by coincidence).
+    xy = np.array([_f2c_latlon_to_xy(lat, lon, lat0, lon0) for lat, lon in latlon])
     elevation_grid, origin_xy, _smoothing_used = build_elevation_grid(
         xy, elevation, dem_resolution_m)
     centroid_xy = field_centroid_xy(corners_ll)
-    lat0, lon0 = corners_ll[0]
     reference_line_ll = select_reference_contour_latlon(
         elevation_grid, dem_resolution_m, origin_xy, centroid_xy, lat0, lon0)
     if reference_line_ll is None:
