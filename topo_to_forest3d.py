@@ -32,17 +32,6 @@ except ImportError:
 # plant rather than one. Raise for a denser field, lower for a cleaner one.
 WEEDS_PER_CROP = 3
 
-# Forest3D's Forest3DConfig pydantic schema hard caps (crop_rows.num_rows,
-# density.crop) — see forest3d/config/loader.py's ValidationError on any
-# field that exceeds these. Sized for a small demo field; a real F2C-planned
-# full-field coverage plan (hundreds of rows) blows straight through them.
-# This is a VISUALIZATION-ONLY limit: it only affects how many rows get
-# rendered as Gazebo terrain/crop models via this script. It never touches
-# the actual navigation topo map (maps/maize_map), which keeps its full,
-# real row count regardless — see the clipping note in main() below.
-FOREST3D_MAX_ROWS = 200
-FOREST3D_MAX_DENSITY = 10000
-
 # Fallback GPS origin when a topo map carries no gps_lat/gps_lon tags at all
 # (e.g. the synthetic virtual_maize_field map, which has no real-world
 # georeference). Without SOME origin, gz-sim-navsat-system falls back to its
@@ -54,8 +43,8 @@ FOREST3D_MAX_DENSITY = 10000
 # back-solved origin trips FusionCore's outlier gate and silently rejects
 # every subsequent real GPS fix for the rest of the run. Do not change this
 # without updating those in lockstep.
-DEFAULT_FIELD_LAT = 48.0046000
-DEFAULT_FIELD_LON = 3.6644000
+DEFAULT_FIELD_LAT = 9.045094
+DEFAULT_FIELD_LON = 77.792024
 
 
 def load_topo(path):
@@ -980,8 +969,6 @@ if __name__ == '__main__':
 
     print(f"Loaded {len(rows)} rows from {args.topo}")
 
-    nav_rows = rows  # keep the full set for spawn-point lookup below
-
     # Forest3D's hard schema floor is 0.1 — clamp the requested minimum up to
     # that so a caller who passes e.g. 0.0 (meaning "as narrow as possible")
     # gets the actual achievable floor, rather than something that would
@@ -993,37 +980,6 @@ if __name__ == '__main__':
         rows, args.headland, args.row_width, args.plant_spacing,
         min_furrow_width=min_furrow_width)
 
-    # Forest3D's schema (see FOREST3D_MAX_ROWS/DENSITY above) can't render
-    # every row of a real, F2C-planned full-field coverage plan. Clip to a
-    # visualization-only subset when needed — this ONLY affects what gets
-    # passed to `forest3d generate` below; maps/maize_map (real navigation,
-    # nav_rows/find_spawn_node) is never touched or re-saved by this script.
-    if len(rows) > FOREST3D_MAX_ROWS or derived_density > FOREST3D_MAX_DENSITY:
-        max_by_density = max(1, FOREST3D_MAX_DENSITY // max(plants_per_row, 1))
-        max_visual_rows = min(len(rows), FOREST3D_MAX_ROWS, max_by_density)
-        # Same row_axis/cross_axis heuristic compute_field_params() uses
-        # internally, so the visual subset lines up with the SAME cross-axis
-        # centres it'll re-derive on the next call — take a contiguous
-        # middle strip (by cross-axis centre) rather than list order, which
-        # has no spatial meaning and would scatter the visible rows.
-        mean_dx = sum(abs(r['b'][0] - r['a'][0]) for r in rows) / len(rows)
-        mean_dy = sum(abs(r['b'][1] - r['a'][1]) for r in rows) / len(rows)
-        cross_axis = 1 if mean_dx >= mean_dy else 0
-        rows_by_centre = sorted(
-            rows, key=lambda r: (r['a'][cross_axis] + r['b'][cross_axis]) / 2)
-        start = (len(rows_by_centre) - max_visual_rows) // 2
-        rows = rows_by_centre[start:start + max_visual_rows]
-        print(f"  NOTE: field has {len(nav_rows)} real rows (density "
-              f"{derived_density}) — Forest3D's schema caps at "
-              f"{FOREST3D_MAX_ROWS} rows / {FOREST3D_MAX_DENSITY} density, "
-              f"so only rendering the middle {len(rows)} rows in Gazebo. "
-              f"Navigation (maps/maize_map) keeps all {len(nav_rows)} rows "
-              f"— this only limits what's visually simulated.")
-        params, gps_lat, gps_lon, plants_per_row, derived_density, terrain_offset = \
-            compute_field_params(
-                rows, args.headland, args.row_width, args.plant_spacing,
-                min_furrow_width=min_furrow_width)
-
     # Robot spawn point: the topo map's HOME node (or first row's IN node as
     # fallback), shifted by the same terrain_offset that's about to be baked
     # into the world. Without this, the robot spawns at literal world (0,0)
@@ -1032,7 +988,7 @@ if __name__ == '__main__':
     # Before terrain_offset existed this was harmless because nothing in the
     # world ever moved; once the world is shifted, HOME and the hardcoded
     # spawn silently drift apart.
-    spawn_topo_x, spawn_topo_y = find_spawn_node(nodes, nav_rows)
+    spawn_topo_x, spawn_topo_y = find_spawn_node(nodes, rows)
     # NOTE: topo node coordinates are ALREADY in world/map frame — that's the
     # entire point of a topo map. terrain_offset is the correction applied to
     # Forest3D's own internally-generated LOCAL mesh coordinates (which are
