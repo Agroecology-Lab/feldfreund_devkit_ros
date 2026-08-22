@@ -40,7 +40,7 @@ pass plain numpy arrays, same convention as terrain_mask.py.
 """
 
 import csv
-import sys
+import logging
 from pathlib import Path
 
 import numpy as np
@@ -68,6 +68,12 @@ _MIN_POINTS_FOR_CV = 10
 # interpolators to search. Flagged (not measured) as a real cost for large
 # recon drives — revisit this cutoff once you have field data at real scale.
 _MAX_POINTS_FOR_CV = 2000
+
+# Neighbours cap shared between _choose_smoothing()'s cross-validation and
+# _interpolate_elevation()'s production fit — CV must score the same
+# neighbours-limited estimator that actually gets used, or the smoothing
+# value it picks is tuned for a different (global, neighbors=None) model.
+_INTERP_NEIGHBORS = 150
 
 # Maximum grid cells allowed in build_elevation_grid. Protects against
 # OOM/excessive computation when resolution_m is too fine or the field is
@@ -225,9 +231,11 @@ def _choose_smoothing(
             train_mask = ~test_mask
             if test_mask.sum() == 0 or train_mask.sum() < 3:
                 continue
+            neighbors = min(_INTERP_NEIGHBORS, int(train_mask.sum()))
             interpolator = RBFInterpolator(
                 xy[train_mask], elevation[train_mask],
-                kernel='thin_plate_spline', smoothing=candidate)
+                kernel='thin_plate_spline', smoothing=candidate,
+                neighbors=neighbors)
             predicted = interpolator(xy[test_mask])
             squared_errors.append((predicted - elevation[test_mask]) ** 2)
 
@@ -269,7 +277,7 @@ def _interpolate_elevation(
     # Limit neighbors to avoid O(n^3) cost when xy is large. RTK recon points
     # are metres apart, so local interpolation with ~150 nearest neighbors
     # captures the terrain without needing the full point set.
-    neighbors = min(150, xy.shape[0])
+    neighbors = min(_INTERP_NEIGHBORS, xy.shape[0])
     interpolator = RBFInterpolator(
         xy, elevation, kernel='thin_plate_spline', smoothing=smoothing,
         neighbors=neighbors)
@@ -345,8 +353,11 @@ def recon_csv_to_obstacle_rings(
 # an edge. Using the *centroid's own elevation* as the contour level is a
 # cheap way to get a centred line without a real optimisation — the
 # isoline through a point necessarily passes through that point.
+_LOGGER = logging.getLogger(__name__)
+
+
 def _log(msg: str) -> None:
-    print(f'[dem] {msg}', file=sys.stderr, flush=True)
+    _LOGGER.info(msg)
 
 
 def select_reference_contour_xy(

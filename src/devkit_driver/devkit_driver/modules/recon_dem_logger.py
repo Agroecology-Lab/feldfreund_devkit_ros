@@ -56,6 +56,15 @@ class ReconDEMLogger:
         self._enabled = node.get_parameter('recon_logging.enabled').value
         self._min_interval_m = float(
             node.get_parameter('recon_logging.min_interval_m').value)
+
+        # Validate min_interval_m: a zero/negative value bypasses the
+        # distance gate (logs every eligible odometry message); a
+        # non-finite value blocks all writes after the first row.
+        if not math.isfinite(self._min_interval_m) or self._min_interval_m <= 0:
+            raise ValueError(
+                f'recon_logging.min_interval_m must be positive and finite, '
+                f'got {self._min_interval_m}')
+
         self._max_fix_age_s = float(
             node.get_parameter('recon_logging.max_fix_age_s').value)
 

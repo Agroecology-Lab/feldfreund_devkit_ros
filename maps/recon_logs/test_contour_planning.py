@@ -61,6 +61,7 @@ for pkg in ('devkit_f2c_planner', 'devkit_ui'):
         sys.path.insert(0, str(candidate))
 
 from devkit_f2c_planner.f2c_planner import (  # noqa: E402
+    _f2c_latlon_to_xy,
     _f2c_xy_to_latlon,
     _run_contour_f2c,
     field_centroid_xy,

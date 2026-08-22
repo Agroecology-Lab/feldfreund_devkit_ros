@@ -994,27 +994,34 @@ if __name__ == '__main__':
     # reason.
     min_furrow_width = max(args.min_furrow_width, 0.1)
 
+    # Terrain geometry (field_length/width, GPS origin, terrain_offset) is
+    # always derived from the COMPLETE row set. The simulator uses nav_rows
+    # for navigation/spawn selection regardless of how many rows get a
+    # visual crop model below, so sizing the mesh to a clipped subset would
+    # leave outer real rows physically outside the generated ground plane.
     params, gps_lat, gps_lon, plants_per_row, derived_density, terrain_offset = compute_field_params(
-        rows, args.headland, args.row_width, args.plant_spacing,
+        nav_rows, args.headland, args.row_width, args.plant_spacing,
         min_furrow_width=min_furrow_width)
 
     # Rendering every row of a real, F2C-planned full-field coverage plan
-    # is both unnecessary (this is just for a Gazebo visual) and, above
-    # VISUAL_TARGET_ROWS, can also blow through Forest3D's schema caps
-    # (FOREST3D_MAX_ROWS/DENSITY). Clip to a small visualization-only
-    # subset whenever the field has more rows than that — this ONLY
-    # affects what gets passed to `forest3d generate` below; maps/maize_map
-    # (real navigation, nav_rows/find_spawn_node) is never touched or
-    # re-saved by this script.
-    if len(rows) > VISUAL_TARGET_ROWS:
+    # is both unnecessary (this is just for a Gazebo visual) and can blow
+    # through Forest3D's schema caps (FOREST3D_MAX_ROWS/DENSITY) — either
+    # because there are simply too many rows, or because a small row count
+    # still exceeds FOREST3D_MAX_DENSITY at tight plant_spacing. Clip to a
+    # small visualization-only subset whenever either cap is exceeded —
+    # this ONLY changes params['num_rows'] (how many crop-row models get
+    # placed); field dimensions/terrain_offset/GPS origin stay bound to
+    # nav_rows above, and maps/maize_map (real navigation, nav_rows/
+    # find_spawn_node) is never touched or re-saved by this script.
+    if len(rows) > VISUAL_TARGET_ROWS or derived_density > FOREST3D_MAX_DENSITY:
         max_by_density = max(1, FOREST3D_MAX_DENSITY // max(plants_per_row, 1))
         max_visual_rows = min(
             len(rows), VISUAL_TARGET_ROWS, FOREST3D_MAX_ROWS, max_by_density)
         # Same row_axis/cross_axis heuristic compute_field_params() uses
         # internally, so the visual subset lines up with the SAME cross-axis
-        # centres it'll re-derive on the next call — take a contiguous
-        # middle strip (by cross-axis centre) rather than list order, which
-        # has no spatial meaning and would scatter the visible rows.
+        # centres it derived from nav_rows above — take a contiguous middle
+        # strip (by cross-axis centre) rather than list order, which has no
+        # spatial meaning and would scatter the visible rows.
         mean_dx = sum(abs(r['b'][0] - r['a'][0]) for r in rows) / len(rows)
         mean_dy = sum(abs(r['b'][1] - r['a'][1]) for r in rows) / len(rows)
         cross_axis = 1 if mean_dx >= mean_dy else 0
@@ -1024,13 +1031,12 @@ if __name__ == '__main__':
         rows = rows_by_centre[start:start + max_visual_rows]
         print(f"  NOTE: field has {len(nav_rows)} real rows (density "
               f"{derived_density}) — only rendering the middle {len(rows)} "
-              f"rows in Gazebo (VISUAL_TARGET_ROWS={VISUAL_TARGET_ROWS}). "
-              f"Navigation (maps/maize_map) keeps all {len(nav_rows)} rows "
-              f"— this only limits what's visually simulated.")
-        params, gps_lat, gps_lon, plants_per_row, derived_density, terrain_offset = \
-            compute_field_params(
-                rows, args.headland, args.row_width, args.plant_spacing,
-                min_furrow_width=min_furrow_width)
+              f"rows in Gazebo (VISUAL_TARGET_ROWS={VISUAL_TARGET_ROWS}, "
+              f"FOREST3D_MAX_DENSITY={FOREST3D_MAX_DENSITY}). Navigation "
+              f"(maps/maize_map) keeps all {len(nav_rows)} rows, and the "
+              f"generated terrain still spans the full field — this only "
+              f"limits how many rows get a visual crop model.")
+        params['num_rows'] = len(rows)
 
     # Robot spawn point: the topo map's HOME node (or first row's IN node as
     # fallback), shifted by the same terrain_offset that's about to be baked
@@ -1057,9 +1063,12 @@ if __name__ == '__main__':
           f"({spawn_world_x}, {spawn_world_y})")
 
     # density is only a global ceiling in Forest3D's placement loop. Default it
-    # to the geometry-derived count so it never truncates the rows; honour an
-    # explicit --density override when given.
-    density = args.density if args.density is not None else derived_density
+    # to the (possibly visual-subset-clipped) row count so it never truncates
+    # the rows actually being rendered, and never exceeds FOREST3D_MAX_DENSITY
+    # via the untouched full-field derived_density; honour an explicit
+    # --density override when given.
+    density = args.density if args.density is not None else \
+        params['num_rows'] * plants_per_row
     print(f"  Plants/row: {plants_per_row}  ->  density cap: {density}")
 
     # Weeds cluster near crops. Scale them against the crop count so a real

@@ -1356,7 +1356,6 @@ class NiceGuiNode(Node):
                 chain = [inn, *wps, outn]
                 for a, b in pairwise(chain):
                     wanted_edges.append((a, b, ROW_ACTION))
-                    wanted_edges.append((b, a, ROW_ACTION))
 
         # Headland edges: same-end neighbours only, classified by geometry —
         # NOT by entry/exit label (snake ordering flips label vs physical end).
@@ -1983,7 +1982,7 @@ class NiceGuiNode(Node):
             contour_used = False
             try:
                 if contour_on:
-                    recon_path = f2c_recon_path.value.strip() or \
+                    recon_path = (f2c_recon_path.value or '').strip() or \
                         '/workspace/maps/recon_logs/recon.csv'
                     dem_res = float(f2c_dem_res.value or 1.0)
                     swaths = await ng_run.io_bound(
@@ -2002,7 +2001,8 @@ class NiceGuiNode(Node):
                         _run_f2c, list(corners_ll), obstacle_rings,
                         width, angle_deg, pad_m, headland_m, snake)
             except (FileNotFoundError, ValueError) as exc:
-                f2c_status.set_text(f'Contour planning failed: {exc}')
+                stage = 'Contour planning' if contour_on else 'Planning'
+                f2c_status.set_text(f'{stage} failed: {exc}')
                 f2c_status.style('color:#cf222e')
                 plan_btn.set_enabled(True)
                 return
