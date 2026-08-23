@@ -1,0 +1,35 @@
+<?xml version="1.0" ?>
+<sdf version="1.8">
+    <model name="ground">
+        <static>true</static>
+        <link name="link">
+            <collision name="collision">
+                <geometry>
+                    <mesh>
+                        <uri>mesh/terrain.stl</uri>
+                    </mesh>
+                </geometry>
+                <surface>
+                    <friction>
+                        <ode>
+                            <mu>0.9</mu>
+                            <mu2>0.9</mu2>
+                        </ode>
+                    </friction>
+                </surface>
+            </collision>
+            <visual name="visual">
+                <geometry>
+                    <mesh>
+                        <uri>mesh/terrain.obj</uri>
+                    </mesh>
+                </geometry>
+                <material>
+                    <ambient>0.25 0.15 0.07 1</ambient>
+                    <diffuse>0.40 0.25 0.12 1</diffuse>
+                    <specular>0.02 0.02 0.02 1</specular>
+                </material>
+            </visual>
+        </link>
+    </model>
+</sdf>
