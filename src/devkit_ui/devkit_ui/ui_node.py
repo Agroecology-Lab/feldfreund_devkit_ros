@@ -99,6 +99,7 @@ from devkit_ui.obstacles import (
     attach_mission_sidebar_controls,
     attach_nav_card,
 )
+from devkit_ui.pages.run.drop_node_card import DropNodeCard
 from devkit_ui.pages.run.joystick_control_card import JoystickControlCard
 from devkit_ui.pages.run.node_map_card import NodeMapCard
 from devkit_ui.pages.run.track_card import TrackCard
@@ -510,8 +511,12 @@ class NiceGuiNode(Node):
         self.create_subscription(Odometry, '/odometry/global',
                                  self._odom_fallback, _ODOM_QOS)
 
-        self.create_subscription(String, '/current_node',
-                                 lambda m: setattr(self, 'topo_current', m.data), _SENSOR_QOS)
+        self.create_subscription(
+            String,
+            '/current_node',
+            lambda m: setattr(self._run_store.drop_node, 'current_node', m.data),
+            _SENSOR_QOS,
+        )
 
         self._topo_doc:  TopoDoc | None = _demo_doc()
         self._topo_demo: bool           = False
@@ -555,11 +560,9 @@ class NiceGuiNode(Node):
         self.angular_velocity           = 0.0
 
         self.topo_selected:   str    | None = None
-        self.topo_current:    str           = '—'
         self.topo_nav_status: str           = 'Idle'
         self.topo_navigating: bool          = False
         self._nav_goal_handle               = None
-        self.drop_status:     str           = ''
 
         self._track_timer:   object  | None   = None
         self._track_counter: int              = 0
@@ -727,25 +730,26 @@ class NiceGuiNode(Node):
                        row_role: str = 'entry') -> None:
         name = re.sub(r'[^A-Z0-9_]', '', name.strip().upper().replace(' ', '_'))
         if not name:
-            self.drop_status = 'ERROR: node name required'
+            self._run_store.drop_node.status = 'ERROR: node name required'
             return
         if not _NAME_RE.match(name):
-            self.drop_status = f'ERROR: invalid name "{name}"'
+            self._run_store.drop_node.status = f'ERROR: invalid name "{name}"'
             return
         if self._topo_doc.has_node(name):
-            self.drop_status = f'ERROR: {name} already exists'
+            self._run_store.drop_node.status = f'ERROR: {name} already exists'
             return
         if self.latest_odom is None and not self._is_sim:
-            self.drop_status = 'ERROR: no odometry'
+            self._run_store.drop_node.status = 'ERROR: no odometry'
             return
         if not self._topo_doc:
-            self.drop_status = 'ERROR: map not loaded'
+            self._run_store.drop_node.status = 'ERROR: map not loaded'
             return
 
         x = round(self.latest_odom.pose.pose.position.x, 3) if self.latest_odom else 0.0
         y = round(self.latest_odom.pose.pose.position.y, 3) if self.latest_odom else 0.0
-        connect_to = (self.topo_current
-                      if self.topo_current not in ('—', 'none', 'None', '', None) else None)
+        current_node = self._run_store.drop_node.current_node
+        connect_to = (current_node
+                      if current_node not in ('—', 'none', 'None', '', None) else None)
         if connect_to and not self._topo_doc.has_node(connect_to):
             connect_to = None
         if not connect_to and self.topo_selected and self._topo_doc.has_node(self.topo_selected):
@@ -806,7 +810,7 @@ class NiceGuiNode(Node):
         gps_str  = (f' [{gps_meta["gps_lat"]:.5f},{gps_meta["gps_lon"]:.5f}]'
                     if gps_meta else '')
         row_str  = f' row={row_id}/{row_role}' if is_row else ''
-        self.drop_status = f'{name}{conn_str} at ({x}, {y}){row_str}{gps_str} — writing…'
+        self._run_store.drop_node.status = f'{name}{conn_str} at ({x}, {y}){row_str}{gps_str} — writing…'
 
         def _publish_and_persist():
             try:
@@ -832,8 +836,10 @@ class NiceGuiNode(Node):
 
                 self._topo_doc = file_doc
 
-                self.drop_status = (f'{name}{conn_str} at ({x}, {y})'
-                                    f'{row_str}{gps_str} — reloading…')
+                self._run_store.drop_node.status = (
+                    f'{name}{conn_str} at ({x}, {y})'
+                    f'{row_str}{gps_str} — reloading…'
+                )
 
                 def _call(client, req, timeout=5.0):
                     ev = threading.Event()
@@ -851,21 +857,25 @@ class NiceGuiNode(Node):
                     sw.no_alias = True
                     sr = _call(self._switch_map_cli, sw)
                     if sr and sr.success:
-                        self.drop_status = (f'{name}{conn_str} at ({x},{y})'
-                                            f'{row_str}{gps_str} — live')
+                        self._run_store.drop_node.status = (
+                            f'{name}{conn_str} at ({x},{y})'
+                            f'{row_str}{gps_str} — live'
+                        )
                     else:
                         self._topo_map_pub.publish(_topo_to_msg(self._topo_doc))
                         err = sr.message if sr else 'timeout'
-                        self.drop_status = f'{name}{conn_str} saved (switch failed: {err})'
+                        self._run_store.drop_node.status = f'{name}{conn_str} saved (switch failed: {err})'
                         self.get_logger().warn(f'switch_topological_map failed ({err})')
                 else:
                     self._topo_map_pub.publish(_topo_to_msg(self._topo_doc))
-                    self.drop_status = (f'{name}{conn_str} at ({x},{y})'
-                                        f'{row_str}{gps_str} — live (no srv)')
+                    self._run_store.drop_node.status = (
+                        f'{name}{conn_str} at ({x},{y})'
+                        f'{row_str}{gps_str} — live (no srv)'
+                    )
                 self.get_logger().info(
                     f'Node dropped: {name} at ({x:.3f},{y:.3f}){conn_str}{row_str}{gps_str}')
             except Exception as e:
-                self.drop_status = f'ERROR: {e}'
+                self._run_store.drop_node.status = f'ERROR: {e}'
                 self.get_logger().error(f'drop_topo_node failed: {e} ({type(e)}\n{traceback.format_exc()})')
 
         threading.Thread(target=_publish_and_persist, daemon=True).start()
@@ -1108,8 +1118,9 @@ class NiceGuiNode(Node):
         nav_frame = self._topo_doc.transformation.get('topo_frame_id', 'map')
         timestamp = datetime.now(UTC).strftime('%d-%m-%Y_%H-%M-%S')
 
-        connect_to = (self.topo_current
-                      if self.topo_current not in ('—', 'none', 'None', '', None)
+        current_node = self._run_store.drop_node.current_node
+        connect_to = (current_node
+                      if current_node not in ('—', 'none', 'None', '', None)
                       else None)
         if connect_to and not self._topo_doc.has_node(connect_to):
             connect_to = None
@@ -1566,37 +1577,10 @@ class NiceGuiNode(Node):
                         on_stop=self.stop_track
                     )
 
-                    with ui.card().classes('flex-1').style('padding:12px 14px'):
-                        with ui.row().classes('items-baseline gap-2 mb-2'):
-                            ui.label('Drop Node').classes('font-semibold')
-                            ui.label('pins at current pose').classes('text-xs').style(
-                                'color:#8c959f')
-                        with ui.row().classes('items-center gap-2 w-full'):
-                            name_input = ui.input(
-                                placeholder='e.g. ROW_D_IN', label='Name',
-                            ).classes('flex-1')
-                        with ui.row().classes('items-center gap-2 w-full mt-1'):
-                            row_id_input = ui.number(
-                                label='Row ID', placeholder='blank=standard',
-                                min=1, step=1, precision=0,
-                            ).classes('w-28')
-                            row_role_toggle = ui.toggle(
-                                {'entry': 'Entry', 'exit': 'Exit'}, value='entry',
-                            ).props('dense')
-                            row_hint = ui.label('').classes('text-xs font-mono').style(
-                                'color:#8c959f')
-                        with ui.row().classes('items-center gap-2 mt-2'):
-                            cur_drop_lbl = ui.label('').classes('text-xs font-mono').style(
-                                'color:#8c959f')
-                            ui.button(
-                                'Drop',
-                                on_click=lambda: self.drop_topo_node(
-                                    name_input.value,
-                                    int(row_id_input.value) if row_id_input.value else None,
-                                    row_role_toggle.value,
-                                ),
-                            ).classes('ml-auto').props('color=positive no-caps dense')
-                        drop_status_lbl = ui.label('').classes('text-xs font-mono mt-1')
+                    DropNodeCard(
+                        state=self._run_store.drop_node,
+                        on_drop=self.drop_topo_node,
+                    )
 
                     with ui.card().classes('flex-1').style('padding:12px 14px'):
                         ui.label('Row Discovery').classes('font-semibold mb-2')
@@ -1697,24 +1681,12 @@ class NiceGuiNode(Node):
             else:
                 self._run_store.joystick.pose_lbl = 'no odom'
 
-
-            cur = self.topo_current
-            if cur and cur != '—':
-                cur_drop_lbl.set_text(f'→ {cur}')
-                cur_drop_lbl.style('color:#1a7f37')
-            else:
-                cur_drop_lbl.set_text('no current node')
-                cur_drop_lbl.style('color:#8c959f')
-            row_hint.set_text(ROW_ACTION if row_id_input.value else NAV_ACTION)
-            row_hint.style('color:#0969da' if row_id_input.value else 'color:#8c959f')
-            drop_status_lbl.set_text(self.drop_status)
-            drop_status_lbl.style(
-                'color:#cf222e' if self.drop_status.startswith('ERROR') else 'color:#1a7f37')
+            current_node = self._run_store.drop_node.current_node
 
             rp = self._robot_pose()
             rp_key = None if rp is None else (round(rp[0], 1), round(rp[1], 1),
                                             round(rp[2], 2))
-            snap = {'sel': self.topo_selected, 'cur': self.topo_current,
+            snap = {'sel': self.topo_selected, 'cur': current_node,
                     'stat': self.topo_nav_status, 'nav': self.topo_navigating,
                     'nodes': set(self._topo_doc.nodes), 'robot': rp_key}
             nonlocal _prev
@@ -1730,7 +1702,7 @@ class NiceGuiNode(Node):
                 self._run_store.node_map.map_svg = build_svg(
                     self._topo_doc,
                     self.topo_selected,
-                    self.topo_current
+                    current_node,
                 )
                 inject_click_js()
 
@@ -1755,7 +1727,7 @@ class NiceGuiNode(Node):
                             f'{nd.name}{"  · row" if is_row else ""}</div>'
                         ).on('click', lambda _, n=n: setattr(self, 'topo_selected', n))
 
-            cur_lbl.set_text(self.topo_current or '—')
+            cur_lbl.set_text(current_node or '—')
             sel_lbl.set_text(self.topo_selected or '—')
             sel_lbl.style('color:#9a6700' if self.topo_selected else 'color:#8c959f')
             stat_lbl.set_text(self.topo_nav_status)
@@ -2075,7 +2047,7 @@ class NiceGuiNode(Node):
         save_btn.on_click(do_save)
 
         async def do_repair():
-            cur = self.topo_current
+            cur = self._run_store.drop_node.current_node
             default_base = ''
             if cur not in ('—', 'none', 'None', '', None) and self._topo_doc.has_node(cur):
                 default_base = cur
