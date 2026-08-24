@@ -29,8 +29,14 @@ class RunStore:
         row_hint: str = ''
         status: str = ''
 
+    @dataclass
+    class Discovery:
+        active: bool = False
+        status: str = 'idle'
+
     def __init__(self) -> None:
         self.joystick = self.Joystick()
         self.node_map = self.NodeMap()
         self.track = self.Track()
         self.drop_node = self.DropNode()
+        self.discovery = self.Discovery()

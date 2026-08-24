@@ -102,6 +102,7 @@ from devkit_ui.obstacles import (
 from devkit_ui.pages.run.drop_node_card import DropNodeCard
 from devkit_ui.pages.run.joystick_control_card import JoystickControlCard
 from devkit_ui.pages.run.node_map_card import NodeMapCard
+from devkit_ui.pages.run.row_discovery_card import RowDiscoveryCard
 from devkit_ui.pages.run.track_card import TrackCard
 from devkit_ui.parse import dump_topo_yaml, parse_topo_json, parse_topo_yaml
 from devkit_ui.stores.global_store import GlobalStore
@@ -355,6 +356,9 @@ class NiceGuiNode(Node):
         """Set up ROS subscriptions/publishers, GUI state, and the terrain/F2C planning wiring."""
         super().__init__(NODE_NAME)
 
+        self._global_store = GlobalStore()
+        self._run_store = RunStore()
+
         # Dedicated wall clock for the real/fake-GPS freshness bookkeeping
         # below (store_gps, store_fake_gps, _publish_fake_gps,
         # _store_fusion_odom). This node runs with use_sim_time=True in sim
@@ -543,9 +547,7 @@ class NiceGuiNode(Node):
         self._row_discovery_stop_cli = self.create_client(
             Trigger, '/row_discovery_node/stop_discovery')
         self.create_subscription(String, '/row_discovery/status',
-            lambda m: setattr(self, 'discovery_status', m.data), _SENSOR_QOS)
-        self.discovery_active: bool = False
-        self.discovery_status: str  = 'idle'
+            lambda m: setattr(self._run_store.discovery, 'status', m.data), _SENSOR_QOS)
 
         self.latest_odom:    Odometry | None     = None
         self.latest_gps:     NavSatFix | None    = None
@@ -600,8 +602,6 @@ class NiceGuiNode(Node):
 
         self._pose_fail_log_t = 0.0
 
-        self._global_store = GlobalStore()
-        self._run_store = RunStore()
         self._run_store.node_map.map_svg = build_svg(self._topo_doc, None, None)
         self._run_store.node_map.robot_svg = build_robot_svg(self._topo_doc.nodes, None)
 
@@ -954,21 +954,21 @@ class NiceGuiNode(Node):
         system wired into this codebase to check against yet; the operator
         confirmation dialog is the only guard that exists right now.
         """
-        self.discovery_status = 'starting…'
+        self._run_store.discovery.status = 'starting…'
         def _work():
             if not self._row_discovery_start_cli.wait_for_service(timeout_sec=2.0):
-                self.discovery_active = False
-                self.discovery_status = 'ERROR: row_discovery_node not running'
+                self._run_store.discovery.active = False
+                self._run_store.discovery.status = 'ERROR: row_discovery_node not running'
                 return
             def _cb(f):
                 try:
                     res = f.result()
-                    self.discovery_active = res.success
-                    self.discovery_status = res.message or (
+                    self._run_store.discovery.active = res.success
+                    self._run_store.discovery.status = res.message or (
                         'running' if res.success else 'failed to start')
                 except Exception as e:
-                    self.discovery_active = False
-                    self.discovery_status = f'ERROR: {e}'
+                    self._run_store.discovery.active = False
+                    self._run_store.discovery.status = f'ERROR: {e}'
             self._row_discovery_start_cli.call_async(
                 Trigger.Request()).add_done_callback(_cb)
         threading.Thread(target=_work, daemon=True).start()
@@ -978,11 +978,11 @@ class NiceGuiNode(Node):
             def _cb(f):
                 try:
                     res = f.result()
-                    self.discovery_status = res.message or 'stopped'
+                    self._run_store.discovery.status = res.message or 'stopped'
                 except Exception as e:
-                    self.discovery_status = f'ERROR: {e}'
+                    self._run_store.discovery.status = f'ERROR: {e}'
                 finally:
-                    self.discovery_active = False
+                    self._run_store.discovery.active = False
             self._row_discovery_stop_cli.call_async(
                 Trigger.Request()).add_done_callback(_cb)
         threading.Thread(target=_work, daemon=True).start()
@@ -1582,51 +1582,11 @@ class NiceGuiNode(Node):
                         on_drop=self.drop_topo_node,
                     )
 
-                    with ui.card().classes('flex-1').style('padding:12px 14px'):
-                        ui.label('Row Discovery').classes('font-semibold mb-2')
-                        ui.html(
-                            '<div style="font-size:12px;color:#9a6700;'
-                            'background:#fff8dc;border:1px solid #d4a72c;'
-                            'border-radius:4px;padding:6px 8px;margin-bottom:8px;">'
-                            '⚠ Discovery mode drives the robot autonomously '
-                            'through the field with no operator override. '
-                            'Only enable this with the person-detection '
-                            'safety system active and confirmed running.</div>'
-                        )
-                        with ui.row().classes('items-center gap-2'):
-                            discovery_checkbox = ui.checkbox('Discovery mode').bind_value(
-                                self, 'discovery_active')
-                            ui.label().classes('text-xs font-mono ml-2').bind_text_from(
-                                self, 'discovery_status')
-
-                        async def _on_discovery_change(e, _cb=discovery_checkbox) -> None:
-                            if e.args:  # ticked on
-                                with ui.dialog() as d, ui.card():
-                                    ui.label(
-                                        'Confirm person-detection safety system'
-                                    ).classes('font-semibold')
-                                    ui.label(
-                                        'Discovery mode will drive the robot with '
-                                        'no operator override. Confirm the '
-                                        'person-detection safety system is running '
-                                        'and active before continuing.'
-                                    ).classes('text-sm').style('max-width:320px')
-                                    with ui.row().classes('justify-end gap-2 mt-2'):
-                                        ui.button('Cancel',
-                                            on_click=lambda: d.submit('cancel')).props(
-                                            'flat no-caps')
-                                        ui.button('Confirmed — Start', color='positive',
-                                            on_click=lambda: d.submit('go')).props(
-                                            'no-caps')
-                                result = await d
-                                if result != 'go':
-                                    _cb.value = False
-                                    return
-                                self.start_discovery()
-                            else:
-                                self.stop_discovery()
-
-                        discovery_checkbox.on('update:model-value', _on_discovery_change)
+                    RowDiscoveryCard(
+                        state=self._run_store.discovery,
+                        on_start=self.start_discovery,
+                        on_stop=self.stop_discovery,
+                    )
 
                     # OBSTACLE: Mark Obstacle card next to Drop Node
                     attach_nav_card(self, self._obstacle_mgr)
