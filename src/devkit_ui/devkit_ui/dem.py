@@ -357,6 +357,7 @@ _LOGGER = logging.getLogger(__name__)
 
 
 def _log(msg: str) -> None:
+    """Emit a diagnostic message via the module logger."""
     _LOGGER.info(msg)
 
 
@@ -418,6 +419,7 @@ def select_reference_contour_xy(
         return None
 
     def _to_xy(contour_rc: np.ndarray) -> list[tuple[float, float]]:
+        """Convert contour (row, col) grid indices to real-world xy coordinates."""
         return [(origin_xy[0] + col * resolution_m, origin_xy[1] + row * resolution_m)
                 for row, col in contour_rc]
 

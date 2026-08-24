@@ -74,6 +74,7 @@ from devkit_ui.dem import (  # noqa: E402
 
 
 def main() -> int:
+    """CLI entry point: load recon points, build a DEM, and run test contour planning."""
     ap = argparse.ArgumentParser(description=__doc__,
                                   formatter_class=argparse.RawDescriptionHelpFormatter)
     ap.add_argument('recon_csv', help='Path to recon.csv (stamp,lat,lon,alt,x,y)')

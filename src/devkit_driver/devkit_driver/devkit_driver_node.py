@@ -29,6 +29,7 @@ class DevkitDriver(Node):
     """Devkit node handler with defensive attribute checks for simulation support."""
 
     def __init__(self, system: System):
+        """Wire up hardware/simulation handlers, skipping any attribute the system lacks."""
         super().__init__('devkit_driver_node')
         self.system = system
 
@@ -67,6 +68,7 @@ class DevkitDriver(Node):
             self.get_logger().info('IMU not detected (no imu attribute); skipping ImuHandler.')
 
     def destroy_node(self) -> None:
+        """Close the recon DEM logger's CSV handle before the usual node teardown."""
         # ReconDEMLogger holds an open CSV file handle for the process
         # lifetime (see recon_dem_logger.py) — nothing else releases it.
         try:

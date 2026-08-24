@@ -44,6 +44,7 @@ class ReconDEMLogger:
     """Log RTK-fixed points at fixed distance intervals for DEM building."""
 
     def __init__(self, node: Node):
+        """Declare recon-logging parameters and open the output CSV if enabled."""
         self.log = node.get_logger()
         self._node = node
 
@@ -103,9 +104,11 @@ class ReconDEMLogger:
         node.create_subscription(Odometry, '/odom', self._handle_odom, sensor_qos)
 
     def _store_fix(self, msg: NavSatFix) -> None:
+        """Cache the latest GNSS fix for pairing with the next odometry callback."""
         self._latest_fix = msg
 
     def _handle_odom(self, msg: Odometry) -> None:
+        """Log the current position to CSV if RTK-fixed, fresh, and past the distance gate."""
         if not self._enabled or self._csv_writer is None:
             return
         if self._latest_fix is None:
@@ -148,6 +151,7 @@ class ReconDEMLogger:
         self._last_logged_xy = (x, y)
 
     def close(self) -> None:
+        """Flush and release the CSV file handle, if one is open."""
         if self._csv_file is not None:
             self._csv_file.close()
             self._csv_file = None

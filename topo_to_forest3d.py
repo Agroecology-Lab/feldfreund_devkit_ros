@@ -124,6 +124,7 @@ def find_spawn_node(nodes, rows):
 
 
 def extract_rows(nodes):
+    """Group topology nodes by row_id into ordered row segments, tolerating mixed int/str ids."""
     by_rid = {}
     for name, nd in nodes.items():
         rid = nd['row_id']
@@ -181,6 +182,7 @@ def extract_rows(nodes):
 
 def compute_field_params(rows, headland_width, default_row_width, plant_spacing,
                           min_furrow_width=0.1):
+    """Derive field dimensions, row axis, and spacing parameters from extracted rows."""
     if len(rows) < 1:
         sys.exit("ERROR: need at least 1 row")
 

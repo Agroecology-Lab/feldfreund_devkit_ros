@@ -199,6 +199,7 @@ class TopoDoc:
         definitions: dict | None = None,
         transformation: dict | None = None,
     ) -> None:
+        """Build a TopoDoc, indexing any provided nodes by name."""
         self._nodes: dict[NodeID, TopoNode] = {}
         for node in nodes or []:
             if isinstance(node, TopoNode):

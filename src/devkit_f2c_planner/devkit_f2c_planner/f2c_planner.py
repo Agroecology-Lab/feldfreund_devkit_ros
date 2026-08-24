@@ -35,6 +35,7 @@ _SHAPELY_OFFSET_CURVE_MIN_VERSION = '2.0'
 
 def _f2c_latlon_to_xy(lat: float, lon: float,
                       lat0: float, lon0: float) -> tuple[float, float]:
+    """Project lat/lon to a local equirectangular xy frame anchored at (lat0, lon0)."""
     R = 6_378_137.0
     x = math.radians(lon - lon0) * R * math.cos(math.radians(lat0))
     y = math.radians(lat - lat0) * R
@@ -43,6 +44,7 @@ def _f2c_latlon_to_xy(lat: float, lon: float,
 
 def _f2c_xy_to_latlon(x: float, y: float,
                       lat0: float, lon0: float) -> tuple[float, float]:
+    """Inverse of _f2c_latlon_to_xy: convert local xy back to lat/lon."""
     R   = 6_378_137.0
     lat = lat0 + math.degrees(y / R)
     lon = lon0 + math.degrees(x / (R * math.cos(math.radians(lat0))))
@@ -99,8 +101,10 @@ def _run_f2c(corners_ll: list,
              obstacle_pad_m: float = 0.0,
              headland_width_m: float = 0.0,
              snake_order: bool = True) -> list:
+    """Generate straight-swath field rows for the boundary, clipped around obstacles."""
 
     def _log(msg):
+        """Write a prefixed diagnostic line to stderr."""
         print(f'[F2C] {msg}', file=sys.stderr, flush=True)
 
     _log(f'called: {len(corners_ll)} boundary pts, '
@@ -320,8 +324,10 @@ def _run_contour_f2c(corners_ll: list,
                       headland_width_m: float = 0.0,
                       snake_order: bool = True,
                       max_rows_each_side: int = 500) -> list:
+    """Generate contour-following rows offset from a reference line, clipped to the field."""
 
     def _log(msg):
+        """Write a prefixed diagnostic line to stderr."""
         print(f'[F2C-contour] {msg}', file=sys.stderr, flush=True)
 
     _log(f'called: {len(corners_ll)} boundary pts, '
@@ -357,6 +363,7 @@ def _run_contour_f2c(corners_ll: list,
 
     # ── Offset outward from the reference line until we run off the field ──
     def _row_at(offset_m: float) -> list | None:
+        """Build one row offset from the reference line, or None if it can't be produced."""
         if offset_m == 0:
             line = ref_line
         else:

@@ -351,6 +351,7 @@ def _plan_contour_rows(corners_ll: list, obstacle_rings: list, tool_width: float
 class NiceGuiNode(Node):
 
     def __init__(self) -> None:
+        """Set up ROS subscriptions/publishers, GUI state, and the terrain/F2C planning wiring."""
         super().__init__(NODE_NAME)
 
         # Dedicated wall clock for the real/fake-GPS freshness bookkeeping
@@ -474,6 +475,7 @@ class NiceGuiNode(Node):
         _FUSION_GNSS_STALENESS_LIMIT = 5.0  # s — real /gnss/fix must be this fresh
 
         def _store_fusion_odom(m: Odometry) -> None:
+            """Update the map marker from fused odometry once its covariance is trustworthy."""
             cov_xx = m.pose.covariance[0]
             if cov_xx <= 0.0 or cov_xx > _FUSION_COV_TRUST_THRESHOLD:
                 return  # not trustworthy yet — let /odom keep driving the marker
@@ -977,12 +979,14 @@ class NiceGuiNode(Node):
 
     def _persist_and_reload(self, modify_fn: Callable[[TopoDoc], None], status_attr: str,
                              success_msg: str) -> None:
+        """Run modify_fn against the on-disk topo map in a thread, then reload and report status."""
         map_name = self._topo_doc.name
         map_file = f'/workspace/maps/{map_name}'
         installed_src = ('/workspace/install/topological_navigation/share/'
                          'topological_navigation/config/mixed_actions_map.yaml')
 
         def _work():
+            """Load the on-disk map, apply modify_fn, save it, and reload it into the UI."""
             try:
                 if os.path.exists(map_file):
                     file_doc = parse_topo_yaml(map_file)
@@ -1039,6 +1043,7 @@ class NiceGuiNode(Node):
 
     def save_f2c_rows_to_topo(self, prefix: str, row_id_start: int,
                               overwrite: bool = False) -> None:
+        """Write the last-planned F2C swaths into the loaded topo map as named rows."""
         prefix = re.sub(r'[^A-Z0-9_]', '',
                         (prefix or '').strip().upper().replace(' ', '_'))
         if not prefix:
@@ -1271,6 +1276,7 @@ class NiceGuiNode(Node):
             f'writing {len(added)} rows · {prefix}{splice_str}{skip_str}…')
 
         def _modify(file_doc):
+            """Insert (or overwrite) the planned row nodes/edges into file_doc."""
             if overwrite:
                 old_names = {
                     e.name
@@ -1303,6 +1309,7 @@ class NiceGuiNode(Node):
     # ── Repair row connectivity ──────────────────────────────────────────────
 
     def repair_row_connectivity(self, connect_to: str | None = None) -> None:
+        """Rebuild missing entry/waypoint/exit edges for existing rows in the loaded map."""
         if not self._topo_doc:
             self.f2c_save_status = 'ERROR: map not loaded'
             return
@@ -1771,6 +1778,7 @@ class NiceGuiNode(Node):
     # ── Mission tab ───────────────────────────────────────────────────────────
 
     def _mission_content(self) -> None:
+        """Build the Mission tab UI: field boundary drawing, F2C planning, and row saving."""
         corners_ll: list[tuple[float, float]] = []
         swath_layers: list = []
         poly_layer:   list = [None]
@@ -1837,6 +1845,7 @@ class NiceGuiNode(Node):
                 contour_note.set_visibility(False)
 
                 def _on_contour_toggle(e) -> None:
+                    """Show/hide contour-only controls when the contour-mode switch flips."""
                     on = bool(e.value)
                     f2c_angle.set_enabled(not on)
                     f2c_recon_path.set_visibility(on)
@@ -1958,6 +1967,7 @@ class NiceGuiNode(Node):
         clear_btn.on_click(do_clear)
 
         async def do_plan():
+            """Run straight or contour F2C planning for the drawn boundary and render the swaths."""
             if len(corners_ll) < 3:
                 f2c_status.set_text('Need at least 3 corners')
                 f2c_status.style('color:#cf222e')
@@ -2696,6 +2706,7 @@ class NiceGuiNode(Node):
     # ── System tab ────────────────────────────────────────────────────────────
 
     def _system_content(self) -> None:
+        """Build the System tab UI: telemetry sliders and manual control widgets."""
         with ui.row().classes('items-stretch w-full gap-3'):
             with ui.card().classes('flex-1'):
                 ui.label('Telemetry').classes('font-semibold mb-2')
@@ -3664,6 +3675,7 @@ class NiceGuiNode(Node):
         self.cmd_vel_publisher.publish(msg)
 
     def store_gps(self, msg: NavSatFix) -> None:
+        """Cache the latest real GNSS fix and refresh the wall-clock staleness timestamp."""
         self.latest_gps = msg
         # Anything arriving on the real /gnss/fix topic is by definition a
         # real fix now that the shim publishes elsewhere — no sentinel check
