@@ -19,7 +19,13 @@
   <depend>sensor_msgs</depend>
   <depend>gps_msgs</depend>
   <depend>tf2_ros</depend>
+  <depend>devkit_f2c_planner</depend>
   <exec_depend>python3-yaml</exec_depend>
+  <!-- terrain_mask.py: traces the grid_map traversability mask into rings -->
+  <exec_depend>python3-skimage</exec_depend>
+  <!-- dem.py: DEM interpolation and traversability mask generation -->
+  <exec_depend>python3-numpy</exec_depend>
+  <exec_depend>python3-scipy</exec_depend>
 
   <test_depend>ament_lint_auto</test_depend>
   <test_depend>ament_lint_common</test_depend>

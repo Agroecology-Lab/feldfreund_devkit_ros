@@ -360,10 +360,21 @@ class DevkitManager:
 
         # Survey origin for the topo map datum. In real-GPS runs this MUST match
         # fusioncore's GNSS reference origin, or the field frame and base_link
-        # will disagree by the lat/lon offset. Defaults to 0/0 (sim-safe).
-        datum_lat = cfg.get('FIELD_DATUM_LAT', '0.0')
-        datum_lon = cfg.get('FIELD_DATUM_LON', '0.0')
-        datum_alt = cfg.get('FIELD_DATUM_ALT', '0.0')
+        # will disagree by the lat/lon offset. Defaults to Field 27's location
+        # (matching ui_node.py's _FAKE_GPS_LAT/LON fake-GPS shim, its leaflet
+        # defaults, and test_contour_planning.py's --anchor-lat/lon) rather
+        # than (0, 0) — see ui_node.py's shim comment: a mismatch above ~53m
+        # between that shim and this map's back-solved origin trips
+        # FusionCore's outlier gate and silently rejects every subsequent
+        # real GPS fix for the rest of the run. Keep these in lockstep.
+        datum_lat = cfg.get('FIELD_DATUM_LAT', '48.0046000')
+        datum_lon = cfg.get('FIELD_DATUM_LON', '3.6644000')
+        # Altitude is NOT part of the lockstep requirement above: 2.318m is
+        # Field 27's real surveyed elevation, while ui_node.py's
+        # _FAKE_GPS_ALT (40.0) is an arbitrary sim-only placeholder.
+        # FusionCore's outlier gate referenced above only checks horizontal
+        # (lat/lon) offset, so this mismatch is intentional, not drift.
+        datum_alt = cfg.get('FIELD_DATUM_ALT', '2.318')
 
         # --sim is our own flag; don't forward it to ros2 launch.
         # Use startswith so variants like --sim, --sim., --sim=true all match.
@@ -388,6 +399,18 @@ class DevkitManager:
         topo_world = ("/workspace/install/devkit_simulation/share/"
                       "devkit_simulation/worlds/maize.world")
         world_gen = (
+            # Everything up to the final ')' is wrapped in one subshell so a
+            # failure anywhere in it (most likely: virtual_maize_field isn't
+            # built — its clone is commented out in docker/Dockerfile — so
+            # `ros2 run virtual_maize_field generate_world` always fails when
+            # no /workspace/maps/maize_map exists yet) logs a clear warning
+            # instead of silently short-circuiting the `&&` chain below and
+            # preventing nav_launch_cmd from ever running. Restore the
+            # virtual_maize_field clone in docker/Dockerfile if synthetic
+            # world bootstrap needs to work again; until then this just
+            # degrades to "launch nav without a freshly generated Gazebo
+            # world", which is recoverable from the UI's System tab.
+            "("
             # Bootstrap node positions only if no map has been authored yet.
             "([ -f /workspace/maps/maize_map ] || ("
             "ros2 run virtual_maize_field generate_world fre22_task_navigation_mini 2>/dev/null && "
@@ -412,7 +435,11 @@ class DevkitManager:
             "--headland 5.0 "
             "--generate "
             f"--world-out {topo_world} "
-            "--models-path /workspace/models && "
+            "--models-path /workspace/models"
+            ") || echo 'WARNING: world_gen failed (virtual_maize_field not "
+            "built, or maize_map bootstrap failed) - launching nav stack "
+            "without a freshly generated Gazebo world; start it manually "
+            "from the UI System tab' && "
         ) if is_sim == 'true' else ""
 
         # In sim mode launch sowbot_sim (real Nav2 + topo nav + UI) instead of

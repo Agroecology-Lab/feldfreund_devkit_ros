@@ -19,6 +19,7 @@ from devkit_driver.modules import (
     EStopHandler,
     ImuHandler,
     OdomHandler,
+    ReconDEMLogger,
     RobotBrainHandler,
     TwistHandler,
 )
@@ -28,6 +29,7 @@ class DevkitDriver(Node):
     """Devkit node handler with defensive attribute checks for simulation support."""
 
     def __init__(self, system: System):
+        """Wire up hardware/simulation handlers, skipping any attribute the system lacks."""
         super().__init__('devkit_driver_node')
         self.system = system
 
@@ -42,6 +44,10 @@ class DevkitDriver(Node):
 
         # Odometry is standard across both modes
         self._odom_handler = OdomHandler(self, self.system.odometer)
+
+        # Opt-in RTK recon logging for DEM building (see issue #110);
+        # subscribes to /gnss/fix + /odom directly, no hardware attr needed.
+        self._recon_dem_logger = ReconDEMLogger(self)
 
         if hasattr(self.system.feldfreund, 'bms'):
             self._bms_handler = BMSHandler(self, self.system.feldfreund.bms)
@@ -60,6 +66,15 @@ class DevkitDriver(Node):
             self._imu_handler = ImuHandler(self, self.system.feldfreund.imu)
         else:
             self.get_logger().info('IMU not detected (no imu attribute); skipping ImuHandler.')
+
+    def destroy_node(self) -> None:
+        """Close the recon DEM logger's CSV handle before the usual node teardown."""
+        # ReconDEMLogger holds an open CSV file handle for the process
+        # lifetime (see recon_dem_logger.py) — nothing else releases it.
+        try:
+            self._recon_dem_logger.close()
+        finally:
+            super().destroy_node()
 
 
 def main() -> None:
@@ -112,6 +127,9 @@ def ros_main(system: System) -> None:
     except (ExternalShutdownException, KeyboardInterrupt):
         pass
     finally:
+        # destroy_node() (closes the ReconDEMLogger CSV handle, see its
+        # override above) — rclpy.shutdown() alone never calls this.
+        devkit_driver.destroy_node()
         if rclpy.ok():
             rclpy.shutdown()
 

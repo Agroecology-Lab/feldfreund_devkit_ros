@@ -45,3 +45,12 @@ uploads/**
 
 # Agri-Field-Dataset (1.9GB download, not versioned)
 Agri-Field-Dataset/
+
+# Runtime maps/missions — not source. recon_logs/ is excluded from this:
+# it holds recon.csv + test_contour_planning.py, which ARE tracked source
+# data (not runtime output), so a blanket "maps/" here would silently drop
+# them from any future `git add -A` the moment they're newly-created and
+# untracked, since git add won't stage already-ignored untracked paths.
+maps/*
+!maps/recon_logs/
+*.patch
