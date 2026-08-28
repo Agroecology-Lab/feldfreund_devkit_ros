@@ -479,10 +479,25 @@ def attach_nav_card(node, manager: ObstacleManager) -> None:
                     name=obs_name.value or '')
                 if added:
                     obs_name.set_value('')
-                    ui.notify(
-                        f'Marked {added}', type='positive', timeout=5000,
-                        actions=[{'label': 'Undo',
-                                  'handler': lambda: manager.delete(added)}])
+                    # NiceGUI notification dismissal cannot reliably report
+                    # whether Undo or its timeout closed the toast.
+                    with ui.dialog() as undo_dialog, ui.element('div').classes(
+                            'obstacle-undo-notification'):
+                        with ui.row().classes('items-center gap-3'):
+                            ui.label(f'Marked {added}')
+                            ui.button(
+                                'Undo',
+                                on_click=lambda: (
+                                    manager.delete(added), undo_dialog.close()),
+                            ).props('flat dense').classes('text-white')
+                    undo_dialog.props('position=bottom seamless')
+                    undo_dialog.open()
+
+                    def _close_undo_dialog() -> None:
+                        if not undo_dialog.is_deleted:
+                            undo_dialog.close()
+
+                    ui.timer(5.0, _close_undo_dialog, once=True)
 
             ui.button('Mark here', on_click=_mark_here).classes(
                 'ml-auto').props('color=warning no-caps dense')

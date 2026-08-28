@@ -27,6 +27,12 @@ body,
 	border: 1px solid var(--border) !important;
 	box-shadow: none !important;
 }
+.obstacle-undo-notification {
+	background: var(--green) !important;
+	color: #ffffff !important;
+	padding: 12px 16px;
+	box-shadow: 0 4px 12px rgba(27, 127, 55, 0.24) !important;
+}
 .q-separator {
 	background: var(--border) !important;
 }
