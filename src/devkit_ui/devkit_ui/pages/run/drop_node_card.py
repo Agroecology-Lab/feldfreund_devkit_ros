@@ -9,11 +9,9 @@ from devkit_ui.stores.run_store import RunStore
 class DropNodeCard(ui.card):
     def __init__(self,
                  state: RunStore.DropNode,
+                 topo_state: RunStore.Topo,
                  on_drop: Callable[[str, int | None, str], None]):
         super().__init__()
-
-        self._state = state
-        self.on_drop = on_drop
 
         self.classes('flex-1')
 
@@ -27,7 +25,7 @@ class DropNodeCard(ui.card):
                 # Name
                 ui.input(
                     placeholder='e.g. ROW_D_IN', label='Name',
-                ).classes('flex-1').bind_value(self._state, 'name')
+                ).classes('flex-1').bind_value(state, 'name')
 
             with ui.row().classes('items-center gap-2 w-full mt-1'):
                 # Row id
@@ -35,14 +33,14 @@ class DropNodeCard(ui.card):
                     label='Row ID', placeholder='blank=standard',
                     min=1, step=1, precision=0,
                 ).classes('w-28').bind_value(
-                    self._state, 'row_id',
+                    state, 'row_id',
                     forward=lambda val: int(val) if val not in (None, '') else None
                 )
 
                 # Toggle role
                 ui.toggle(
                     {'entry': 'Entry', 'exit': 'Exit'}
-                ).props('dense').bind_value(self._state, 'row_role')
+                ).props('dense').bind_value(state, 'row_role')
 
                 # Hint label
                 self.row_hint = ui.label('').classes('text-xs font-mono')
@@ -52,7 +50,7 @@ class DropNodeCard(ui.card):
                     self.row_hint.style(f'color:{"#0969da" if has_row else "#8c959f"}')
                     return ROW_ACTION if has_row else NAV_ACTION
 
-                self.row_hint.bind_text_from(self._state, 'row_id', backward=sync_hint)
+                self.row_hint.bind_text_from(state, 'row_id', backward=sync_hint)
 
             with ui.row().classes('items-center gap-2 mt-2'):
                 self.current_node_lbl = ui.label('').classes('text-xs font-mono')
@@ -65,15 +63,15 @@ class DropNodeCard(ui.card):
                     return f'→ {current_node}' if has_current else 'no current node'
 
                 self.current_node_lbl.bind_text_from(
-                    self._state, 'current_node', backward=sync_current_node
+                    topo_state, 'current_node', backward=sync_current_node
                 )
 
                 ui.button(
                     'Drop',
-                    on_click=lambda: self.on_drop(
-                        self._state.name,
-                        self._state.row_id,
-                        self._state.row_role,
+                    on_click=lambda: on_drop(
+                        state.name,
+                        state.row_id,
+                        state.row_role,
                     ),
                 ).classes('ml-auto').props('color=positive no-caps dense')
 
@@ -83,4 +81,4 @@ class DropNodeCard(ui.card):
                 self.status_lbl.style(f'color:{"#cf222e" if status.startswith("ERROR") else "#1a7f37"}')
                 return status
 
-            self.status_lbl.bind_text_from(self._state, 'status', backward=sync_status)
+            self.status_lbl.bind_text_from(state, 'status', backward=sync_status)

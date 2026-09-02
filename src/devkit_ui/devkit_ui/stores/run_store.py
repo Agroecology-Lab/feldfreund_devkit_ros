@@ -25,9 +25,16 @@ class RunStore:
         name: str = ''
         row_id: int | None = None
         row_role: str = 'entry'
-        current_node: str = '—'
         row_hint: str = ''
         status: str = ''
+
+    @dataclass
+    class Topo:
+        current_node: str = '—'
+        selected_node: str | None = None
+        navigating: bool = False
+        nav_status: str = 'idle'
+        delete_status: str = ''
 
     @dataclass
     class Discovery:
@@ -39,4 +46,5 @@ class RunStore:
         self.node_map = self.NodeMap()
         self.track = self.Track()
         self.drop_node = self.DropNode()
+        self.topo = self.Topo()
         self.discovery = self.Discovery()
