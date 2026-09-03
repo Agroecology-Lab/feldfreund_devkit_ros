@@ -3,13 +3,13 @@ from collections.abc import Callable
 from nicegui import ui
 
 from devkit_ui.constants import NAV_ACTION, ROW_ACTION
-from devkit_ui.stores.run_store import RunStore
+from devkit_ui.view_models.run_view_model import RunViewModel
 
 
 class DropNodeCard(ui.card):
     def __init__(self,
-                 state: RunStore.DropNode,
-                 topo_state: RunStore.Topo,
+                 state: RunViewModel.DropNode,
+                 topo_state: RunViewModel.Topo,
                  on_drop: Callable[[str, int | None, str], None]):
         super().__init__()
 

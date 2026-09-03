@@ -1,10 +1,10 @@
 from nicegui import ui
 
-from devkit_ui.stores.run_store import RunStore
+from devkit_ui.view_models.run_view_model import RunViewModel
 
 
 class NodeMapCard(ui.card):
-    def __init__(self, state: RunStore.NodeMap):
+    def __init__(self, state: RunViewModel.NodeMap):
         super().__init__()
 
         self._state = state

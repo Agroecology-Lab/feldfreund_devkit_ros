@@ -1,7 +1,7 @@
 from dataclasses import dataclass
 
 
-class RunStore:
+class RunViewModel:
     @dataclass
     class Joystick:
         pose_lbl: str = 'no odom'

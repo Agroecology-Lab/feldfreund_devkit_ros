@@ -2,12 +2,12 @@ from collections.abc import Callable
 
 from nicegui import ui
 
-from devkit_ui.stores.run_store import RunStore
+from devkit_ui.view_models.run_view_model import RunViewModel
 
 
 class RowDiscoveryCard(ui.card):
     def __init__(self,
-                 state: RunStore.Discovery,
+                 state: RunViewModel.Discovery,
                  on_start: Callable[[], None],
                  on_stop: Callable[[], None]):
         super().__init__()

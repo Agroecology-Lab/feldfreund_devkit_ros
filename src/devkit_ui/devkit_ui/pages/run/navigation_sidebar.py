@@ -2,14 +2,14 @@ from collections.abc import Callable, Iterable
 
 from nicegui import ui
 
-from devkit_ui.stores.global_store import GlobalStore
-from devkit_ui.stores.run_store import RunStore
+from devkit_ui.view_models.global_view_model import GlobalViewModel
+from devkit_ui.view_models.run_view_model import RunViewModel
 
 
 class NavigationSidebar(ui.card):
     def __init__(self,
-                 global_store: GlobalStore,
-                 topo_state: RunStore.Topo,
+                 global_store: GlobalViewModel,
+                 topo_state: RunViewModel.Topo,
                  on_go: Callable[[], None],
                  on_cancel: Callable[[], None],
                  on_delete: Callable[[], None],
