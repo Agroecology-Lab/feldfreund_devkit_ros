@@ -71,7 +71,7 @@ def sample_field(surface, polygon, grid):
     inside = np.array([polygon.contains(Point(p)) for p in pts])
     pts = pts[inside]
 
-    spacing = np.median(np.diff(gx))
+    spacing = grid
     boundary = set()
     coords = list(polygon.exterior.coords)[:-1]
     for a, b in zip(coords, coords[1:] + coords[:1]):
@@ -164,6 +164,8 @@ def main():
                     help='Resample spacing in real metres (decimation; '
                          f'default {GRID:.0f} m)')
     args = ap.parse_args()
+    if not np.isfinite(args.grid) or args.grid <= 0:
+        raise SystemExit(f"ERROR: --grid must be a positive finite number, got {args.grid}")
 
     ply = Path(args.dataset) / 'surfaces_3D' / f'field{args.field}.ply'
     if not ply.exists():

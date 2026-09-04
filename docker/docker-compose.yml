@@ -32,7 +32,7 @@ services:
     container_name: feldfreund_simulation
     ports:
       - "80:80"
-      - "8765:8765"
+      - "127.0.0.1:8765:8765"
     volumes:
       - ~/.ros:/root/.ros
       - ../:/workspace

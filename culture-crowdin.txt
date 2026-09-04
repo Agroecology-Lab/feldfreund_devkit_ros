@@ -1,0 +1,22 @@
+
+
+<style>.js-proxy-blur {filter: blur(5px);}</style>
+
+
+<style>.js-proxy-blur {filter: blur(5px);}</style>
+<script src="https://website-translator.app.crowdin.net/assets/proxy-translator.js"></script>
+<script>
+  window.proxyTranslator.init({
+    baseUrl: "https://culture.transitionnetwork.org",
+    distribution: "3d03dd5459824faa6f873faind2",
+    defaultLanguage: "en",
+    languageTitles: {"en": "English"},
+    showDefaultLanguageInUrl: false,
+    languageRoutingMethod: "query",
+    position: "bottom-right",
+    submenuPosition: "top-right",
+    poweredBy: true,
+    token: "U2FsdGVkX18hcFEzei9tJuh0IWEjTo5TfZtoeOK3Nlli7I5t2dSnr0H3rbqxD0jGOyQRdjYy+lDlLWrJXEdE9Xn+dzlvBrYBQaZHbwfukEgGgF2sfBYII5CywoGWKh4TFxf6mR8rVC5w74MA/EdK20/z+/2O/YpJuQrcufM2ap7HZEFRn/GRDj8mV+1/oQuk",
+  });
+</script>
+

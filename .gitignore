@@ -40,7 +40,9 @@ src/ublox_dgnss/
 uploads/**
 !uploads/.gitkeep
 !uploads/terrain/
-!uploads/terrain/**
+!uploads/terrain/terrain.obj
+!uploads/terrain/terrain.stl
+!uploads/terrain/terrain.mtl
 !uploads/soil_custom/
 !uploads/soil_custom/textures/
 !uploads/**/.gitkeep

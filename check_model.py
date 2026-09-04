@@ -169,17 +169,51 @@ def inertia_ballpark(link, mass):
 
 def check_structure(root, links):
     joints = {}
-    for j in root.findall("joint"):
-        joints[j.find("child").get("link")] = (
-            j.find("parent").get("link"), j.get("type"), j)
-    roots = [n for n in links if n not in joints]
+    ok = True
     print(f"== STRUCTURE ==")
+    for j in root.findall("joint"):
+        child_el, parent_el = j.find("child"), j.find("parent")
+        child = child_el.get("link") if child_el is not None else None
+        parent = parent_el.get("link") if parent_el is not None else None
+        if child is None or parent is None:
+            print(f"  ERROR: joint {j.get('name')} missing parent or child link")
+            ok = False
+            continue
+        if child in joints:
+            print(f"  ERROR: link {child} has multiple parent joints "
+                  f"({joints[child][0]} and {parent})")
+            ok = False
+            continue
+        joints[child] = (parent, j.get("type"), j)
+
+    roots = [n for n in links if n not in joints]
     print(f"  links: {len(links)}, joints: {len(joints)}")
     if len(roots) != 1:
         print(f"  ERROR: expected exactly one root link, found {roots}")
         return False
-    print(f"  root link: {roots[0]}")
-    ok = True
+    root_link = roots[0]
+    print(f"  root link: {root_link}")
+
+    # Every link must be reachable from the single root by walking parents,
+    # with no cycles. world_of()/path_to_root() walk `child -> parent` until
+    # they fall off the joints dict, so an unreachable link or a cycle among
+    # non-root links would otherwise loop forever or silently misplace parts.
+    for name in links:
+        seen = set()
+        cur = name
+        while cur in joints:
+            if cur in seen:
+                print(f"  ERROR: cycle detected in kinematic chain at {cur}")
+                ok = False
+                break
+            seen.add(cur)
+            cur = joints[cur][0]
+        else:
+            if cur != root_link:
+                print(f"  ERROR: link {name} does not resolve to root "
+                      f"{root_link} (found {cur} — is it a missing link?)")
+                ok = False
+
     for child, (parent, jtype, j) in joints.items():
         if parent not in links:
             print(f"  ERROR: joint ->{child} references missing parent {parent}")
@@ -224,21 +258,26 @@ def check_overlaps(root, links, joints):
             if not aabb_overlap(aabbs[names[i]], aabbs[names[j]]):
                 continue
             dx, dy, dz = overlap_depth(aabbs[names[i]], aabbs[names[j]])
-            n1_path, n2_path = {}, {}
             root1, p1 = path_to_root(n1, joints)
             root2, p2 = path_to_root(n2, joints)
-            for (child, parent, jtype, _j) in p1:
-                n1_path[child] = jtype
-            for (child, parent, jtype, _j) in p2:
-                n2_path[child] = jtype
-            all_fixed = all(
-                v == "fixed" for v in list(n1_path.values()) + list(n2_path.values()))
-            adjacent = (n1 in n2_path and n2_path[n1] != "fixed") or \
-                       (n2 in n1_path and n1_path[n2] != "fixed")
+            a1 = [n1] + [parent for (_c, parent, _jt, _j) in p1]
+            a2 = [n2] + [parent for (_c, parent, _jt, _j) in p2]
+            a2_set = set(a2)
+            idx1 = next(k for k, node in enumerate(a1) if node in a2_set)
+            lca = a1[idx1]
+            idx2 = a2.index(lca)
+            # Only the joints strictly between n1 and n2 (via their lowest
+            # common ancestor) determine whether these two links are part of
+            # the same rigid body — shared ancestors above the LCA are
+            # irrelevant to that question.
+            path_jtypes = [jt for (_c, _p, jt, _j) in p1[:idx1]] + \
+                          [jt for (_c, _p, jt, _j) in p2[:idx2]]
+            all_fixed = bool(path_jtypes) and all(jt == "fixed" for jt in path_jtypes)
+            non_fixed_count = sum(1 for jt in path_jtypes if jt != "fixed")
             if all_fixed:
                 verdict = "RIGID OVERLAP (same body; masked while self_collide=off, breaks if enabled)"
-                is_err = False
-            elif adjacent:
+                is_err = True
+            elif non_fixed_count == 1:
                 verdict = "adjacent moving joint (normally filtered)"
                 is_err = False
             else:
@@ -249,6 +288,43 @@ def check_overlaps(root, links, joints):
                   f"({dx:.3f}, {dy:.3f}, {dz:.3f}) m — {verdict}")
             ok = ok and not is_err
     return ok
+
+
+def convex_hull_2d(points):
+    """Andrew's monotone chain. points: (N,2) array. Returns hull vertices, CCW."""
+    pts = sorted(set(map(tuple, points)))
+    if len(pts) <= 2:
+        return np.array(pts)
+
+    def cross(o, a, b):
+        return (a[0] - o[0]) * (b[1] - o[1]) - (a[1] - o[1]) * (b[0] - o[0])
+
+    lower = []
+    for p in pts:
+        while len(lower) >= 2 and cross(lower[-2], lower[-1], p) <= 0:
+            lower.pop()
+        lower.append(p)
+    upper = []
+    for p in reversed(pts):
+        while len(upper) >= 2 and cross(upper[-2], upper[-1], p) <= 0:
+            upper.pop()
+        upper.append(p)
+    return np.array(lower[:-1] + upper[:-1])
+
+
+def point_in_polygon(pt, poly):
+    """Ray-casting point-in-polygon test. poly: (N,2) array, CCW or CW."""
+    x, y = pt
+    inside = False
+    n = len(poly)
+    for i in range(n):
+        x1, y1 = poly[i]
+        x2, y2 = poly[(i + 1) % n]
+        if (y1 > y) != (y2 > y):
+            x_int = x1 + (y - y1) * (x2 - x1) / (y2 - y1)
+            if x < x_int:
+                inside = not inside
+    return inside
 
 
 def check_mass_cg(root, links, joints):
@@ -290,17 +366,21 @@ def check_mass_cg(root, links, joints):
         x1, y1 = pts[:, 0].max(), pts[:, 1].max()
         hl, hw = (x1 - x0) / 2, (y1 - y0) / 2
         cx, cy = (x1 + x0) / 2, (y1 + y0) / 2
-        print(f"  support box  = x +-{hl:.3f}, y +-{hw:.3f} (centre {cx:.3f}, {cy:.3f})")
-        in_x = abs(cg[0] - cx) < hl
-        in_y = abs(cg[1] - cy) < hw
-        print(f"  CG inside support box: x {'OK' if in_x else 'FAIL'}, "
-              f"y {'OK' if in_y else 'FAIL'}")
-        if in_x and in_y and cg[2] > 1e-6:
+        print(f"  support bbox = x +-{hl:.3f}, y +-{hw:.3f} (centre {cx:.3f}, {cy:.3f})")
+
+        hull = convex_hull_2d(pts)
+        # The bbox can pass (a rectangle) while the CG sits outside a
+        # triangular/sparse contact polygon, e.g. 3-point contact — so the
+        # real pass/fail is CG-in-hull, not CG-in-bbox.
+        stable = len(hull) >= 3 and point_in_polygon((cg[0], cg[1]), hull)
+        print(f"  support hull = {len(hull)} vertices")
+        print(f"  CG inside support polygon: {'OK' if stable else 'FAIL'}")
+        if stable and cg[2] > 1e-6:
             roll = math.degrees(math.atan(hw / cg[2]))
             pitch = math.degrees(math.atan(hl / cg[2]))
             print(f"  tip-over: roll {roll:.1f} deg, pitch {pitch:.1f} deg "
-                  f"(>45 deg is comfortably stable)")
-        return in_x and in_y
+                  f"(>45 deg is comfortably stable, bbox-based estimate)")
+        return stable
     print("  WARNING: no ground-level collision found")
     return False
 

@@ -61,9 +61,15 @@ KEY=$(
             -type f \( -name "*.sdf" -o -name "*.glb" -o -name "*.stl" \) \
             -exec md5sum {} + 2>/dev/null
         find /workspace/uploads/terrain -type f -exec md5sum {} + 2>/dev/null
+        find /workspace/uploads/soil_custom/textures -type f -exec md5sum {} + 2>/dev/null
         md5sum /workspace/topo_to_forest3d.py
     } | md5sum | awk '{print $1}'
 )
+
+LOCKFILE="$WORLD.lock"
+mkdir -p "$(dirname "$WORLD")"
+exec 9>"$LOCKFILE"
+flock 9
 
 if [ -f "$WORLD" ] && [ -f "$KEYFILE" ] && [ "$KEY" = "$(cat "$KEYFILE")" ]; then
     echo "[world] up-to-date — skipping regeneration"

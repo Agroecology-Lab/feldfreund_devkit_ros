@@ -52,6 +52,7 @@ from launch.actions import (
     EmitEvent,
     ExecuteProcess,
     IncludeLaunchDescription,
+    LogInfo,
     RegisterEventHandler,
     SetEnvironmentVariable,
     TimerAction,
@@ -372,10 +373,18 @@ def generate_launch_description():
         )
     )
 
+    def _launch_sim_if_worldgen_ok(event, context):
+        if event.returncode != 0:
+            return [LogInfo(msg=(
+                f'[sowbot_sim] world_gen exited with code {event.returncode} — '
+                'not starting sim_launch (world may be missing/stale)'
+            ))]
+        return [sim_launch]
+
     start_sim_after_worldgen = RegisterEventHandler(
         OnProcessExit(
             target_action=world_gen,
-            on_exit=[sim_launch],
+            on_exit=_launch_sim_if_worldgen_ok,
         )
     )
 

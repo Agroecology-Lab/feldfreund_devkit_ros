@@ -227,11 +227,17 @@ def read_ground_mesh_extent():
                 pass
             text = p.read_text(errors='ignore')
             xs, ys = [], []
-            for line in text.splitlines():
+            for lineno, line in enumerate(text.splitlines(), 1):
                 parts = line.split()
                 if len(parts) >= 3 and parts[0] == 'vertex':
-                    xs.append(float(parts[1]))
-                    ys.append(float(parts[2]))
+                    try:
+                        xs.append(float(parts[1]))
+                        ys.append(float(parts[2]))
+                    except ValueError:
+                        sys.exit(
+                            f"ERROR: malformed vertex on line {lineno} of "
+                            f"{p.name}: {line.strip()!r} — reject and re-upload "
+                            "the mesh")
             if xs:
                 return min(xs), max(xs), min(ys), max(ys)
     return None
@@ -353,6 +359,12 @@ def compute_field_params(rows, headland_width, default_row_width, plant_spacing,
         # row_width across a field_width mesh, so the margin must be at most
         # (field_width - band) / 2 on each side.
         row_band = (num_rows - 1) * spacing + row_width
+        if row_band > field_width:
+            sys.exit(
+                f"ERROR: uploaded ground mesh is {field_width:.2f}m wide but "
+                f"the topo map's {num_rows} rows need {row_band:.2f}m — the "
+                "mesh cannot contain this row layout. Upload a wider mesh or "
+                "use a topo map with fewer/closer rows.")
         headland = max(headland_width, 0.0)
         max_headland = max(0.0, (field_width - row_band) / 2.0)
         if headland > max_headland:
