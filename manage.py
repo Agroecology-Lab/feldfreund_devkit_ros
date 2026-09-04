@@ -360,10 +360,21 @@ class DevkitManager:
 
         # Survey origin for the topo map datum. In real-GPS runs this MUST match
         # fusioncore's GNSS reference origin, or the field frame and base_link
-        # will disagree by the lat/lon offset. Defaults to 0/0 (sim-safe).
-        datum_lat = cfg.get('FIELD_DATUM_LAT', '0.0')
-        datum_lon = cfg.get('FIELD_DATUM_LON', '0.0')
-        datum_alt = cfg.get('FIELD_DATUM_ALT', '0.0')
+        # will disagree by the lat/lon offset. Defaults to Field 27's location
+        # (matching ui_node.py's _FAKE_GPS_LAT/LON fake-GPS shim, its leaflet
+        # defaults, and test_contour_planning.py's --anchor-lat/lon) rather
+        # than (0, 0) — see ui_node.py's shim comment: a mismatch above ~53m
+        # between that shim and this map's back-solved origin trips
+        # FusionCore's outlier gate and silently rejects every subsequent
+        # real GPS fix for the rest of the run. Keep these in lockstep.
+        datum_lat = cfg.get('FIELD_DATUM_LAT', '48.0046000')
+        datum_lon = cfg.get('FIELD_DATUM_LON', '3.6644000')
+        # Altitude is NOT part of the lockstep requirement above: 2.318m is
+        # Field 27's real surveyed elevation, while ui_node.py's
+        # _FAKE_GPS_ALT (40.0) is an arbitrary sim-only placeholder.
+        # FusionCore's outlier gate referenced above only checks horizontal
+        # (lat/lon) offset, so this mismatch is intentional, not drift.
+        datum_alt = cfg.get('FIELD_DATUM_ALT', '2.318')
 
         # --sim is our own flag; don't forward it to ros2 launch.
         # Use startswith so variants like --sim, --sim., --sim=true all match.

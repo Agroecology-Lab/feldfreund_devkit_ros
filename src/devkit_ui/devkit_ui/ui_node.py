@@ -24,9 +24,10 @@ from itertools import pairwise
 from operator import attrgetter
 from pathlib import Path
 
+import numpy as np
+
 # The following imports get generated in the Dockerfile, they aren't available to pylint
 # pylint: disable=import-error
-import fields2cover as f2c
 import rclpy
 from ament_index_python.packages import (
     PackageNotFoundError,
@@ -36,6 +37,7 @@ from geometry_msgs.msg import Twist
 from nav_msgs.msg import Odometry
 from nicegui import app, ui, ui_run
 from nicegui import run as ng_run
+from rclpy.clock import Clock, ClockType
 from rclpy.executors import ExternalShutdownException
 from rclpy.node import Node
 from rclpy.qos import (
@@ -48,8 +50,6 @@ from rclpy.qos import (
 )
 from rclpy.time import Time
 from sensor_msgs.msg import BatteryState, NavSatFix, NavSatStatus
-from shapely.geometry import LineString, MultiLineString, Polygon
-from shapely.ops import unary_union
 from std_msgs.msg import Bool, Empty, Float64, String
 from std_srvs.srv import Trigger
 from tf2_ros import (
@@ -63,6 +63,23 @@ from tf2_ros.transform_listener import TransformListener
 # MISSION: store owns missions.yaml, scheduling, and run recording.
 from devkit_ui.actions import ACTIONS, action_ros_msgs
 from devkit_ui.constants import NAV_ACTION, NODE_NAME, ROW_ACTION
+# F2C: lat/lon<->XY projection + swath generator, now a standalone package
+# (devkit_f2c_planner) — see its f2c_planner.py docstring for why.
+from devkit_f2c_planner.f2c_planner import (
+    _f2c_latlon_to_xy,
+    _f2c_xy_to_latlon,
+    _run_contour_f2c,
+    _run_f2c,
+    field_centroid_xy,
+)
+# CONTOUR: terrain-aware reference line, from recon-logged elevation data.
+# See dem.py's module docstring for the recon.csv -> elevation_grid ->
+# reference contour pipeline this pulls from.
+from devkit_ui.dem import (
+    build_elevation_grid,
+    load_recon_points,
+    select_reference_contour_latlon,
+)
 from devkit_ui.missions import MissionStore
 from devkit_ui.models import (
     NodeID,
@@ -105,6 +122,22 @@ try:
 except ImportError:
     pass
 
+# Field 27's actual GPS extent, derived from maps/recon_logs/recon.csv (the
+# real Agri-Field-Dataset field-27 mesh, Zenodo 7805321 — France, ~372m x
+# 252m footprint, downsampled to a ~6.5m grid — replacing an earlier
+# placeholder India location that was in this file before). FIELD27_CENTER
+# is the anchor the mesh was georeferenced against (the field's actual
+# centroid). FIELD27_BOUNDS pads that extent by 15% on each side so
+# leaflet's fitBounds() shows the whole field with a small margin, rather
+# than butting the boundary against the map edge. This value MUST stay in
+# lockstep with DEFAULT_FIELD_LAT/LON in topo_to_forest3d.py,
+# FIELD_DATUM_LAT/LON's default in manage.py, and --anchor-lat/lon's
+# default in maps/recon_logs/test_contour_planning.py — see
+# _FAKE_GPS_LAT/LON below for why a mismatch there is dangerous, not just
+# cosmetic.
+FIELD27_CENTER = (48.0046000, 3.6644000)
+FIELD27_BOUNDS = ((48.0031957, 3.6612233), (48.0060043, 3.6675767))
+
 SAFETY_QOS = QoSProfile(
     depth=1,
     reliability=ReliabilityPolicy.RELIABLE,
@@ -120,10 +153,77 @@ TMAP_QOS = QoSProfile(
     history=HistoryPolicy.KEEP_LAST,
 )
 
+# CONTOUR: spacing for intermediate topo nodes dropped along curved rows
+# (see save_f2c_rows_to_topo()'s WAYPOINTS block and _resample_row_xy()
+# below) — a single entry->exit edge gives limbic_row_follow nothing to
+# track the bend with, so this chops a curved row into short near-straight
+# hops instead.
+#
+# CAVEAT: this sets hop length, not curve fidelity. Waypoints are
+# interpolated along whatever polyline f2c_planner._run_contour_f2c()
+# already produced, which is a *simplified* offset of the reference
+# contour (dem.select_reference_contour_xy()'s simplify_tolerance_m,
+# default 1.5x the DEM grid resolution — currently 1.5m at the UI's
+# default 1.0m resolution). Between two of that polyline's original
+# vertices the row is geometrically a straight chord; dropping waypoints
+# along it at 1m spacing places nodes exactly ON that chord, not on the
+# true elevation isoline the chord approximates. If tighter tracking than
+# the simplify tolerance matters, lower "DEM grid resolution" in the
+# Mission sidebar (tightens simplify_tolerance_m too) rather than
+# shortening this interval — a denser waypoint chain along the same
+# under-resolved chord doesn't add information the chord doesn't have.
+_CONTOUR_WAYPOINT_INTERVAL_M = 1.0
+
+
 def _topo_to_msg(doc: TopoDoc) -> String:
     msg = String()
     msg.data = json.dumps(doc.to_dict(), ensure_ascii=False)
     return msg
+
+
+def _resample_row_xy(points_ll: list, anchor_lat: float, anchor_lon: float,
+                      interval_m: float) -> list[tuple[float, float]]:
+    """Resample a row's full point list (lat/lon, as f2c_planner returns it)
+    into evenly-spaced intermediate points at ~interval_m along its arc
+    length, in local xy anchored at anchor_lat/anchor_lon.
+
+    Deliberately excludes the row's first and last points — callers already
+    turn those into the row's IN/OUT topo nodes, this only fills the gap
+    between them. Returns [] if the row's total length is shorter than one
+    interval (nothing to insert) or has fewer than 2 points.
+
+    The last computed waypoint is dropped if it would land within
+    0.3*interval_m of OUT — a node crammed almost on top of OUT achieves
+    nothing and just adds an edge-case-y near-zero-length final hop.
+    """
+    pts_xy = [_f2c_latlon_to_xy(lat, lon, anchor_lat, anchor_lon)
+              for lat, lon in points_ll]
+    if len(pts_xy) < 2:
+        return []
+
+    seg_lens = [math.dist(pts_xy[i], pts_xy[i + 1]) for i in range(len(pts_xy) - 1)]
+    total_len = sum(seg_lens)
+    if total_len < interval_m:
+        return []
+
+    targets = [interval_m * k for k in range(1, int(total_len // interval_m) + 1)]
+    if targets and (total_len - targets[-1]) < 0.3 * interval_m:
+        targets.pop()
+
+    out_xy: list[tuple[float, float]] = []
+    cum = 0.0
+    seg_i = 0
+    for target in targets:
+        while seg_i < len(seg_lens) and cum + seg_lens[seg_i] < target:
+            cum += seg_lens[seg_i]
+            seg_i += 1
+        if seg_i >= len(seg_lens):
+            break
+        frac = (target - cum) / seg_lens[seg_i] if seg_lens[seg_i] > 0 else 0.0
+        x0, y0 = pts_xy[seg_i]
+        x1, y1 = pts_xy[seg_i + 1]
+        out_xy.append((x0 + frac * (x1 - x0), y0 + frac * (y1 - y0)))
+    return out_xy
 
 
 def _headland_neighbour_pairs(coords: dict) -> list:
@@ -200,211 +300,50 @@ _TF_STALENESS_LIMIT = 2.0  # s — map->base_link older than this: don't draw it
 
 # ── Fields2Cover geometry helpers ─────────────────────────────────────────────
 
-def _f2c_latlon_to_xy(lat: float, lon: float,
-                      lat0: float, lon0: float) -> tuple[float, float]:
-    R = 6_378_137.0
-    x = math.radians(lon - lon0) * R * math.cos(math.radians(lat0))
-    y = math.radians(lat - lat0) * R
-    return x, y
+# F2C core (lat/lon<->XY projection + _run_f2c) — imported at top of file
+# from the standalone devkit_f2c_planner package.
 
 
-def _f2c_xy_to_latlon(x: float, y: float,
-                      lat0: float, lon0: float) -> tuple[float, float]:
-    R   = 6_378_137.0
-    lat = lat0 + math.degrees(y / R)
-    lon = lon0 + math.degrees(x / (R * math.cos(math.radians(lat0))))
-    return lat, lon
+def _plan_contour_rows(corners_ll: list, obstacle_rings: list, tool_width: float,
+                        pad_m: float, headland_m: float, snake: bool,
+                        recon_path: str, dem_resolution_m: float) -> list | None:
+    """Recon CSV -> reference contour -> contour swaths, in one blocking
+    call so do_plan() can run it via ng_run.io_bound() without blocking the
+    event loop (RBFInterpolator fit + swath offsetting are both CPU-bound).
 
+    Returns None (not an error) when the field's too flat for a usable
+    reference contour — see dem.select_reference_contour_xy()'s docstring.
+    do_plan() treats None as "fall back to _run_f2c()'s straight swaths".
 
-# OBSTACLE: shapely post-clipping for swath/obstacle avoidance.
-#
-# We do not trust F2C's interior-ring handling. Across F2C builds and
-# Python-binding versions the behaviour of SG_BruteForce with respect to
-# Cell holes is inconsistent — sometimes swaths are clipped against
-# holes, sometimes they aren't, with no error either way. Field tests
-# showed swaths running straight through marked obstacles even with CW-
-# wound interior rings.
-#
-# The fix: generate swaths against the outer boundary (F2C's job), then
-# compute swath_line.difference(union_of_obstacle_polygons) ourselves
-# (shapely's job). This is observable, deterministic, and guarantees the
-# lines you see on the Mission map are the lines the robot will follow.
-#
-# Obstacle rings are still added to the F2C Cell as a hint — belt and
-# braces — but the safety net is the shapely post-clip.
-#
-# HEADLAND: optional Minkowski erosion of the field by headland_width_m
-# before swath generation, so swaths don't start/end exactly at the
-# field boundary. Done via F2C's HG_Const_gen; wrapped in try/except
-# because the headland call can fail on degenerate / very narrow fields.
-#
-# SNAKE: optional boustrophedon ordering — every second swath reversed
-# so end-of-swath-N is near start-of-swath-N+1. Done in Python rather
-# than via f2c.RP_Snake to avoid depending on which route-planner API
-# the local F2C build exposes. Snake-flip happens *before* shapely
-# clipping so direction is preserved per-fragment when an obstacle
-# splits a swath into pieces.
-def _run_f2c(corners_ll: list,
-             obstacle_rings: list,
-             tool_width: float,
-             angle_deg: float,
-             obstacle_pad_m: float = 0.0,
-             headland_width_m: float = 0.0,
-             snake_order: bool = True) -> list:
-
-    def _log(msg):
-        print(f'[F2C] {msg}', file=sys.stderr, flush=True)
-
-    _log(f'called: {len(corners_ll)} boundary pts, '
-         f'{len(obstacle_rings)} obstacles, pad={obstacle_pad_m}m, '
-         f'headland={headland_width_m}m, snake={snake_order}, '
-         f'width={tool_width}m, angle={angle_deg}°')
-
-    try:
-        has_shapely = True
-        _log('shapely OK')
-    except ImportError as e:
-        has_shapely = False
-        _log(f'shapely MISSING: {e}')
-
+    Raises FileNotFoundError / ValueError straight through from
+    load_recon_points() — do_plan() surfaces those as a status message
+    rather than silently falling back, since a missing/too-short recon log
+    is a setup mistake worth fixing, not a legitimate "flat field" case.
+    """
+    xy_native, elevation, latlon = load_recon_points(recon_path)
     lat0, lon0 = corners_ll[0]
-
-    # ── Outer boundary ────────────────────────────────────────────────
-    outer = f2c.LinearRing()
-    for lat, lon in corners_ll:
-        x, y = _f2c_latlon_to_xy(lat, lon, lat0, lon0)
-        outer.addPoint(f2c.Point(x, y, 0))
-    outer.closeRing()
-    cell = f2c.Cell()
-    cell.addRing(outer)
-
-    # ── Obstacles: shapely polys for post-clip + F2C hole hints ──────
-    obstacle_polys_xy: list = []
-    for idx, ring_ll in enumerate(obstacle_rings):
-        if len(ring_ll) < 3:
-            _log(f'obstacle {idx}: skipped (only {len(ring_ll)} pts)')
-            continue
-        pts_xy = [_f2c_latlon_to_xy(lat, lon, lat0, lon0)
-                  for lat, lon in ring_ll]
-        _log(f'obstacle {idx}: {len(pts_xy)} pts, '
-             f'xy bbox=({min(p[0] for p in pts_xy):.1f},{min(p[1] for p in pts_xy):.1f}) '
-             f'to ({max(p[0] for p in pts_xy):.1f},{max(p[1] for p in pts_xy):.1f})')
-
-        if has_shapely:
-            poly = Polygon(pts_xy)
-            _log(f'obstacle {idx}: shapely poly valid={poly.is_valid} '
-                 f'empty={poly.is_empty} area={poly.area:.3f}m²')
-            if obstacle_pad_m > 0:
-                poly = poly.buffer(obstacle_pad_m, join_style=2, resolution=8)
-                _log(f'obstacle {idx}: after buffer({obstacle_pad_m}m) '
-                     f'empty={poly.is_empty} type={poly.geom_type} '
-                     f'area={poly.area:.3f}m²')
-            if poly.is_empty or poly.geom_type != 'Polygon':
-                _log(f'obstacle {idx}: DROPPED (empty or non-Polygon)')
-                continue
-            obstacle_polys_xy.append(poly)
-            pts_xy = list(poly.exterior.coords)
-
-        hole = f2c.LinearRing()
-        for x, y in reversed(pts_xy):
-            hole.addPoint(f2c.Point(x, y, 0))
-        hole.closeRing()
-        cell.addRing(hole)
-
-    _log(f'built cell with {len(obstacle_polys_xy)} shapely obstacles')
-
-    # ── Headland inset ───────────────────────────────────────────────
-    # Shrinks the cover area by headland_width_m on all sides so the
-    # robot has room to turn at field edges instead of starting/ending
-    # swaths at the boundary itself. Skipped when 0 — preserves the
-    # original behaviour for backwards compatibility with saved fields.
-    swath_cell = cell
-    if headland_width_m > 0:
-        try:
-            hg = f2c.HG_Const_gen()
-            inner = hg.generateHeadlands(f2c.Cells(cell), headland_width_m)
-            if inner.size() > 0:
-                swath_cell = inner.getGeometry(0)
-                _log(f'headland: inset {headland_width_m}m → '
-                     f'{inner.size()} sub-cell(s)')
-            else:
-                _log(f'headland: inset {headland_width_m}m produced 0 '
-                     f'cells (too wide?) — using full boundary')
-        except Exception as e:
-            _log(f'headland generation failed: {e} — using full boundary')
-
-    # ── Swath generation ─────────────────────────────────────────────
-    angle_rad = math.radians(angle_deg % 180)
-    sg     = f2c.SG_BruteForce()
-    swaths = sg.generateSwaths(angle_rad, tool_width, swath_cell)
-
-    raw_xy: list = []
-    for i in range(swaths.size()):
-        path = swaths.at(i).getPath()
-        pts  = []
-        for j in range(path.size()):
-            pt = path.getGeometry(j)
-            pts.append((pt.getX(), pt.getY()))
-        if len(pts) >= 2:
-            raw_xy.append(pts)
-    _log(f'F2C produced {len(raw_xy)} raw swaths')
-
-    # ── Snake ordering (Python-side boustrophedon) ───────────────────
-    # F2C's BruteForce returns swaths spatially sorted along the
-    # perpendicular to `angle`. Reversing every other one means the end
-    # of swath N is near the start of swath N+1 — minimising inter-row
-    # travel and giving the topo graph a natural chain order.
-    #
-    # Done before shapely clipping so direction is preserved when an
-    # obstacle splits a swath into multiple fragments.
-    if snake_order and raw_xy:
-        raw_xy = [list(reversed(pts)) if i % 2 == 1 else list(pts)
-                  for i, pts in enumerate(raw_xy)]
-        _log(f'snake-flipped {len(raw_xy)} swaths')
-
-    # ── Post-clip swaths against obstacle union ──────────────────────
-    if has_shapely and obstacle_polys_xy:
-        obstacles_union = unary_union(obstacle_polys_xy)
-        _log(f'obstacle union: type={obstacles_union.geom_type} '
-             f'area={obstacles_union.area:.3f}m² '
-             f'bounds={obstacles_union.bounds}')
-        if raw_xy:
-            sample = raw_xy[0]
-            _log(f'first swath: {len(sample)} pts, '
-                 f'from ({sample[0][0]:.1f},{sample[0][1]:.1f}) '
-                 f'to ({sample[-1][0]:.1f},{sample[-1][1]:.1f})')
-        clipped: list = []
-        clipped_count, dropped_count = 0, 0
-        for pts in raw_xy:
-            line = LineString(pts)
-            intersects = line.intersects(obstacles_union)
-            remaining = line.difference(obstacles_union)
-            if remaining.is_empty:
-                dropped_count += 1
-                continue
-            geoms = (list(remaining.geoms)
-                     if isinstance(remaining, MultiLineString)
-                     else [remaining])
-            for sub in geoms:
-                if sub.length > tool_width * 0.5:
-                    clipped.append(list(sub.coords))
-                    if intersects:
-                        clipped_count += 1
-        _log(f'clipped {clipped_count} swaths against obstacles, '
-             f'{dropped_count} fully dropped, final={len(clipped)}')
-        raw_xy = clipped
-    else:
-        _log(f'NO CLIPPING: has_shapely={has_shapely}, '
-             f'obstacle_polys_xy={len(obstacle_polys_xy)}')
-
-    # ── Project back to lat/lon ──────────────────────────────────────
-    result: list = []
-    for pts_xy in raw_xy:
-        pts_ll = [_f2c_xy_to_latlon(x, y, lat0, lon0) for x, y in pts_xy]
-        if len(pts_ll) >= 2:
-            result.append(pts_ll)
-    _log(f'returning {len(result)} swaths to UI')
-    return result
+    # Recon points are logged in recon_dem_logger.py's own /odom-anchored
+    # frame, unrelated to whatever frame the user's drawn boundary
+    # (corners_ll) happens to be in. Re-anchor them onto corners_ll[0] via
+    # their own lat/lon columns before building the elevation grid, so
+    # origin_xy ends up in the same frame field_centroid_xy() computed
+    # centroid_xy in below — without this, centroid_xy is checked against
+    # an elevation grid built around a completely different, unrelated
+    # local origin, which can easily land outside the grid entirely (this
+    # is what produced the "centroid falls outside the elevation grid"
+    # case with the France field-27 data: the fake India test field was
+    # small enough that this mismatch went unnoticed by coincidence).
+    xy = np.array([_f2c_latlon_to_xy(lat, lon, lat0, lon0) for lat, lon in latlon])
+    elevation_grid, origin_xy, _smoothing_used = build_elevation_grid(
+        xy, elevation, dem_resolution_m)
+    centroid_xy = field_centroid_xy(corners_ll)
+    reference_line_ll = select_reference_contour_latlon(
+        elevation_grid, dem_resolution_m, origin_xy, centroid_xy, lat0, lon0)
+    if reference_line_ll is None:
+        return None
+    return _run_contour_f2c(
+        corners_ll, obstacle_rings, reference_line_ll, tool_width,
+        pad_m, headland_m, snake)
 
 
 # ── ROS node ──────────────────────────────────────────────────────────────────
@@ -412,7 +351,24 @@ def _run_f2c(corners_ll: list,
 class NiceGuiNode(Node):
 
     def __init__(self) -> None:
+        """Set up ROS subscriptions/publishers, GUI state, and the terrain/F2C planning wiring."""
         super().__init__(NODE_NAME)
+
+        # Dedicated wall clock for the real/fake-GPS freshness bookkeeping
+        # below (store_gps, store_fake_gps, _publish_fake_gps,
+        # _store_fusion_odom). This node runs with use_sim_time=True in sim
+        # mode (see sim_nav.launch.py) so that TF-staleness checks agree
+        # with fusioncore's sim-time stamps once Gazebo is up. But before
+        # Gazebo publishes /clock, a sim-time Clock is frozen at 0 — which
+        # means a self.get_clock().now()-driven timer plain never fires, and
+        # "elapsed time since last real fix" comparisons against a frozen 0
+        # both read as "just happened". That silently defeated the whole
+        # point of the fake-GPS shim (a fix available before Gazebo/the real
+        # bridge exists), so save_f2c_rows_to_topo always failed with
+        # "no GPS fix yet" until Gazebo was started. Freshness here is a
+        # real-world-elapsed-seconds concept regardless of sim state, so a
+        # wall clock is correct for all of it, not just the cold-start case.
+        self._wall_clock = Clock(clock_type=ClockType.SYSTEM_TIME)
 
         self.cmd_vel_publisher       = self.create_publisher(Twist,  'cmd_vel',       1)
         self.esp_enable_publisher    = self.create_publisher(Empty,  'esp/enable',    1)
@@ -449,12 +405,12 @@ class NiceGuiNode(Node):
         # The sim flag is the authoritative signal, plumbed from
         # manage.py's is_sim through devkit.launch.py -> ui.launch.py, so we
         # never publish this on hardware. The India datum matches the
-        # leaflet centre / F2C fallback used elsewhere in this UI.
+        # leaflet centre / F2C fallback used elsewhere in this UI — see
+        # FIELD27_CENTER above.
         _FAKE_GPS_TOPIC = '/gnss/fix_sim_shim'
         self.declare_parameter('sim', False)
         self._is_sim = bool(self.get_parameter('sim').value)
-        self._FAKE_GPS_LAT = 9.045094
-        self._FAKE_GPS_LON = 77.792024
+        self._FAKE_GPS_LAT, self._FAKE_GPS_LON = FIELD27_CENTER
         self._FAKE_GPS_ALT = 40.0
         # Sentinel marking our own synthetic fixes. Kept even though the
         # shim is off /gnss/fix now: store_fake_gps still uses it to make
@@ -470,7 +426,11 @@ class NiceGuiNode(Node):
                 NavSatFix, _FAKE_GPS_TOPIC, _SENSOR_QOS)
             self.create_subscription(
                 NavSatFix, _FAKE_GPS_TOPIC, self.store_fake_gps, _SENSOR_QOS)
-            self.create_timer(1.0, self._publish_fake_gps)
+            # clock=self._wall_clock: a sim-time timer never fires before
+            # Gazebo publishes /clock (see _wall_clock comment above), which
+            # would silently disable this shim for the entire cold-start
+            # window it exists to cover.
+            self.create_timer(1.0, self._publish_fake_gps, clock=self._wall_clock)
             self.get_logger().info(
                 f'Sim mode: publishing fake fix on {_FAKE_GPS_TOPIC} at datum '
                 f'({self._FAKE_GPS_LAT}, {self._FAKE_GPS_LON}) — fusioncore '
@@ -515,10 +475,13 @@ class NiceGuiNode(Node):
         _FUSION_GNSS_STALENESS_LIMIT = 5.0  # s — real /gnss/fix must be this fresh
 
         def _store_fusion_odom(m: Odometry) -> None:
+            """Update the map marker from fused odometry once its covariance is trustworthy."""
             cov_xx = m.pose.covariance[0]
             if cov_xx <= 0.0 or cov_xx > _FUSION_COV_TRUST_THRESHOLD:
                 return  # not trustworthy yet — let /odom keep driving the marker
-            now = self.get_clock().now().nanoseconds * 1e-9
+            # Wall clock: _last_real_gps_t is now recorded on wall time (see
+            # store_gps), so this comparison must use the same clock.
+            now = self._wall_clock.now().nanoseconds * 1e-9
             if now - self._last_real_gps_t > _FUSION_GNSS_STALENESS_LIMIT:
                 return  # low covariance but no recent real GNSS correction —
                         # confidently wrong, not confidently right
@@ -606,6 +569,7 @@ class NiceGuiNode(Node):
         self._f2c_row_start:  int   = 1
         self._f2c_tool_width: float = 1.2
         self._f2c_angle_deg:  float = 0.0
+        self._f2c_contour_used: bool = False
         self._f2c_origin_ll = None
         self.f2c_save_status: str   = ''
         self.delete_status:   str   = ''
@@ -1015,12 +979,14 @@ class NiceGuiNode(Node):
 
     def _persist_and_reload(self, modify_fn: Callable[[TopoDoc], None], status_attr: str,
                              success_msg: str) -> None:
+        """Run modify_fn against the on-disk topo map in a thread, then reload and report status."""
         map_name = self._topo_doc.name
         map_file = f'/workspace/maps/{map_name}'
         installed_src = ('/workspace/install/topological_navigation/share/'
                          'topological_navigation/config/mixed_actions_map.yaml')
 
         def _work():
+            """Load the on-disk map, apply modify_fn, save it, and reload it into the UI."""
             try:
                 if os.path.exists(map_file):
                     file_doc = parse_topo_yaml(map_file)
@@ -1029,10 +995,14 @@ class NiceGuiNode(Node):
                 else:
                     file_doc = copy.deepcopy(self._topo_doc)
 
-                # Backfill missing per-node entry meta (hand-written nodes).
-                file_doc.ensure_meta(map_name)
-
                 modify_fn(file_doc)
+
+                # Backfill missing per-node entry meta (hand-written nodes,
+                # and anything modify_fn() just added — e.g. F2C row saves
+                # set meta.map/meta.node but not meta.pointset, which the
+                # tmap schema requires). Must run after modify_fn(), not
+                # before, or newly-added nodes never get backfilled.
+                file_doc.ensure_meta(map_name)
 
                 dump_topo_yaml(file_doc, map_file)
                 self._topo_doc = file_doc
@@ -1073,6 +1043,7 @@ class NiceGuiNode(Node):
 
     def save_f2c_rows_to_topo(self, prefix: str, row_id_start: int,
                               overwrite: bool = False) -> None:
+        """Write the last-planned F2C swaths into the loaded topo map as named rows."""
         prefix = re.sub(r'[^A-Z0-9_]', '',
                         (prefix or '').strip().upper().replace(' ', '_'))
         if not prefix:
@@ -1149,7 +1120,6 @@ class NiceGuiNode(Node):
 
         added: list[int] = []
         row_names: dict[int, tuple[NodeID, NodeID]] = {}
-        row_coords: dict[str, tuple[float, float]] = {}   # node_name -> (x, y) for headland end-classification
         skipped: list[int] = []
 
         verts = [Vector2(x=-0.5, y=-0.5), Vector2(x= 0.5, y=-0.5),
@@ -1199,39 +1169,76 @@ class NiceGuiNode(Node):
                               'gps_fix_type': fix_type, 'gps_hdop': None,
                               'row_id': rid}
 
-            in_edges = [TopoEdge(action=ROW_ACTION, edge_id=f'{in_name}_{out_name}', node=out_name)]
-            in_node = _disk_node(in_name,  ix, iy, 'entry', in_lat,  in_lon,  in_edges, rid)
+            # WAYPOINTS: for contour rows, drop intermediate topo nodes along
+            # the curve at ~1m intervals (see _resample_row_xy()) instead of
+            # a single entry->exit edge — limbic_row_follow otherwise has
+            # nothing telling it the row bends. Straight rows (contour mode
+            # off, or a flat-field fallback) get no waypoints and behave
+            # exactly as before: a direct entry->exit edge.
+            wp_names: list[str] = []
+            if self._f2c_contour_used and len(swath) > 2:
+                for k, (wx, wy) in enumerate(
+                        _resample_row_xy(swath, anchor_lat, anchor_lon,
+                                          _CONTOUR_WAYPOINT_INTERVAL_M),
+                        start=1):
+                    wp_name = f'{prefix}_R{rid}_W{k}'
+                    if not overwrite and wp_name in new_topo_nodes:
+                        continue
+                    wlat, wlon = _f2c_xy_to_latlon(wx, wy, anchor_lat, anchor_lon)
+                    wp_node = _disk_node(
+                        wp_name, round(anchor_x + wx, 3), round(anchor_y + wy, 3),
+                        'waypoint', wlat, wlon, [], rid)
+                    wp_node.add_metadata(**ui_meta_common)
+                    new_topo_nodes[wp_name] = wp_node
+                    wp_names.append(wp_name)
+
+            in_node = _disk_node(in_name,  ix, iy, 'entry', in_lat,  in_lon,  [], rid)
             in_node.add_metadata(**ui_meta_common)
             out_node = _disk_node(out_name, ox, oy, 'exit',  out_lat, out_lon, [], rid)
             out_node.add_metadata(**ui_meta_common)
 
             new_topo_nodes[in_name] = in_node
             new_topo_nodes[out_name] = out_node
+
+            # Chain entry -> [waypoints] -> exit with row-follow edges. With
+            # no waypoints this is exactly the old direct in_name -> out_name
+            # edge.
+            for a_name, b_name in pairwise([in_name] + wp_names + [out_name]):
+                new_topo_nodes[a_name].add_edge(b_name, action=ROW_ACTION)
+
             added.append(rid)
             row_names[rid] = (in_name, out_name)
-            # Retain endpoint coords so headland edges can be built by physical
-            # end (south/north), not by IN/OUT label — snake ordering flips the
-            # label↔end correspondence on alternate rows.
-            row_coords[in_name]  = (ix, iy)
-            row_coords[out_name] = (ox, oy)
 
         if not added:
             self.f2c_save_status = 'ERROR: nothing added (all names already taken)'
             return
 
         # ── Headland edges (point-to-point nav_to_pose) ──────────────────────
-        # Connect each node only to its immediate same-end neighbour along the
-        # headland, so a route between rows hugs the headland and never angles
-        # across a crop row. IN/OUT label is NOT the end: the snake flip puts
-        # odd-row IN and even-row OUT at one end, and the opposite labels at the
-        # other. Classify by the cross-row coordinate, then chain neighbours
-        # sorted along the headland.
+        # Connect row i's OUT to row i+1's IN, in swath order. This used to
+        # go through _headland_neighbour_pairs(), which re-derives adjacency
+        # from coordinates alone by guessing which axis separates the two
+        # headland ends (whichever of x/y has the larger spread across ALL
+        # endpoints). That guess silently breaks once a field has enough
+        # rows that its cross-row width (spread of the SHORT axis) catches
+        # up to row length (spread of the LONG axis): the split then happens
+        # on the wrong axis and roughly bisects the field by row number
+        # instead of by physical end, leaving two fully disconnected halves
+        # (e.g. rows 1-4 cut off from rows 5-8 on an 8-row field).
         #
-        # Cross-row axis = the field dimension with the larger endpoint spread
-        # (rows are long and narrow, so the ends are separated along the SHORT
-        # axis). We split nodes into two ends by that coordinate's median and,
-        # within each end, sort along the other (along-headland) axis and link
-        # consecutive nodes. IN→OUT row-follow edges are untouched.
+        # We don't need to guess here: self._f2c_swaths is already in snake
+        # order (that's what snake_order means), so row i's OUT and row
+        # i+1's IN are known, by construction, to be the pair that should
+        # get a headland edge — no coordinates required. This intentionally
+        # gives up the extra same-end shortcut edges the geometric version
+        # produced for non-consecutive rows (e.g. R1_IN<->R4_OUT on a 4-row
+        # field); those only ever tightened A*'s path along the headland,
+        # they were never load-bearing for connectivity.
+        #
+        # repair_row_connectivity() below still uses
+        # _headland_neighbour_pairs() and still needs the geometric guess —
+        # it rewires whatever topo map is already on disk, which may
+        # contain hand-dropped nodes from the web UI with no known
+        # generation order, so coordinates are all it has to go on.
         def _add_headland_edge(p: str, q: str) -> None:
             """Bidirectional nav_to_pose edge p<->q in both graph structures."""
 
@@ -1248,9 +1255,10 @@ class NiceGuiNode(Node):
                 other = q if node.name == p else p
                 node.add_edge(other, action=NAV_ACTION)
 
-        all_pts = dict(row_coords)   # {name: (x, y)}
-        for a_name, b_name in _headland_neighbour_pairs(all_pts):
-            _add_headland_edge(a_name, b_name)
+        for rid_a, rid_b in pairwise(added):
+            _, out_a = row_names[rid_a]
+            in_b, _  = row_names[rid_b]
+            _add_headland_edge(out_a, in_b)
 
         if connect_to:
             first_in = row_names[added[0]][0]
@@ -1268,6 +1276,7 @@ class NiceGuiNode(Node):
             f'writing {len(added)} rows · {prefix}{splice_str}{skip_str}…')
 
         def _modify(file_doc):
+            """Insert (or overwrite) the planned row nodes/edges into file_doc."""
             if overwrite:
                 old_names = {
                     e.name
@@ -1275,21 +1284,22 @@ class NiceGuiNode(Node):
                     if e.name.startswith(f'{prefix}_R')
                 }
                 if old_names:
-                    file_doc.nodes = [
-                        e for e in file_doc.nodes
-                        if e.name not in old_names
-                    ]
-                    # Prune dangling edges pointing at removed nodes
-                    for entry in file_doc.nodes:
-                        entry.edges = [
-                            e for e in entry.edges
-                            if e.node not in old_names
-                        ]
+                    # remove_nodes() removes the nodes AND prunes dangling
+                    # edges pointing at them in one call — same effect as
+                    # the old two-step version, without treating the
+                    # .nodes/.edges properties (dict_values views) as if
+                    # they were plain mutable lists.
+                    file_doc.remove_nodes(old_names)
             existing = {e.name for e in file_doc.nodes}
             for entry in new_topo_nodes.values():
                 if entry.name in existing:
                     continue
-                file_doc.nodes.append(entry)
+                # insert_node(), not add_node(): edges within this batch
+                # (headland links) are already wired bidirectionally above,
+                # so add_node()'s reverse-edge backfill would KeyError on a
+                # sibling not yet inserted, and would add an unwanted
+                # reverse edge back onto any pre-existing connect_to node.
+                file_doc.insert_node(entry)
 
         self._persist_and_reload(
             _modify, 'f2c_save_status',
@@ -1299,6 +1309,7 @@ class NiceGuiNode(Node):
     # ── Repair row connectivity ──────────────────────────────────────────────
 
     def repair_row_connectivity(self, connect_to: str | None = None) -> None:
+        """Rebuild missing entry/waypoint/exit edges for existing rows in the loaded map."""
         if not self._topo_doc:
             self.f2c_save_status = 'ERROR: map not loaded'
             return
@@ -1309,15 +1320,21 @@ class NiceGuiNode(Node):
             meta = node.meta
             rid = meta.get('row_id')
             role = meta.get('row_role')
-            if rid is None or role not in ('entry', 'exit'):
+            if rid is None or role not in ('entry', 'exit', 'waypoint'):
                 continue
             try:
                 rid_int = int(rid)
             except (TypeError, ValueError):
                 continue
-            rows.setdefault(rid_int, {})[role] = node.name
-            # x/y live at the top level of the lightweight node dict
-            coords[node.name] = (node.x, node.y)
+            if role == 'waypoint':
+                # Waypoints aren't row ends, so they're deliberately excluded
+                # from `coords` — including them would corrupt the
+                # same-end classification _headland_neighbour_pairs() does
+                # on row endpoints only.
+                rows.setdefault(rid_int, {}).setdefault('waypoints', []).append(node.name)
+            else:
+                rows.setdefault(rid_int, {})[role] = node.name
+                coords[node.name] = (node.x, node.y)
 
         if not rows:
             self.f2c_save_status = 'ERROR: no row nodes found'
@@ -1331,15 +1348,21 @@ class NiceGuiNode(Node):
 
         wanted_edges: list = []
 
-        # In-row edges: every row's entry -> exit is a row-follow edge. The
-        # repair restores these in case they were lost; it must NOT use
-        # nav_to_pose here or the robot would drive straight through the crop.
+        # In-row edges: every row's entry -> [waypoints] -> exit is a chain
+        # of row-follow edges. Waypoints (if any) are re-threaded in name
+        # order (W1, W2, ...) so a repair after nodes/edges got lost still
+        # produces entry->W1->W2->...->exit rather than collapsing back to
+        # a single entry->exit hop that would skip the curve entirely.
+        _wp_num = re.compile(r'_W(\d+)$')
         for rid in sorted_rids:
             inn = rows[rid].get('entry')
             outn = rows[rid].get('exit')
+            wps = sorted(rows[rid].get('waypoints', []),
+                         key=lambda n: int(m.group(1)) if (m := _wp_num.search(n)) else 0)
             if inn and outn and inn != outn:
-                wanted_edges.append((inn, outn, ROW_ACTION))
-                wanted_edges.append((outn, inn, ROW_ACTION))
+                chain = [inn, *wps, outn]
+                for a, b in pairwise(chain):
+                    wanted_edges.append((a, b, ROW_ACTION))
 
         # Headland edges: same-end neighbours only, classified by geometry —
         # NOT by entry/exit label (snake ordering flips label vs physical end).
@@ -1755,6 +1778,7 @@ class NiceGuiNode(Node):
     # ── Mission tab ───────────────────────────────────────────────────────────
 
     def _mission_content(self) -> None:
+        """Build the Mission tab UI: field boundary drawing, F2C planning, and row saving."""
         corners_ll: list[tuple[float, float]] = []
         swath_layers: list = []
         poly_layer:   list = [None]
@@ -1765,9 +1789,15 @@ class NiceGuiNode(Node):
                 ui.html('<div class="sec-label mb-2">Field boundary — click to draw</div>')
                 gps_center = (
                     (self.latest_gps.latitude, self.latest_gps.longitude)
-                    if self.latest_gps else (9.045094, 77.792024)
+                    if self.latest_gps else FIELD27_CENTER
                 )
                 mission_map = ui.leaflet(center=gps_center, zoom=18).classes('w-full h-96')
+                if not self.latest_gps:
+                    # No live fix yet — fit the whole field extent rather
+                    # than just zooming in on its centre point, so the
+                    # boundary-drawing view actually shows the field.
+                    mission_map.run_map_method(
+                        'fitBounds', [list(FIELD27_BOUNDS[0]), list(FIELD27_BOUNDS[1])])
                 mission_map.tile_layer(
                     url_template='https://server.arcgisonline.com/ArcGIS/rest/services/'
                                  'World_Imagery/MapServer/tile/{z}/{y}/{x}',
@@ -1786,6 +1816,43 @@ class NiceGuiNode(Node):
                 angle_lbl = ui.label('0°').classes('text-xs font-mono').style('color:#57606a')
                 f2c_angle.on('update:model-value',
                              lambda e: angle_lbl.set_text(f'{int(e.args)}°'))
+
+                # CONTOUR: terrain-following rows instead of one fixed
+                # angle — offsets from a reference elevation isoline
+                # (dem.select_reference_contour_latlon()) rather than
+                # F2C's SG_BruteForce. See f2c_planner._run_contour_f2c()'s
+                # module comment for why this isn't a config flag on F2C.
+                ui.html('<div class="sec-label mt-3">Contour rows</div>')
+                f2c_contour = ui.checkbox(
+                    'follow terrain (uses recon elevation log)', value=False)
+                f2c_recon_path = ui.input(
+                    value='/workspace/maps/recon_logs/recon.csv',
+                    placeholder='/workspace/maps/recon_logs/recon.csv',
+                ).classes('w-full mt-1')
+                f2c_recon_path.set_visibility(False)
+                dem_res_lbl = ui.html(
+                    '<div class="sec-label mt-1">DEM grid resolution</div>')
+                dem_res_lbl.set_visibility(False)
+                f2c_dem_res = ui.number(
+                    value=1.0, min=0.2, max=5.0, step=0.1, precision=2,
+                    suffix='m',
+                ).classes('w-full')
+                f2c_dem_res.set_visibility(False)
+                contour_note = ui.label(
+                    'Row angle is ignored in contour mode — row direction '
+                    'follows the reference elevation line instead.'
+                ).classes('text-xs').style('color:#8c959f')
+                contour_note.set_visibility(False)
+
+                def _on_contour_toggle(e) -> None:
+                    """Show/hide contour-only controls when the contour-mode switch flips."""
+                    on = bool(e.value)
+                    f2c_angle.set_enabled(not on)
+                    f2c_recon_path.set_visibility(on)
+                    dem_res_lbl.set_visibility(on)
+                    f2c_dem_res.set_visibility(on)
+                    contour_note.set_visibility(on)
+                f2c_contour.on_value_change(_on_contour_toggle)
 
                 # HEADLAND: shrink cover area by this much on all sides so
                 # swaths don't start/end at the field boundary. 0 = off.
@@ -1900,6 +1967,7 @@ class NiceGuiNode(Node):
         clear_btn.on_click(do_clear)
 
         async def do_plan():
+            """Run straight or contour F2C planning for the drawn boundary and render the swaths."""
             if len(corners_ll) < 3:
                 f2c_status.set_text('Need at least 3 corners')
                 f2c_status.style('color:#cf222e')
@@ -1914,17 +1982,43 @@ class NiceGuiNode(Node):
             row_start  = int(f2c_row_id_start.value or 1)
             headland_m = float(f2c_headland.value or 0.0)
             snake      = bool(f2c_snake.value)
+            contour_on = bool(f2c_contour.value)
 
             # OBSTACLE: snapshot obstacle rings and pad
             obstacle_rings = self._obstacle_mgr.rings_ll()
             pad_m          = float(obstacle_pad.value or 0.0)
 
+            mode_note = ''
+            contour_used = False
             try:
-                swaths = await ng_run.io_bound(
-                    _run_f2c, list(corners_ll), obstacle_rings,
-                    width, angle_deg, pad_m,
-                    headland_m, snake)
+                if contour_on:
+                    recon_path = (f2c_recon_path.value or '').strip() or \
+                        '/workspace/maps/recon_logs/recon.csv'
+                    dem_res = float(f2c_dem_res.value or 1.0)
+                    swaths = await ng_run.io_bound(
+                        _plan_contour_rows, list(corners_ll), obstacle_rings,
+                        width, pad_m, headland_m, snake, recon_path, dem_res)
+                    if swaths is None:
+                        mode_note = ' · flat field, straight swaths used'
+                        swaths = await ng_run.io_bound(
+                            _run_f2c, list(corners_ll), obstacle_rings,
+                            width, angle_deg, pad_m, headland_m, snake)
+                    else:
+                        mode_note = ' · contour rows'
+                        contour_used = True
+                else:
+                    swaths = await ng_run.io_bound(
+                        _run_f2c, list(corners_ll), obstacle_rings,
+                        width, angle_deg, pad_m, headland_m, snake)
+            except (FileNotFoundError, ValueError) as exc:
+                stage = 'Contour planning' if contour_on else 'Planning'
+                f2c_status.set_text(f'{stage} failed: {exc}')
+                f2c_status.style('color:#cf222e')
+                plan_btn.set_enabled(True)
+                return
             except Exception as exc:
+                self.get_logger().error(
+                    f'do_plan failed: {exc} ({type(exc)}\n{traceback.format_exc()})')
                 f2c_status.set_text(f'ERROR: {exc}')
                 f2c_status.style('color:#cf222e')
                 plan_btn.set_enabled(True)
@@ -1950,6 +2044,7 @@ class NiceGuiNode(Node):
             self._f2c_row_start  = row_start
             self._f2c_tool_width = width
             self._f2c_angle_deg  = angle_deg
+            self._f2c_contour_used = contour_used
             # Field reference origin = first boundary corner, the same lat0/lon0
             # _run_f2c projected from. The save path re-anchors to this so the
             # lat/lon round-trip cancels and rows land at the local odom origin
@@ -1961,9 +2056,10 @@ class NiceGuiNode(Node):
             snk_note = ' · snake' if snake else ''
             obs_note = (f' · {len(obstacle_rings)} obs avoided'
                         if obstacle_rings else '')
+            angle_note = '' if contour_used else f' · {angle_deg:.0f}°'
             f2c_status.set_text(
-                f'{len(swaths)} rows · {width}m wide · {angle_deg:.0f}°'
-                f'{hl_note}{snk_note}{obs_note}')
+                f'{len(swaths)} rows · {width}m wide{angle_note}'
+                f'{hl_note}{snk_note}{obs_note}{mode_note}')
             f2c_status.style('color:#1a7f37')
             plan_btn.set_enabled(True)
             save_btn.set_enabled(bool(swaths))
@@ -2551,6 +2647,8 @@ class NiceGuiNode(Node):
 
         map_name = self._topo_doc.name
         map_file = f'/workspace/maps/{map_name}'
+        installed_src = ('/workspace/install/topological_navigation/share/'
+                         'topological_navigation/config/mixed_actions_map.yaml')
 
         # Pick next available archive index
         i = 1
@@ -2569,6 +2667,25 @@ class NiceGuiNode(Node):
 
             # Build empty map doc preserving header fields.
             empty_doc = self._topo_doc.clone_empty(map_name)
+
+            # clone_empty() only carries over whatever actions/definitions
+            # self._topo_doc already had. If the doc we're archiving was
+            # itself actions-less (e.g. the very first load came from an
+            # authored waypoint map with no 'actions' section), writing
+            # empty_doc back to map_file would permanently shadow the
+            # installed_src seed template for every future _persist_and_reload
+            # call, since that function only falls back to installed_src when
+            # map_file doesn't exist yet. Backfill here instead.
+            if not empty_doc.actions and os.path.exists(installed_src):
+                try:
+                    seed_doc = parse_topo_yaml(installed_src)
+                    empty_doc.seed_actions(seed_doc.actions, seed_doc.definitions)
+                    self.get_logger().info(
+                        'archive_and_clear_map: backfilled actions from installed_src')
+                except Exception as seed_err:
+                    self.get_logger().warning(
+                        f'archive_and_clear_map: could not seed actions: {seed_err}')
+
             dump_topo_yaml(empty_doc, map_file)
             self._topo_doc = empty_doc
 
@@ -2589,6 +2706,7 @@ class NiceGuiNode(Node):
     # ── System tab ────────────────────────────────────────────────────────────
 
     def _system_content(self) -> None:
+        """Build the System tab UI: telemetry sliders and manual control widgets."""
         with ui.row().classes('items-stretch w-full gap-3'):
             with ui.card().classes('flex-1'):
                 ui.label('Telemetry').classes('font-semibold mb-2')
@@ -2636,7 +2754,9 @@ class NiceGuiNode(Node):
                 ui.button('Configure', on_click=lambda: self.esp_configure_publisher.publish(Empty())).props('outline no-caps').classes('px-4')
         with ui.card().classes('w-full mt-3'):
             ui.label('GPS').classes('font-semibold mb-2')
-            leaflet = ui.leaflet(center=(9.045094, 77.792024), zoom=18).classes('w-full h-80')
+            leaflet = ui.leaflet(center=FIELD27_CENTER, zoom=18).classes('w-full h-80')
+            leaflet.run_map_method(
+                'fitBounds', [list(FIELD27_BOUNDS[0]), list(FIELD27_BOUNDS[1])])
             marker  = leaflet.marker(latlng=leaflet.center)
             gps_status_lbl = ui.label('—').classes('text-xs font-mono mt-1').style('color:#57606a')
             _FIX_LABELS = {-1: 'NO FIX', 0: 'AUTONOMOUS', 1: 'SBAS',
@@ -3551,12 +3671,21 @@ class NiceGuiNode(Node):
         self.cmd_vel_publisher.publish(msg)
 
     def store_gps(self, msg: NavSatFix) -> None:
+        """Cache the latest real GNSS fix and refresh the wall-clock staleness timestamp."""
         self.latest_gps = msg
         # Anything arriving on the real /gnss/fix topic is by definition a
         # real fix now that the shim publishes elsewhere — no sentinel check
         # needed here any more, but keep the same variable/semantics for the
-        # staleness gate below.
-        self._last_real_gps_t = self.get_clock().now().nanoseconds * 1e-9
+        # staleness gate below. Wall clock (see self._wall_clock comment) so
+        # this stays meaningful before /clock exists.
+        # Only refresh _last_real_gps_t for valid fixes: at least STATUS_FIX,
+        # finite coordinates, and not (0,0). Leave _last_real_gps_t unchanged
+        # for invalid/no-fix messages, preserving store_fake_gps behavior and
+        # the UI's last usable fix.
+        if (msg.status.status >= NavSatStatus.STATUS_FIX
+                and math.isfinite(msg.latitude) and math.isfinite(msg.longitude)
+                and not (msg.latitude == 0.0 and msg.longitude == 0.0)):
+            self._last_real_gps_t = self._wall_clock.now().nanoseconds * 1e-9
 
     def store_fake_gps(self, msg: NavSatFix) -> None:
         """Consume the sim shim's fix as a fallback ONLY (see _FAKE_GPS_TOPIC
@@ -3567,7 +3696,7 @@ class NiceGuiNode(Node):
         fix has arrived recently, so a slow-starting real bridge doesn't
         leave the UI without any fix while it comes up.
         """
-        now = self.get_clock().now().nanoseconds * 1e-9
+        now = self._wall_clock.now().nanoseconds * 1e-9
         if now - self._last_real_gps_t < 20.0:
             return  # a real fix was seen recently; don't override it
         self.latest_gps = msg
@@ -3580,7 +3709,10 @@ class NiceGuiNode(Node):
         fusioncore and the real bridge never see this topic at all.
         """
         msg = NavSatFix()
-        msg.header.stamp = self.get_clock().now().to_msg()
+        # Wall clock: self.get_clock() is frozen at 0 before Gazebo
+        # publishes /clock, which would stamp every cold-start fix
+        # identically instead of just being a cosmetic difference.
+        msg.header.stamp = self._wall_clock.now().to_msg()
         msg.header.frame_id = 'gps'
         msg.status.status = NavSatStatus.STATUS_FIX
         msg.status.service = self._FAKE_GPS_SENTINEL

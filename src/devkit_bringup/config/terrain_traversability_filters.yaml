@@ -1,0 +1,60 @@
+# terrain_traversability_filters.yaml
+# ────────────────────────────────────
+# grid_map_filters chain: DEM (elevation layer, built from the recon point
+# cloud logged by recon_dem_logger.py) -> slope -> traversability mask.
+#
+# Output layer `traversable` is a 0/1 mask consumed by
+# devkit_ui/terrain_mask.py, which vectorizes the unsafe (0) region into
+# lat/lon rings for f2c_planner._run_f2c()'s obstacle_rings input.
+#
+# Load with grid_map_filters' filter_chain node, e.g.:
+#   ros2 run grid_map_filters filter_chain_node
+#     --ros-args --params-file terrain_traversability_filters.yaml
+#
+# Thresholds below are placeholders — tune against real field slope data
+# before trusting them (see issue #110: Sowbot's target fields are row-crop,
+# likely lower relief than the H-CCPP paper's orchard/hillside dataset;
+# confirm actual slope variation justifies this before relying on it).
+
+grid_map_filters:
+  ros__parameters:
+    filters:
+      # Fill small holes in the elevation layer (missed recon coverage)
+      # before slope is computed on it — do this on `elevation`, not the
+      # final mask, so isolated gaps don't get scored as false unsafe cells.
+      filter1:
+        name: inpaint
+        type: gridMapCv/InpaintFilter
+        params:
+          input_layer: elevation
+          output_layer: elevation
+          radius: 0.5
+
+      filter2:
+        name: surface_normals
+        type: gridMapFilters/NormalVectorsFilter
+        params:
+          input_layer: elevation
+          output_layers_prefix: normal_
+          radius: 0.2
+          normal_vector_positive_axis: z
+
+      # Slope angle (degrees) from the vertical component of the surface
+      # normal. normal_z == 1.0 is flat ground; smaller values mean steeper.
+      filter3:
+        name: slope_deg
+        type: gridMapFilters/MathExpressionFilter
+        params:
+          output_layer: slope_deg
+          expression: acos(normal_z) * 180.0 / pi
+
+      # Binary safety mask: 1 = traversable, 0 = excluded.
+      # max_slope_deg is the single number to tune per field/vehicle —
+      # ties directly to the cross-slope erosion/traction concern raised
+      # in issue #110, not just "can the robot physically climb it".
+      filter4:
+        name: traversable
+        type: gridMapFilters/MathExpressionFilter
+        params:
+          output_layer: traversable
+          expression: slope_deg <= 15.0
