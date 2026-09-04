@@ -479,8 +479,8 @@ def attach_nav_card(node, manager: ObstacleManager) -> None:
                     name=obs_name.value or '')
                 if added:
                     obs_name.set_value('')
-                    # NiceGUI notification dismissal cannot reliably report
-                    # whether Undo or its timeout closed the toast.
+                    # Using Dialog because NiceGUI notification dismissal cannot
+                    # reliably report whether Undo or its timeout closed the toast.
                     with ui.dialog() as undo_dialog, ui.element('div').classes(
                             'obstacle-undo-notification'):
                         with ui.row().classes('items-center gap-3'):
