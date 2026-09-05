@@ -4,7 +4,7 @@ pytest
 pytest-asyncio
 mypy
 pylint
-ruff
+ruff==0.16.6
 pre-commit
 livesync
 types-setuptools

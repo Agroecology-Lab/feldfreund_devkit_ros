@@ -12,7 +12,6 @@ import re
 import shutil
 import signal
 import subprocess
-import sys
 import threading
 import time
 import traceback
@@ -32,6 +31,16 @@ import rclpy
 from ament_index_python.packages import (
     PackageNotFoundError,
     get_package_share_directory,
+)
+
+# F2C: lat/lon<->XY projection + swath generator, now a standalone package
+# (devkit_f2c_planner) — see its f2c_planner.py docstring for why.
+from devkit_f2c_planner.f2c_planner import (
+    _f2c_latlon_to_xy,
+    _f2c_xy_to_latlon,
+    _run_contour_f2c,
+    _run_f2c,
+    field_centroid_xy,
 )
 from geometry_msgs.msg import Twist
 from nav_msgs.msg import Odometry
@@ -63,15 +72,7 @@ from tf2_ros.transform_listener import TransformListener
 # MISSION: store owns missions.yaml, scheduling, and run recording.
 from devkit_ui.actions import ACTIONS, action_ros_msgs
 from devkit_ui.constants import NAV_ACTION, NODE_NAME, ROW_ACTION
-# F2C: lat/lon<->XY projection + swath generator, now a standalone package
-# (devkit_f2c_planner) — see its f2c_planner.py docstring for why.
-from devkit_f2c_planner.f2c_planner import (
-    _f2c_latlon_to_xy,
-    _f2c_xy_to_latlon,
-    _run_contour_f2c,
-    _run_f2c,
-    field_centroid_xy,
-)
+
 # CONTOUR: terrain-aware reference line, from recon-logged elevation data.
 # See dem.py's module docstring for the recon.csv -> elevation_grid ->
 # reference contour pipeline this pulls from.
@@ -320,7 +321,7 @@ def _plan_contour_rows(corners_ll: list, obstacle_rings: list, tool_width: float
     rather than silently falling back, since a missing/too-short recon log
     is a setup mistake worth fixing, not a legitimate "flat field" case.
     """
-    xy_native, elevation, latlon = load_recon_points(recon_path)
+    _xy_native, elevation, latlon = load_recon_points(recon_path)
     lat0, lon0 = corners_ll[0]
     # Recon points are logged in recon_dem_logger.py's own /odom-anchored
     # frame, unrelated to whatever frame the user's drawn boundary
@@ -1203,7 +1204,7 @@ class NiceGuiNode(Node):
             # Chain entry -> [waypoints] -> exit with row-follow edges. With
             # no waypoints this is exactly the old direct in_name -> out_name
             # edge.
-            for a_name, b_name in pairwise([in_name] + wp_names + [out_name]):
+            for a_name, b_name in pairwise([in_name, *wp_names, out_name]):
                 new_topo_nodes[a_name].add_edge(b_name, action=ROW_ACTION)
 
             added.append(rid)

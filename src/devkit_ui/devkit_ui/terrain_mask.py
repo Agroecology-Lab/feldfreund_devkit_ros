@@ -19,9 +19,8 @@ this stays unit-testable without a running node.
 """
 
 import numpy as np
-from skimage import measure
-
 from devkit_f2c_planner.f2c_planner import _f2c_xy_to_latlon
+from skimage import measure
 
 
 def traversability_mask_to_latlon_rings(
