@@ -500,7 +500,7 @@ def attach_nav_card(node, manager: ObstacleManager) -> None:
                             ui.button(
                                 'Undo',
                                 on_click=lambda: (
-                                    manager.delete(added), undo_dialog.close()),
+                                    manager.delete(added), _close_undo_dialog()),
                             ).props('flat dense').classes('text-white')
                     undo_dialog.props('position=bottom seamless')
                     undo_dialog.open()
