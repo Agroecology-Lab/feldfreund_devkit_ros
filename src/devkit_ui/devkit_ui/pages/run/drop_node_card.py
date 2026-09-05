@@ -11,7 +11,15 @@ class DropNodeCard(ui.card):
                  state: RunViewModel.DropNode,
                  topo_state: RunViewModel.Topo,
                  on_drop: Callable[[str, int | None, str], None]):
-        super().__init__()
+        """
+                 Configure the drop-node card with state bindings and a drop action callback.
+                 
+                 Parameters:
+                     state: Drop-node configuration and operation status state.
+                     topo_state: Topology state used to display the current node.
+                     on_drop: Callback invoked with the node name, row ID, and row role.
+                 """
+                 super().__init__()
 
         self.classes('flex-1')
 
@@ -46,6 +54,15 @@ class DropNodeCard(ui.card):
                 self.row_hint = ui.label('').classes('text-xs font-mono')
 
                 def sync_hint(row_id: str) -> str:
+                    """
+                    Update the row-action hint styling based on whether a row ID is provided.
+                    
+                    Parameters:
+                        row_id (str): The row ID used to determine the hint state.
+                    
+                    Returns:
+                        str: `ROW_ACTION` when a row ID is provided, otherwise `NAV_ACTION`.
+                    """
                     has_row = bool(row_id)
                     self.row_hint.style(f'color:{"#0969da" if has_row else "#8c959f"}')
                     return ROW_ACTION if has_row else NAV_ACTION
@@ -56,6 +73,15 @@ class DropNodeCard(ui.card):
                 self.current_node_lbl = ui.label('').classes('text-xs font-mono')
 
                 def sync_current_node(current_node: str) -> str:
+                    """
+                    Update the current-node display and provide its text.
+                    
+                    Parameters:
+                        current_node (str): The current topology node name, or a dash indicating no node.
+                    
+                    Returns:
+                        str: The formatted current-node text.
+                    """
                     has_current = bool(current_node and current_node != '—')
                     self.current_node_lbl.style(
                         f'color:{"#1a7f37" if has_current else "#8c959f"}'
@@ -78,6 +104,15 @@ class DropNodeCard(ui.card):
             self.status_lbl = ui.label('').classes('text-xs font-mono mt-1')
 
             def sync_status(status: str) -> str:
+                """
+                Update the status label color based on the status and return the status text.
+                
+                Parameters:
+                    status (str): Operation status text.
+                
+                Returns:
+                    str: The unchanged status text.
+                """
                 self.status_lbl.style(f'color:{"#cf222e" if status.startswith("ERROR") else "#1a7f37"}')
                 return status
 

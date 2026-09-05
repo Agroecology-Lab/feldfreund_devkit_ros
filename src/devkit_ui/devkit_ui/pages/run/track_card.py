@@ -11,7 +11,15 @@ class TrackCard(ui.card):
                  state: RunViewModel.Track,
                  on_start: Callable[[str, float, int | None, str], None],
                  on_stop: Callable[[], None]):
-        super().__init__()
+        """
+                 Initialize a track configuration and control card.
+                 
+                 Parameters:
+                 	state (RunViewModel.Track): Track state bound to the card controls.
+                 	on_start (Callable): Callback invoked with the track prefix, drop interval, row ID, and row role.
+                 	on_stop (Callable): Callback invoked when stopping the track.
+                 """
+                 super().__init__()
 
         self._state = state
         self.on_start = on_start

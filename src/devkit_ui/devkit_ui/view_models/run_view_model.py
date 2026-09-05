@@ -42,6 +42,7 @@ class RunViewModel:
         status: str = 'idle'
 
     def __init__(self) -> None:
+        """Initialize the run screen state with default values for each view-model component."""
         self.joystick = self.Joystick()
         self.node_map = self.NodeMap()
         self.track = self.Track()

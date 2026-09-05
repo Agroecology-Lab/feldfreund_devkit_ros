@@ -14,7 +14,18 @@ class NavigationSidebar(ui.card):
                  on_cancel: Callable[[], None],
                  on_delete: Callable[[], None],
                  on_select: Callable[[str], None]):
-        super().__init__()
+        """
+                 Initialize the navigation sidebar and bind its controls to the run state.
+                 
+                 Parameters:
+                     global_store (GlobalViewModel): Global application state used for emergency-stop handling.
+                     topo_state (RunViewModel.Topo): Run state containing node selection and navigation statuses.
+                     on_go (Callable[[], None]): Callback invoked to start navigation.
+                     on_cancel (Callable[[], None]): Callback invoked to cancel navigation.
+                     on_delete (Callable[[], None]): Callback invoked to delete the selected node.
+                     on_select (Callable[[str], None]): Callback invoked with the name of the selected node.
+                 """
+                 super().__init__()
 
         self._on_select = on_select
 
@@ -36,6 +47,15 @@ class NavigationSidebar(ui.card):
             )
 
             def sync_selected(selected: str | None) -> str:
+                """
+                Update the selected-node label color and provide its display text.
+                
+                Parameters:
+                    selected (str | None): The selected node name, or None when no node is selected.
+                
+                Returns:
+                    str: The selected node name, or "—" when no node is selected.
+                """
                 self.selected.style(
                     f'color:{"#9a6700" if selected else "#8c959f"}'
                 )
@@ -50,6 +70,15 @@ class NavigationSidebar(ui.card):
             self.nav_status = ui.label('').classes('text-xs font-mono')
 
             def sync_status(status: str) -> str:
+                """
+                Synchronize the navigation status display with the given status.
+                
+                Parameters:
+                    status (str): Navigation status used to determine the display color.
+                
+                Returns:
+                    str: The original navigation status.
+                """
                 color = (
                     '#1a7f37' if status == 'arrived' else
                     '#cf222e' if 'fail' in (status or '') else
@@ -99,6 +128,15 @@ class NavigationSidebar(ui.card):
             self.delete_status = ui.label('').classes('text-xs font-mono')
 
             def sync_delete_status(status: str) -> str:
+                """
+                Synchronize the deletion status label's color with the current status.
+                
+                Parameters:
+                    status (str): Deletion status text used to determine the label color.
+                
+                Returns:
+                    str: The unchanged deletion status text.
+                """
                 color = (
                     '#cf222e' if status.startswith('ERROR') else
                     '#1a7f37' if status else
@@ -117,6 +155,13 @@ class NavigationSidebar(ui.card):
                 self.node_col = ui.column().style('gap:1px;width:100%')
 
     def render_nodes(self, nodes: Iterable, selected_node: str | None) -> None:
+        """
+        Render the available nodes as a sorted, selectable list.
+        
+        Parameters:
+        	nodes (Iterable): Nodes to display.
+        	selected_node (str | None): Name of the currently selected node.
+        """
         self.node_col.clear()
         with self.node_col:
             for node in sorted(nodes, key=lambda item: item.name):

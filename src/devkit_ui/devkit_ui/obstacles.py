@@ -448,8 +448,13 @@ class ObstacleManager:
 # ── UI: Nav-tab attachment ────────────────────────────────────────────────────
 
 def attach_nav_card(node, manager: ObstacleManager) -> None:
-    """Renders the 'Mark Obstacle' card in the current ui context.
-    Call from inside _nav_content where you want it placed."""
+    """
+    Render the “Mark Obstacle” card and keep its status display synchronized with the obstacle manager.
+    
+    Parameters:
+        node: UI node used to store the default radius, GPS data, and status.
+        manager (ObstacleManager): Manager used to add and remove obstacles.
+    """
     if not hasattr(node, 'default_obstacle_radius'):
         node.default_obstacle_radius = 0.5
 
@@ -469,6 +474,13 @@ def attach_nav_card(node, manager: ObstacleManager) -> None:
             ).classes('w-24').bind_value(node, 'default_obstacle_radius')
 
             def _mark_here() -> None:
+                """
+                Mark a circular obstacle at the latest GPS position.
+                
+                If no GPS message is available, updates the obstacle status with an error.
+                On success, clears the obstacle name input and displays a temporary dialog
+                with an option to undo the addition.
+                """
                 gps = getattr(node, 'latest_gps', None)
                 if gps is None:
                     node.obstacle_status = 'ERROR: no GPS message yet'
@@ -494,6 +506,7 @@ def attach_nav_card(node, manager: ObstacleManager) -> None:
                     undo_dialog.open()
 
                     def _close_undo_dialog() -> None:
+                        """Close the obstacle undo dialog if it is still available."""
                         if not undo_dialog.is_deleted:
                             undo_dialog.close()
 

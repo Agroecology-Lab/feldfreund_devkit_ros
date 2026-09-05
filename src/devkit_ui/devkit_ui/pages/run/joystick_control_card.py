@@ -13,7 +13,17 @@ class JoystickControlCard(ui.card):
                  on_move: Callable[[float, float], None],
                  on_stop: Callable[[], None],
                  on_estop: Callable[[], None]):
-        super().__init__()
+        """
+                 Initialize the joystick control card with its state and control callbacks.
+                 
+                 Parameters:
+                     global_store (GlobalViewModel): Global application state containing the emergency-stop status.
+                     state (RunViewModel.Joystick): Joystick state containing the displayed pose.
+                     on_move (Callable[[float, float], None]): Callback invoked with the joystick's y and x coordinates.
+                     on_stop (Callable[[], None]): Callback invoked when joystick movement ends.
+                     on_estop (Callable[[], None]): Callback invoked when the emergency-stop button is pressed.
+                 """
+                 super().__init__()
 
         self._global_store = global_store
         self._state = state
