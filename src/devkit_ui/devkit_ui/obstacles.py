@@ -448,8 +448,13 @@ class ObstacleManager:
 # ── UI: Nav-tab attachment ────────────────────────────────────────────────────
 
 def attach_nav_card(node, manager: ObstacleManager) -> None:
-    """Renders the 'Mark Obstacle' card in the current ui context.
-    Call from inside _nav_content where you want it placed."""
+    """
+    Render the “Mark Obstacle” card and keep its status display synchronized with the obstacle manager.
+    
+    Parameters:
+        node: UI node used to store the default radius, GPS data, and status.
+        manager (ObstacleManager): Manager used to add and remove obstacles.
+    """
     if not hasattr(node, 'default_obstacle_radius'):
         node.default_obstacle_radius = 0.5
 
@@ -469,6 +474,13 @@ def attach_nav_card(node, manager: ObstacleManager) -> None:
             ).classes('w-24').bind_value(node, 'default_obstacle_radius')
 
             def _mark_here() -> None:
+                """
+                Mark a circular obstacle at the latest GPS position.
+                
+                If no GPS message is available, updates the obstacle status with an error.
+                On success, clears the obstacle name input and displays a temporary dialog
+                with an option to undo the addition.
+                """
                 gps = getattr(node, 'latest_gps', None)
                 if gps is None:
                     node.obstacle_status = 'ERROR: no GPS message yet'
@@ -479,10 +491,26 @@ def attach_nav_card(node, manager: ObstacleManager) -> None:
                     name=obs_name.value or '')
                 if added:
                     obs_name.set_value('')
-                    ui.notify(
-                        f'Marked {added}', type='positive', timeout=5000,
-                        actions=[{'label': 'Undo',
-                                  'handler': lambda: manager.delete(added)}])
+                    # Using Dialog because NiceGUI notification dismissal cannot
+                    # reliably report whether Undo or its timeout closed the toast.
+                    with ui.dialog() as undo_dialog, ui.element('div').classes(
+                            'obstacle-undo-notification'):
+                        with ui.row().classes('items-center gap-3'):
+                            ui.label(f'Marked {added}')
+                            ui.button(
+                                'Undo',
+                                on_click=lambda: (
+                                    manager.delete(added), _close_undo_dialog()),
+                            ).props('flat dense').classes('text-white')
+                    undo_dialog.props('position=bottom seamless')
+                    undo_dialog.open()
+
+                    def _close_undo_dialog() -> None:
+                        """Close the obstacle undo dialog if it is still available."""
+                        if not undo_dialog.is_deleted:
+                            undo_dialog.close()
+
+                    ui.timer(5.0, _close_undo_dialog, once=True)
 
             ui.button('Mark here', on_click=_mark_here).classes(
                 'ml-auto').props('color=warning no-caps dense')

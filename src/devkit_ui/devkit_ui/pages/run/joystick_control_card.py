@@ -2,17 +2,27 @@ from collections.abc import Callable
 
 from nicegui import ui
 
-from devkit_ui.stores.global_store import GlobalStore
-from devkit_ui.stores.run_store import RunStore
+from devkit_ui.view_models.global_view_model import GlobalViewModel
+from devkit_ui.view_models.run_view_model import RunViewModel
 
 
 class JoystickControlCard(ui.card):
     def __init__(self,
-                 global_store: GlobalStore,
-                 state: RunStore.Joystick,
+                 global_store: GlobalViewModel,
+                 state: RunViewModel.Joystick,
                  on_move: Callable[[float, float], None],
                  on_stop: Callable[[], None],
                  on_estop: Callable[[], None]):
+        """
+                 Initialize the joystick control card with its state and control callbacks.
+                 
+                 Parameters:
+                     global_store (GlobalViewModel): Global application state containing the emergency-stop status.
+                     state (RunViewModel.Joystick): Joystick state containing the displayed pose.
+                     on_move (Callable[[float, float], None]): Callback invoked with the joystick's y and x coordinates.
+                     on_stop (Callable[[], None]): Callback invoked when joystick movement ends.
+                     on_estop (Callable[[], None]): Callback invoked when the emergency-stop button is pressed.
+                 """
         super().__init__()
 
         self._global_store = global_store

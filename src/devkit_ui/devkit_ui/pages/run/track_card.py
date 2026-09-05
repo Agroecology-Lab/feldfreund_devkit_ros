@@ -3,14 +3,22 @@ from collections.abc import Callable
 from nicegui import ui
 
 from devkit_ui.constants import NAV_ACTION
-from devkit_ui.stores.run_store import RunStore
+from devkit_ui.view_models.run_view_model import RunViewModel
 
 
 class TrackCard(ui.card):
     def __init__(self,
-                 state: RunStore.Track,
+                 state: RunViewModel.Track,
                  on_start: Callable[[str, float, int | None, str], None],
                  on_stop: Callable[[], None]):
+        """
+                 Initialize a track configuration and control card.
+                 
+                 Parameters:
+                 	state (RunViewModel.Track): Track state bound to the card controls.
+                 	on_start (Callable): Callback invoked with the track prefix, drop interval, row ID, and row role.
+                 	on_stop (Callable): Callback invoked when stopping the track.
+                 """
         super().__init__()
 
         self._state = state
