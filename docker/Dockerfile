@@ -161,12 +161,18 @@ RUN python3 -c "import fields2cover as f2c; print('fields2cover OK:', f2c.__vers
 # ============================================================
 # Stage 4: Lizard (ESP32 devtools)
 # ============================================================
-RUN GIT_TERMINAL_PROMPT=0 git clone --depth 1 \
-        https://github.com/Agroecology-Lab/lizard /root/.lizard && \
+ARG LIZARD_COMMIT=87ab4e198d3af2a274e60292ee204b722f939b5e
+RUN GIT_TERMINAL_PROMPT=0 mkdir -p /root/.lizard && \
+    cd /root/.lizard && \
+    git init -q && \
+    git fetch --depth 1 https://github.com/Agroecology-Lab/lizard "${LIZARD_COMMIT}" && \
+    git checkout -q FETCH_HEAD && \
+    cd - && \
     chmod +x /root/.lizard/espresso.py && \
     pip install --break-system-packages --ignore-installed --retries 10 \
       shapely \
       -r /root/.lizard/requirements.txt
+
 # ============================================================
 # Stage 5: Python Dependencies
 # ============================================================
