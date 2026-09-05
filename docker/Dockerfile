@@ -265,7 +265,7 @@ RUN clone() { \
     clone -b aoc_refactor https://github.com/LCAS/topological_navigation src/topological_navigation & pids="$pids $!"; \
     clone -b main      https://github.com/samuk/caatingarobotics src/caatingarobotics & pids="$pids $!"; \
     clone              https://github.com/manankharwar/fusioncore src/fusioncore & pids="$pids $!"; \
-    #clone -b ros2-gz   https://github.com/FieldRobotEvent/virtual_maize_field src/virtual_maize_field & pids="$pids $!"; \
+    clone -b ros2-gz   https://github.com/FieldRobotEvent/virtual_maize_field src/virtual_maize_field & pids="$pids $!"; \
     clone -b master    https://github.com/LCAS/sentor src/sentor & pids="$pids $!"; \
     clone -b main      https://github.com/nilseuropa/ros2graph_explorer src/ros2graph_explorer & pids="$pids $!"; \
     clone -b main      https://github.com/Supull/ros2grapher.git src/ros2grapher & pids="$pids $!"; \
