@@ -23,7 +23,7 @@ class JoystickControlCard(ui.card):
                      on_stop (Callable[[], None]): Callback invoked when joystick movement ends.
                      on_estop (Callable[[], None]): Callback invoked when the emergency-stop button is pressed.
                  """
-                 super().__init__()
+        super().__init__()
 
         self._global_store = global_store
         self._state = state

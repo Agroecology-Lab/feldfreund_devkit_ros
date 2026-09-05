@@ -31,6 +31,16 @@ from ament_index_python.packages import (
     PackageNotFoundError,
     get_package_share_directory,
 )
+
+# F2C: lat/lon<->XY projection + swath generator, now a standalone package
+# (devkit_f2c_planner) — see its f2c_planner.py docstring for why.
+from devkit_f2c_planner.f2c_planner import (
+    _f2c_latlon_to_xy,
+    _f2c_xy_to_latlon,
+    _run_contour_f2c,
+    _run_f2c,
+    field_centroid_xy,
+)
 from geometry_msgs.msg import Twist
 from nav_msgs.msg import Odometry
 from nicegui import app, ui, ui_run
@@ -57,16 +67,6 @@ from tf2_ros import (
 )
 from tf2_ros.buffer import Buffer
 from tf2_ros.transform_listener import TransformListener
-
-# F2C: lat/lon<->XY projection + swath generator, now a standalone package
-# (devkit_f2c_planner) — see its f2c_planner.py docstring for why.
-from devkit_f2c_planner.f2c_planner import (
-    _f2c_latlon_to_xy,
-    _f2c_xy_to_latlon,
-    _run_contour_f2c,
-    _run_f2c,
-    field_centroid_xy,
-)
 
 # MISSION: store owns missions.yaml, scheduling, and run recording.
 from devkit_ui.actions import ACTIONS, action_ros_msgs
@@ -323,7 +323,7 @@ def _plan_contour_rows(corners_ll: list, obstacle_rings: list, tool_width: float
     rather than silently falling back, since a missing/too-short recon log
     is a setup mistake worth fixing, not a legitimate "flat field" case.
     """
-    xy_native, elevation, latlon = load_recon_points(recon_path)
+    _xy_native, elevation, latlon = load_recon_points(recon_path)
     lat0, lon0 = corners_ll[0]
     # Recon points are logged in recon_dem_logger.py's own /odom-anchored
     # frame, unrelated to whatever frame the user's drawn boundary
@@ -567,6 +567,7 @@ class NiceGuiNode(Node):
         self.angular_velocity           = 0.0
 
         self._nav_goal_handle               = None
+        self._nav_cancel_requested          = False
 
         self._track_timer:   object  | None   = None
         self._track_counter: int              = 0
@@ -696,6 +697,7 @@ class NiceGuiNode(Node):
                 'send_nav_goal: rejected — navigation already in progress '
                 'or soft-estop active')
             return
+        self._nav_cancel_requested = False
         self._run_vm.topo.nav_status = f'connecting → {target}…'
         self._run_vm.topo.navigating = True
         def _send():
@@ -713,13 +715,22 @@ class NiceGuiNode(Node):
         threading.Thread(target=_send, daemon=True).start()
 
     def _nav_accepted(self, future) -> None:
-        """Handle acceptance of a navigation goal and register its result callback."""
+        """Handle acceptance of a navigation goal and register its result callback.
+
+        If cancellation was requested while the goal was still pending acceptance,
+        cancel this handle immediately instead of letting it run unchecked.
+        """
         gh = future.result()
         if not gh.accepted:
             self._run_vm.topo.nav_status = 'goal rejected'
             self._run_vm.topo.navigating = False
+            self._nav_cancel_requested = False
             return
         self._nav_goal_handle = gh
+        if self._nav_cancel_requested:
+            self._nav_cancel_requested = False
+            self._run_vm.topo.nav_status = 'cancelling…'
+            gh.cancel_goal_async()
         gh.get_result_async().add_done_callback(self._nav_result)
 
     def _nav_feedback(self, feedback_msg) -> None:
@@ -736,12 +747,21 @@ class NiceGuiNode(Node):
         self._nav_goal_handle = None
 
     def cancel_nav_goal(self) -> None:
-        """Cancel the active navigation goal and update navigation status."""
+        """Cancel the active navigation goal.
+
+        If the goal has already been accepted, cancel it now. If a send is still
+        in flight (accepted status not yet known), flag it so `_nav_accepted`
+        cancels it the moment it arrives, and keep `navigating` set so a second
+        goal cannot be accepted in the meantime.
+        """
         if self._nav_goal_handle:
             self._nav_goal_handle.cancel_goal_async()
             self._nav_goal_handle = None
-        self._run_vm.topo.nav_status = 'cancelled'
-        self._run_vm.topo.navigating = False
+            self._run_vm.topo.nav_status = 'cancelled'
+            self._run_vm.topo.navigating = False
+        elif self._run_vm.topo.navigating:
+            self._nav_cancel_requested = True
+            self._run_vm.topo.nav_status = 'cancelling…'
 
     # ── node dropping ─────────────────────────────────────────────────────────
 
@@ -755,21 +775,21 @@ class NiceGuiNode(Node):
                        	row_id (int | None): Row identifier to associate with the node, or None for a navigation node.
                        	row_role (str): Role of the node within its row, such as "entry" or "exit".
                        """
-                       name = re.sub(r'[^A-Z0-9_]', '', name.strip().upper().replace(' ', '_'))
+        name = re.sub(r'[^A-Z0-9_]', '', name.strip().upper().replace(' ', '_'))
         if not name:
             self._run_vm.drop_node.status = 'ERROR: node name required'
             return
         if not _NAME_RE.match(name):
             self._run_vm.drop_node.status = f'ERROR: invalid name "{name}"'
             return
+        if not self._topo_doc:
+            self._run_vm.drop_node.status = 'ERROR: map not loaded'
+            return
         if self._topo_doc.has_node(name):
             self._run_vm.drop_node.status = f'ERROR: {name} already exists'
             return
         if self.latest_odom is None and not self._is_sim:
             self._run_vm.drop_node.status = 'ERROR: no odometry'
-            return
-        if not self._topo_doc:
-            self._run_vm.drop_node.status = 'ERROR: map not loaded'
             return
 
         x = round(self.latest_odom.pose.pose.position.x, 3) if self.latest_odom else 0.0
@@ -928,7 +948,7 @@ class NiceGuiNode(Node):
                         row_id (int | None): Optional row identifier associated with each node.
                         row_role (str | None): Role assigned to recorded nodes when no row identifier is provided.
                     """
-                    prefix = re.sub(r'[^A-Z0-9_]', '', prefix.strip().upper().replace(' ', '_'))
+        prefix = re.sub(r'[^A-Z0-9_]', '', prefix.strip().upper().replace(' ', '_'))
         if not prefix:
             self._run_vm.track.running = False
             self._run_vm.track.status = 'ERROR: prefix required'
@@ -1024,11 +1044,14 @@ class NiceGuiNode(Node):
             def _cb(f):
                 try:
                     res = f.result()
-                    self._run_vm.discovery.status = res.message or 'stopped'
+                    if res.success:
+                        self._run_vm.discovery.active = False
+                        self._run_vm.discovery.status = res.message or 'stopped'
+                    else:
+                        self._run_vm.discovery.status = res.message or (
+                            'ERROR: stop failed — discovery state unknown')
                 except Exception as e:
-                    self._run_vm.discovery.status = f'ERROR: {e}'
-                finally:
-                    self._run_vm.discovery.active = False
+                    self._run_vm.discovery.status = f'ERROR: {e} — discovery state unknown'
             self._row_discovery_stop_cli.call_async(
                 Trigger.Request()).add_done_callback(_cb)
         threading.Thread(target=_work, daemon=True).start()

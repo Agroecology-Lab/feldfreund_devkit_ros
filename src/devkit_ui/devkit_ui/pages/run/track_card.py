@@ -19,7 +19,7 @@ class TrackCard(ui.card):
                  	on_start (Callable): Callback invoked with the track prefix, drop interval, row ID, and row role.
                  	on_stop (Callable): Callback invoked when stopping the track.
                  """
-                 super().__init__()
+        super().__init__()
 
         self._state = state
         self.on_start = on_start

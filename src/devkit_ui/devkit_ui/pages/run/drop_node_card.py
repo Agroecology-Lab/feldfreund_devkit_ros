@@ -19,7 +19,7 @@ class DropNodeCard(ui.card):
                      topo_state: Topology state used to display the current node.
                      on_drop: Callback invoked with the node name, row ID, and row role.
                  """
-                 super().__init__()
+        super().__init__()
 
         self.classes('flex-1')
 

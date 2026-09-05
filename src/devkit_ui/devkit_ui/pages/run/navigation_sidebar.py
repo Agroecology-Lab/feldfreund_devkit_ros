@@ -25,7 +25,7 @@ class NavigationSidebar(ui.card):
                      on_delete (Callable[[], None]): Callback invoked to delete the selected node.
                      on_select (Callable[[str], None]): Callback invoked with the name of the selected node.
                  """
-                 super().__init__()
+        super().__init__()
 
         self._on_select = on_select
 

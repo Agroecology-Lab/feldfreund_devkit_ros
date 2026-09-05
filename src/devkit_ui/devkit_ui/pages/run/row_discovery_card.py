@@ -18,7 +18,7 @@ class RowDiscoveryCard(ui.card):
                      on_start (Callable[[], None]): Callback invoked after discovery is confirmed.
                      on_stop (Callable[[], None]): Callback invoked when discovery is disabled.
                  """
-                 super().__init__()
+        super().__init__()
 
         self._state = state
         self.on_start = on_start
@@ -39,7 +39,7 @@ class RowDiscoveryCard(ui.card):
             )
 
             with ui.row().classes('items-center gap-2'):
-                discovery_checkbox = ui.checkbox('Discovery mode').bind_value(
+                discovery_checkbox = ui.checkbox('Discovery mode').bind_value_from(
                     self._state, 'active'
                 )
                 ui.label().classes('text-xs font-mono ml-2').bind_text_from(
