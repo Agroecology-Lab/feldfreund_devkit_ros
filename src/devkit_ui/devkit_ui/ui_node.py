@@ -679,6 +679,11 @@ class NiceGuiNode(Node):
         if not _ACTION_OK:
             self._run_vm.topo.nav_status = 'action unavailable (import failed)'
             return
+        if self._run_vm.topo.navigating or self._global_vm.soft_estop_active:
+            self.get_logger().warn(
+                'send_nav_goal: rejected — navigation already in progress '
+                'or soft-estop active')
+            return
         self._run_vm.topo.nav_status = f'connecting → {target}…'
         self._run_vm.topo.navigating = True
         def _send():
@@ -2479,14 +2484,14 @@ class NiceGuiNode(Node):
         goal = GotoNode.Goal()
         goal.target = target
         self._run_vm.topo.nav_status = f'→ {target}'
-        self.topo_navigating = True
+        self._run_vm.topo.navigating = True
 
         def _on_accepted(future):
             gh = future.result()
             if not gh.accepted:
                 result_holder[0] = False
                 self._run_vm.topo.nav_status = 'goal rejected'
-                self.topo_navigating = False
+                self._run_vm.topo.navigating = False
                 done_event.set()
                 return
             self._nav_goal_handle = gh
@@ -2496,7 +2501,7 @@ class NiceGuiNode(Node):
             success = getattr(future.result().result, 'success', True)
             result_holder[0] = success
             self._run_vm.topo.nav_status = 'arrived' if success else 'failed'
-            self.topo_navigating = False
+            self._run_vm.topo.navigating = False
             self._nav_goal_handle = None
             done_event.set()
 
