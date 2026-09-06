@@ -6,12 +6,15 @@ import threading
 from pathlib import Path
 
 import rclpy
+import rclpy.parameter
+import rosys
 from ament_index_python.packages import get_package_share_directory
 from feldfreund_devkit import FeldfreundHardware, FeldfreundSimulation, System, api
-from feldfreund_devkit.config import config_from_file
+from feldfreund_devkit.config import Secrets, config_from_file
 from nicegui import app, ui, ui_run
 from rclpy.executors import ExternalShutdownException
 from rclpy.node import Node
+from rosgraph_msgs.msg import Clock
 
 from devkit_driver.modules import (
     BMSHandler,
@@ -26,23 +29,26 @@ from devkit_driver.modules import (
 
 
 class DevkitDriver(Node):
-    """Devkit node handler with defensive attribute checks for simulation support."""
 
     def __init__(self, system: System):
         """Wire up hardware/simulation handlers, skipping any attribute the system lacks."""
         super().__init__('devkit_driver_node')
         self.system = system
 
-        # NOTE: Support both physical hardware and simulation (GHOST mode)
-        assert isinstance(self.system.feldfreund, (FeldfreundHardware, FeldfreundSimulation))
-
-        # Defensive initialization: Only load handlers if attributes exist.
-        if hasattr(self.system.feldfreund, 'robot_brain'):
+        if isinstance(self.system.feldfreund, FeldfreundHardware):
+            self.get_logger().info('Running in hardware mode')
             self._robot_brain_handler = RobotBrainHandler(self, self.system.feldfreund.robot_brain)
+        elif isinstance(self.system.feldfreund, FeldfreundSimulation):
+            self.get_logger().info('Running in simulation mode')
+            self._clock_publisher = self.create_publisher(Clock, '/clock', 10)
+            self.set_parameters([rclpy.parameter.Parameter('use_sim_time',
+                                                           rclpy.parameter.Parameter.Type.BOOL,
+                                                           True)])
+            rosys.on_repeat(self._publish_clock, 0.01)
         else:
-            self.get_logger().info('RobotBrain not detected (Simulation Mode); skipping handler.')
+            raise TypeError(f'Unknown feldfreund type: {type(self.system.feldfreund)}')
 
-        # Odometry is standard across both modes
+        # All other handlers work with both hardware and simulation
         self._odom_handler = OdomHandler(self, self.system.odometer)
 
         # Opt-in RTK recon logging for DEM building (see issue #110);
@@ -54,18 +60,22 @@ class DevkitDriver(Node):
 
         if getattr(self.system.feldfreund, 'bumper', None) is not None:
             self._bumper_handler = BumperHandler(self, self.system.feldfreund.bumper, self.system.feldfreund.estop)
-
-        if hasattr(self.system.feldfreund, 'wheels'):
-            self._twist_handler = TwistHandler(self, self.system.feldfreund.wheels)
-
-        if hasattr(self.system.feldfreund, 'estop'):
-            self._estop_handler = EStopHandler(self, self.system.feldfreund.estop)
+        self._twist_handler = TwistHandler(self, self.system.feldfreund.wheels)
+        self._estop_handler = EStopHandler(self, self.system.feldfreund.estop)
 
         # BNO085 IMU — publishes sensor_msgs/Imu on /imu/data when present.
-        if getattr(self.system.feldfreund, 'imu', None) is not None:
+        if self.system.feldfreund.imu is not None:
             self._imu_handler = ImuHandler(self, self.system.feldfreund.imu)
-        else:
-            self.get_logger().info('IMU not detected (no imu attribute); skipping ImuHandler.')
+
+
+    def _publish_clock(self) -> None:
+        current_time = rosys.time()
+
+        msg = Clock()
+        msg.clock.sec = int(current_time)
+        msg.clock.nanosec = int((current_time - int(current_time)) * 1e9)
+
+        self._clock_publisher.publish(msg)
 
     def destroy_node(self) -> None:
         """Close the recon DEM logger's CSV handle before the usual node teardown."""
@@ -101,20 +111,21 @@ def on_startup() -> None:
     logging.basicConfig(level=logging.INFO, format="%(levelname)s: %(message)s")
     log = logging.getLogger("devkit_driver.startup")
 
-
     if not config_path.exists():
-        # Node cannot safely initialize without a hardware definition
         log.critical("Configuration file not found at %s", config_path)
         os._exit(1)
 
     log.info("Loading hardware configuration from %s", config_path)
 
+    simulation_mode = os.environ.get('FELDFREUND_SIMULATION', 'false').lower() in ('true', '1', 'yes')
+    if simulation_mode:
+        rosys.enter_simulation()
 
-    config = config_from_file(str(config_path))
-    system = System(config)
+    secrets = Secrets()
+    config = config_from_file(str(config_path), secrets=secrets)
+    system = System(config, secrets=secrets)
     api.Online()
 
-    # Background thread handles ROS middleware events without blocking NiceGUI
     threading.Thread(target=ros_main, args=(system,), daemon=True).start()
 
 

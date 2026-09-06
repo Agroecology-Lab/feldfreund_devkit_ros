@@ -36,12 +36,12 @@ class OdomHandler:
         # Publisher
         self._publisher = node.create_publisher(Odometry, 'odom', 10)
         self._tf_broadcaster = TransformBroadcaster(self._node)
-        self._odom.PREDICTION_UPDATED.subscribe(self.publish_odom)
+        self._odom.POSE_UPDATED.subscribe(self.publish_odom)
         self.publish_odom()
 
-    def publish_odom(self):
+    def publish_odom(self, *_args) -> None:
         """Publish odometry data to ros."""
-        pose = self._odom.prediction
+        pose = self._odom.pose
         timestamp_message = self._node.get_clock().now().to_msg()
         quat = Quaternion(axis=[0, 0, 1], angle=pose.yaw)
         if self._publish_tf:

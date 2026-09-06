@@ -1,3 +1,8 @@
+# FakeElement/FakeUi deliberately mirror nicegui's real API signatures (text=''
+# before *args) and build fake elements dynamically, so pylint's static checks
+# for keyword-before-vararg and attribute-defined-outside-init are expected
+# false positives here, not real issues.
+# pylint: disable=keyword-arg-before-vararg,attribute-defined-outside-init
 import sys
 import unittest
 from dataclasses import dataclass, field
@@ -48,6 +53,14 @@ class FakeElement:
             transform=forward,
         )
         self.value = getattr(source, attribute)
+        return self
+
+    def bind_value_from(self, source, attribute, backward=None):
+        self.binding = SimpleNamespace(
+            kind='value', source=source, attribute=attribute,
+            transform=backward,
+        )
+        self.refresh_binding()
         return self
 
     def bind_text_from(self, source, attribute, backward=None):

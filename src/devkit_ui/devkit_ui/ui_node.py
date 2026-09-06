@@ -31,16 +31,6 @@ from ament_index_python.packages import (
     PackageNotFoundError,
     get_package_share_directory,
 )
-
-# F2C: lat/lon<->XY projection + swath generator, now a standalone package
-# (devkit_f2c_planner) — see its f2c_planner.py docstring for why.
-from devkit_f2c_planner.f2c_planner import (
-    _f2c_latlon_to_xy,
-    _f2c_xy_to_latlon,
-    _run_contour_f2c,
-    _run_f2c,
-    field_centroid_xy,
-)
 from geometry_msgs.msg import Twist
 from nav_msgs.msg import Odometry
 from nicegui import app, ui, ui_run
@@ -67,6 +57,16 @@ from tf2_ros import (
 )
 from tf2_ros.buffer import Buffer
 from tf2_ros.transform_listener import TransformListener
+
+# F2C: lat/lon<->XY projection + swath generator, now a standalone package
+# (devkit_f2c_planner) — see its f2c_planner.py docstring for why.
+from devkit_f2c_planner.f2c_planner import (
+    _f2c_latlon_to_xy,
+    _f2c_xy_to_latlon,
+    _run_contour_f2c,
+    _run_f2c,
+    field_centroid_xy,
+)
 
 # MISSION: store owns missions.yaml, scheduling, and run recording.
 from devkit_ui.actions import ACTIONS, action_ros_msgs
@@ -356,7 +356,7 @@ class NiceGuiNode(Node):
     def __init__(self) -> None:
         """
         Initialize the ROS node, GUI view models, navigation interfaces, sensor state, and mission-planning components.
-        
+
         In simulation, configure the dedicated fallback GPS source used when no recent real GPS fix is available. Register the NiceGUI root page and initialize topology, obstacle, mission, safety, and navigation state.
         """
         super().__init__(NODE_NAME)
@@ -685,9 +685,9 @@ class NiceGuiNode(Node):
 
     def send_nav_goal(self, target: str) -> None:
         """Send a navigation goal to the specified topology node.
-        
+
         Parameters:
-        	target (str): Name of the topology node to navigate to.
+            target (str): Name of the topology node to navigate to.
         """
         if not _ACTION_OK:
             self._run_vm.topo.nav_status = 'action unavailable (import failed)'
@@ -769,11 +769,11 @@ class NiceGuiNode(Node):
                        row_role: str = 'entry') -> None:
         """
                        Add a topology node at the current robot position and persist it to the active map.
-                       
+
                        Parameters:
-                       	name (str): Name for the new node.
-                       	row_id (int | None): Row identifier to associate with the node, or None for a navigation node.
-                       	row_role (str): Role of the node within its row, such as "entry" or "exit".
+                        name (str): Name for the new node.
+                        row_id (int | None): Row identifier to associate with the node, or None for a navigation node.
+                        row_role (str): Role of the node within its row, such as "entry" or "exit".
                        """
         name = re.sub(r'[^A-Z0-9_]', '', name.strip().upper().replace(' ', '_'))
         if not name:
@@ -862,7 +862,7 @@ class NiceGuiNode(Node):
 
         def _publish_and_persist():
             """Persist the updated topology map and make it available to the navigation system.
-            
+
             Writes the map to YAML, updates the in-memory topology document, and switches or
             publishes the map. Reports duplicate nodes, failures, and operation status through
             the node's view model and logger.
@@ -941,7 +941,7 @@ class NiceGuiNode(Node):
                     row_id: int | None, row_role: str | None) -> None:
         """
                     Start periodic recording of topology nodes using the specified naming prefix.
-                    
+
                     Parameters:
                         prefix (str): Prefix used for numbered node names after normalization.
                         interval (float): Time in seconds between recorded nodes.
@@ -1013,7 +1013,7 @@ class NiceGuiNode(Node):
 
     def start_discovery(self) -> None:
         """Initiate row discovery through the configured ROS 2 Trigger service.
-        
+
         Updates the discovery status as the request starts, completes, or fails.
         """
         self._run_vm.discovery.status = 'starting…'
@@ -1060,7 +1060,7 @@ class NiceGuiNode(Node):
                              status_attr: str, success_msg: str) -> None:
         """
                              Apply a topology modification, persist the updated map, and make it live.
-                             
+
                              Parameters:
                                  modify_fn (Callable[[TopoDoc], None]): Function that mutates the topology document.
                                  status_owner (object): Object whose status attribute receives progress or error messages.
@@ -1075,7 +1075,7 @@ class NiceGuiNode(Node):
         def _work():
             """
             Apply a topology modification, persist the updated map, and reload it for live use.
-            
+
             The map is loaded from the configured file or installed source, with the current
             topology used as a fallback. Persistence and reload failures are recorded in the
             provided status owner.
@@ -1138,7 +1138,7 @@ class NiceGuiNode(Node):
                               overwrite: bool = False) -> None:
         """
                               Save the most recently planned F2C swaths as rows in the loaded topology map.
-                              
+
                               Parameters:
                                   prefix (str): Prefix used to name the generated row nodes.
                                   row_id_start (int): Identifier assigned to the first planned row.
@@ -1379,7 +1379,7 @@ class NiceGuiNode(Node):
 
         def _modify(file_doc):
             """Update the topology document with the planned row nodes and edges.
-            
+
             When overwrite is enabled, existing nodes for the configured row prefix are
             removed before the planned nodes are inserted. Existing nodes with matching
             names are preserved.
@@ -1418,9 +1418,9 @@ class NiceGuiNode(Node):
     def repair_row_connectivity(self, connect_to: str | None = None) -> None:
         """
         Rebuild missing in-row and headland connections for existing rows in the loaded topology map.
-        
+
         Parameters:
-        	connect_to (str | None): Optional node name to connect bidirectionally to the first row entry and last row exit.
+            connect_to (str | None): Optional node name to connect bidirectionally to the first row entry and last row exit.
         """
         if not self._topo_doc:
             self.f2c_save_status = 'ERROR: map not loaded'
@@ -1538,9 +1538,9 @@ class NiceGuiNode(Node):
 
     def delete_topo_node(self, name: str) -> None:
         """Delete a topology node and persist the updated map.
-        
+
         Parameters:
-        	name (str): Name of the topology node to delete.
+            name (str): Name of the topology node to delete.
         """
         if not self._topo_doc:
             self._run_vm.topo.delete_status = 'ERROR: map not loaded'
@@ -1556,9 +1556,9 @@ class NiceGuiNode(Node):
         def _modify(file_doc):
             """
             Remove the node identified by ``name`` from the topology document.
-            
+
             Parameters:
-            	file_doc: Topology document to modify.
+                file_doc: Topology document to modify.
             """
             file_doc.remove_node(name)
 
@@ -1569,9 +1569,9 @@ class NiceGuiNode(Node):
     def delete_row(self, row_id: int) -> None:
         """
         Delete all topology nodes belonging to a row and persist the updated map.
-        
+
         Parameters:
-        	row_id (int): Identifier of the row whose nodes should be deleted.
+            row_id (int): Identifier of the row whose nodes should be deleted.
         """
         targets = {node.name for node in self._topo_doc.nodes
                    if node.meta.get('row_id') == row_id}
@@ -1589,9 +1589,9 @@ class NiceGuiNode(Node):
         def _modify(file_doc):
             """
             Remove the selected nodes from a topology document.
-            
+
             Parameters:
-            	file_doc: The topology document to modify.
+                file_doc: The topology document to modify.
             """
             file_doc.remove_nodes(targets)
 
@@ -2477,10 +2477,10 @@ class NiceGuiNode(Node):
     def _run_mission(self, queue: list, status_lbl) -> None:
         """
         Start executing the queued row mission.
-        
+
         Parameters:
-        	queue (list): Tuples containing a row ID, action key, and action parameters.
-        	status_lbl: UI status label updated with mission progress and outcome.
+            queue (list): Tuples containing a row ID, action key, and action parameters.
+            status_lbl: UI status label updated with mission progress and outcome.
         """
         if not queue:
             status_lbl.set_text('ERROR: queue is empty')
@@ -2532,7 +2532,7 @@ class NiceGuiNode(Node):
         def _execute():
             """
             Execute the queued mission steps and update the mission status.
-            
+
             Each step navigates to its entry node with the implement disabled, then
             traverses to its exit node with the configured action enabled. Stops on
             cancellation, soft-estop activation, or navigation failure, and resets the
@@ -2595,11 +2595,11 @@ class NiceGuiNode(Node):
 
     def _send_goal_sync(self, target: str, timeout_sec: float = 300.0) -> bool:
         """Synchronously execute navigation to a topological node.
-        
+
         Parameters:
             target (str): Name of the destination node.
             timeout_sec (float): Maximum time to wait for navigation completion.
-        
+
         Returns:
             bool: True if navigation succeeds, False if it fails, is cancelled, times out, or the action server is unavailable.
         """
@@ -2621,7 +2621,7 @@ class NiceGuiNode(Node):
         def _on_accepted(future):
             """
             Handle acceptance of a navigation goal and register its result callback.
-            
+
             Parameters:
                 future: Future containing the navigation goal handle.
             """
@@ -2638,9 +2638,9 @@ class NiceGuiNode(Node):
         def _on_result(future):
             """
             Handle completion of a navigation goal and update its status.
-            
+
             Parameters:
-            	future: Future containing the navigation result.
+                future: Future containing the navigation result.
             """
             success = getattr(future.result().result, 'success', True)
             result_holder[0] = success
@@ -3138,13 +3138,12 @@ class NiceGuiNode(Node):
                 # studded in the inter-row gaps of the R*_IN/OUT nodes. Gazebo
                 # reads the world only at launch, so a running sim must be
                 # stopped and relaunched to see a rebuild — we refuse mid-run
-                # rather than silently no-op. The generator script is mounted
-                # at /workspace/topo_to_forest3d.py by manage.py.
+                # rather than silently no-op. Uses the shared worldgen.sh
+                # (also called by Launch Sim) so Rebuild and Launch Sim agree
+                # on the cache key and never regenerate each other's world.
                 _MAP_FILE   = '/workspace/maps/maize_map'
-                _WORLD_FILE = ('/workspace/install/devkit_simulation/share/'
-                               'devkit_simulation/worlds/maize.world')
 
-                def _rebuild_world():
+                async def _rebuild_world():
                     if _gazebo_proc[0] is not None and _gazebo_proc[0].poll() is None:
                         _gazebo_lbl.set_text(
                             'stop the sim before rebuilding — Gazebo reads the '
@@ -3160,12 +3159,12 @@ class NiceGuiNode(Node):
                         _gazebo_lbl.set_text('rebuilding world from map…')
                         _gazebo_lbl.style('color:#57606a')
                         # Get plant placement values (cm → m conversion)
-                        spacing_m = float(plant_spacing.value or 80) / 100.0
+                        spacing_m = float(plant_spacing.value or 100) / 100.0
                         row_w_m = float(row_width_input.value or 80) / 100.0
                         scale = float(plant_scale.value or 100) / 100.0
                         cat = scale_category.value or 'all'
                         model = plant_model.value or 'plant'
-                        weed_density = int(weed_density_scale.value) if weed_density_scale.value is not None else 100
+                        weed_density = int(weed_density_scale.value) if weed_density_scale.value is not None else 10
                         # Validate selected model exists on disk
                         model_dir = _CROP_MODELS_DIR / model
                         if not model_dir.is_dir() or not (model_dir / 'model.sdf').is_file():
@@ -3173,20 +3172,17 @@ class NiceGuiNode(Node):
                                 f'model "{model}" not found — upload it first')
                             _gazebo_lbl.style('color:#cf222e')
                             return
-                        r = subprocess.run(
-                            ['python3', '/workspace/topo_to_forest3d.py',
-                             '--topo', _MAP_FILE,
-                             '--out', '/workspace/forest3d.yaml',
-                             '--generate',
-                             '--world-out', _WORLD_FILE,
-                             '--models-path', '/workspace/models',
+                        r = await ng_run.io_bound(
+                            subprocess.run,
+                            ['bash', '/workspace/worldgen.sh',
                              '--plant-spacing', str(spacing_m),
                              '--row-width', str(row_w_m),
                              '--plant-scale', str(scale),
                              '--scale-category', cat,
                              '--crop-model', model,
                              '--weed-density', str(weed_density)],
-                            capture_output=True, text=True, timeout=120, check=False
+                            capture_output=True, text=True, timeout=120,
+                            check=False
                         )
                         if r.returncode != 0:
                             err = (r.stderr or r.stdout or 'unknown error').strip()
@@ -3269,7 +3265,7 @@ class NiceGuiNode(Node):
                     with ui.column().classes('flex-1 gap-0'):
                         ui.html('<div class="sec-label">Plant Spacing</div>')
                         plant_spacing = ui.number(
-                            value=80, min=10, max=300, step=5, precision=0,
+                            value=100, min=10, max=1000, step=5, precision=0,
                             suffix='cm'
                         ).classes('w-full')
                     with ui.column().classes('flex-1 gap-0'):
@@ -3283,7 +3279,7 @@ class NiceGuiNode(Node):
 
                 def _check_spacing_warning():
                     rw = float(row_width_input.value or 80)
-                    ps = float(plant_spacing.value or 80)
+                    ps = float(plant_spacing.value or 100)
                     if rw >= ps:
                         spacing_warn_lbl.set_text('Warning: row width >= plant spacing')
                     else:
@@ -3319,7 +3315,7 @@ class NiceGuiNode(Node):
                         ui.html('<div class="sec-label">Weed Density</div>')
                         with ui.row().classes('items-center gap-1 w-full'):
                             weed_density_scale = ui.number(
-                                value=100, min=0, max=100, step=5, precision=0,
+                                value=10, min=0, max=100, step=5, precision=0,
                                 suffix='%'
                             ).classes('flex-1')
                             ui.label('on').classes('text-xs').style('color:#8c959f')
@@ -3711,10 +3707,10 @@ class NiceGuiNode(Node):
     def send_speed(self, x: float, y: float) -> None:
         """
         Publish a velocity command and update the stored velocity values.
-        
+
         Parameters:
-        	x (float): Linear velocity command.
-        	y (float): Angular velocity command.
+            x (float): Linear velocity command.
+            y (float): Angular velocity command.
         """
         msg = Twist()
         msg.linear.x = x

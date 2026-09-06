@@ -16,7 +16,7 @@ class NavigationSidebar(ui.card):
                  on_select: Callable[[str], None]):
         """
                  Initialize the navigation sidebar and bind its controls to the run state.
-                 
+
                  Parameters:
                      global_store (GlobalViewModel): Global application state used for emergency-stop handling.
                      topo_state (RunViewModel.Topo): Run state containing node selection and navigation statuses.
@@ -49,10 +49,10 @@ class NavigationSidebar(ui.card):
             def sync_selected(selected: str | None) -> str:
                 """
                 Update the selected-node label color and provide its display text.
-                
+
                 Parameters:
                     selected (str | None): The selected node name, or None when no node is selected.
-                
+
                 Returns:
                     str: The selected node name, or "—" when no node is selected.
                 """
@@ -72,10 +72,10 @@ class NavigationSidebar(ui.card):
             def sync_status(status: str) -> str:
                 """
                 Synchronize the navigation status display with the given status.
-                
+
                 Parameters:
                     status (str): Navigation status used to determine the display color.
-                
+
                 Returns:
                     str: The original navigation status.
                 """
@@ -120,7 +120,7 @@ class NavigationSidebar(ui.card):
             ).classes('w-full').props('no-caps outline').bind_enabled_from(
                 topo_state,
                 'selected_node',
-                backward=lambda selected: bool(selected)
+                backward=bool
             )
 
             # Delete status
@@ -130,10 +130,10 @@ class NavigationSidebar(ui.card):
             def sync_delete_status(status: str) -> str:
                 """
                 Synchronize the deletion status label's color with the current status.
-                
+
                 Parameters:
                     status (str): Deletion status text used to determine the label color.
-                
+
                 Returns:
                     str: The unchanged deletion status text.
                 """
@@ -157,10 +157,10 @@ class NavigationSidebar(ui.card):
     def render_nodes(self, nodes: Iterable, selected_node: str | None) -> None:
         """
         Render the available nodes as a sorted, selectable list.
-        
+
         Parameters:
-        	nodes (Iterable): Nodes to display.
-        	selected_node (str | None): Name of the currently selected node.
+            nodes (Iterable): Nodes to display.
+            selected_node (str | None): Name of the currently selected node.
         """
         self.node_col.clear()
         with self.node_col:

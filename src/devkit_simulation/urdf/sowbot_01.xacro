@@ -96,7 +96,13 @@
        joint on the drive roller is what the diff-drive plugin spins.
        ══════════════════════════════════════════════════════════════ -->
   <xacro:macro name="track" params="prefix y axis_y">
-    <!-- Belt body (visual + collision) -->
+    <!-- Belt body (visual + collision). FIXED to base_link: gz-sim's
+         TrackedVehicle/TrackController drive the robot by setting a moving
+         contact surface on the belt's ground patch (conveyor effect), NOT by
+         rotating a belt joint — see gz-sim tracked_vehicle_simple.sdf (track
+         joints are type='fixed' there). Keeping the belt fixed to the chassis
+         also removes the free pivot at the belt axle that let the chassis
+         rock like an inverted pendulum and lose balance. -->
     <link name="${prefix}_track_link">
       <visual>
         <origin xyz="0 0 0" rpy="0 0 0"/>
@@ -123,11 +129,10 @@
         <inertia ixx="0.8" ixy="0" ixz="0" iyy="2.0" iyz="0" izz="2.0"/>
       </inertial>
     </link>
-    <joint name="${prefix}_track_joint" type="continuous">
+    <joint name="${prefix}_track_joint" type="fixed">
       <parent link="base_link"/>
       <child  link="${prefix}_track_link"/>
       <origin xyz="0 ${y} 0" rpy="0 0 0"/>
-      <axis xyz="0 ${axis_y} 0"/>
     </joint>
 
     <!-- Drive roller (front) — full track height; forms the rounded front end -->
@@ -175,6 +180,20 @@
 
   <xacro:track prefix="left"  y=" ${track_half}" axis_y=" 1"/>
   <xacro:track prefix="right" y="-${track_half}" axis_y="-1"/>
+
+  <!-- sdformat's URDF->SDF conversion lumps every fixed joint's child link
+       into its parent by default, so left/right_track_link would silently
+       disappear and TrackController could never find them (gzwarn + return;
+       robot never moves). preserveFixedJoint keeps these two as real links.
+       Verified in sim (2026-08-08): with this tag the sowbot drives and turns
+       level; without it, TrackedVehicle publishes belt cmds but the robot
+       stays put. -->
+  <gazebo reference="left_track_joint">
+    <preserveFixedJoint>true</preserveFixedJoint>
+  </gazebo>
+  <gazebo reference="right_track_joint">
+    <preserveFixedJoint>true</preserveFixedJoint>
+  </gazebo>
 
   <!-- Native <collision><surface><friction> above is silently dropped on
        URDF->SDF conversion (Gazebo Harmonic) — without this, tracks have
