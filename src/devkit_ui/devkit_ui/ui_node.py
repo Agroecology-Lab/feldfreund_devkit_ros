@@ -1246,7 +1246,11 @@ class NiceGuiNode(Node):
                     row_role=role,
                 ),
                 verts=verts,
-                meta={'map': map_name, 'node': name}
+                # row_id/row_role must live in .meta, not just .properties —
+                # topo_renderer.py's build_svg() reads nd.meta.get('row_role')
+                # for the in-circle label. Omitting it here (the earlier bug)
+                # made every row node fall back to '?', regardless of type.
+                meta={'map': map_name, 'node': name, 'row_id': rid, 'row_role': role}
             )
 
         for i, swath in enumerate(self._f2c_swaths):
