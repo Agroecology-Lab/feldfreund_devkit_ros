@@ -1,0 +1,18 @@
+<?xml version="1.0" ?>
+<sdf version="1.8">
+    <model name="palm2">
+        <static>true</static>
+        <link name="link">
+            <collision name="collision">
+                <geometry>
+                    <mesh><uri>mesh/palm2.glb</uri><scale>1 1 1</scale></mesh>
+                </geometry>
+            </collision>
+            <visual name="visual">
+                <geometry>
+                    <mesh><uri>mesh/palm2.glb</uri><scale>1 1 1</scale></mesh>
+                </geometry>
+            </visual>
+        </link>
+    </model>
+</sdf>
