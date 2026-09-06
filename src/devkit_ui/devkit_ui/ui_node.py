@@ -33,15 +33,6 @@ from ament_index_python.packages import (
     get_package_share_directory,
 )
 
-# F2C: lat/lon<->XY projection + swath generator, now a standalone package
-# (devkit_f2c_planner) — see its f2c_planner.py docstring for why.
-from devkit_f2c_planner.f2c_planner import (
-    _f2c_latlon_to_xy,
-    _f2c_xy_to_latlon,
-    _run_contour_f2c,
-    _run_f2c,
-    field_centroid_xy,
-)
 from geometry_msgs.msg import Twist
 from nav_msgs.msg import Odometry
 from nicegui import app, ui, ui_run
@@ -68,6 +59,16 @@ from tf2_ros import (
 )
 from tf2_ros.buffer import Buffer
 from tf2_ros.transform_listener import TransformListener
+
+# F2C: lat/lon<->XY projection + swath generator, now a standalone package
+# (devkit_f2c_planner) — see its f2c_planner.py docstring for why.
+from devkit_f2c_planner.f2c_planner import (
+    _f2c_latlon_to_xy,
+    _f2c_xy_to_latlon,
+    _run_contour_f2c,
+    _run_f2c,
+    field_centroid_xy,
+)
 
 # MISSION: store owns missions.yaml, scheduling, and run recording.
 from devkit_ui.actions import ACTIONS, action_ros_msgs
