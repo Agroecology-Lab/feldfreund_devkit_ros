@@ -50,6 +50,14 @@ class FakeElement:
         self.value = getattr(source, attribute)
         return self
 
+    def bind_value_from(self, source, attribute, backward=None):
+        self.binding = SimpleNamespace(
+            kind='value', source=source, attribute=attribute,
+            transform=backward,
+        )
+        self.refresh_binding()
+        return self
+
     def bind_text_from(self, source, attribute, backward=None):
         self.binding = SimpleNamespace(
             kind='text', source=source, attribute=attribute,

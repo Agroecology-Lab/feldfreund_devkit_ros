@@ -1,3 +1,7 @@
+# NavigationHarness is built dynamically (see load_navigation_harness below) and its
+# instance attributes are set in make_node() rather than __init__, so pylint's static
+# analysis can't see them and raises spurious no-member/protected-access warnings.
+# pylint: disable=no-member,protected-access,attribute-defined-outside-init,exec-used
 import ast
 import threading
 import unittest
