@@ -450,7 +450,7 @@ class ObstacleManager:
 def attach_nav_card(node, manager: ObstacleManager) -> None:
     """
     Render the “Mark Obstacle” card and keep its status display synchronized with the obstacle manager.
-    
+
     Parameters:
         node: UI node used to store the default radius, GPS data, and status.
         manager (ObstacleManager): Manager used to add and remove obstacles.
@@ -476,7 +476,7 @@ def attach_nav_card(node, manager: ObstacleManager) -> None:
             def _mark_here() -> None:
                 """
                 Mark a circular obstacle at the latest GPS position.
-                
+
                 If no GPS message is available, updates the obstacle status with an error.
                 On success, clears the obstacle name input and displays a temporary dialog
                 with an option to undo the addition.

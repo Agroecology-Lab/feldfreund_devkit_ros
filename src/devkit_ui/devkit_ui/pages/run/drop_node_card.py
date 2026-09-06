@@ -13,7 +13,7 @@ class DropNodeCard(ui.card):
                  on_drop: Callable[[str, int | None, str], None]):
         """
                  Configure the drop-node card with state bindings and a drop action callback.
-                 
+
                  Parameters:
                      state: Drop-node configuration and operation status state.
                      topo_state: Topology state used to display the current node.
@@ -56,10 +56,10 @@ class DropNodeCard(ui.card):
                 def sync_hint(row_id: str) -> str:
                     """
                     Update the row-action hint styling based on whether a row ID is provided.
-                    
+
                     Parameters:
                         row_id (str): The row ID used to determine the hint state.
-                    
+
                     Returns:
                         str: `ROW_ACTION` when a row ID is provided, otherwise `NAV_ACTION`.
                     """
@@ -75,10 +75,10 @@ class DropNodeCard(ui.card):
                 def sync_current_node(current_node: str) -> str:
                     """
                     Update the current-node display and provide its text.
-                    
+
                     Parameters:
                         current_node (str): The current topology node name, or a dash indicating no node.
-                    
+
                     Returns:
                         str: The formatted current-node text.
                     """
@@ -106,10 +106,10 @@ class DropNodeCard(ui.card):
             def sync_status(status: str) -> str:
                 """
                 Update the status label color based on the status and return the status text.
-                
+
                 Parameters:
                     status (str): Operation status text.
-                
+
                 Returns:
                     str: The unchanged status text.
                 """

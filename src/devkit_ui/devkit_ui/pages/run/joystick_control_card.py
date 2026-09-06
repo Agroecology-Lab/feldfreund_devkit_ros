@@ -15,7 +15,7 @@ class JoystickControlCard(ui.card):
                  on_estop: Callable[[], None]):
         """
                  Initialize the joystick control card with its state and control callbacks.
-                 
+
                  Parameters:
                      global_store (GlobalViewModel): Global application state containing the emergency-stop status.
                      state (RunViewModel.Joystick): Joystick state containing the displayed pose.

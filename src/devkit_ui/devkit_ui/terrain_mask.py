@@ -23,7 +23,6 @@ from skimage import measure
 
 # pylint: disable=import-error
 from devkit_f2c_planner.f2c_planner import _f2c_xy_to_latlon
-from skimage import measure
 
 
 def traversability_mask_to_latlon_rings(

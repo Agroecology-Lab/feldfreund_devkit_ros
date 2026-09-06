@@ -7,7 +7,7 @@ class NodeMapCard(ui.card):
     def __init__(self, state: RunViewModel.NodeMap):
         """
         Initialize a card displaying the node map and robot marker overlay.
-        
+
         Parameters:
             state (RunViewModel.NodeMap): View-model state providing the map and robot SVG content.
         """
