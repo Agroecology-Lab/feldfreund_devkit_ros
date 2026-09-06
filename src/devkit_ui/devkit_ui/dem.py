@@ -44,13 +44,12 @@ import logging
 from pathlib import Path
 
 import numpy as np
-
-# pylint: disable=import-error
-from devkit_f2c_planner.f2c_planner import _f2c_latlon_to_xy, _f2c_xy_to_latlon
 from scipy.interpolate import RBFInterpolator
 from shapely.geometry import LineString, Point
 from skimage import measure
 
+# pylint: disable=import-error
+from devkit_f2c_planner.f2c_planner import _f2c_latlon_to_xy, _f2c_xy_to_latlon
 from devkit_ui.terrain_mask import traversability_mask_to_latlon_rings
 
 # Candidate RBFInterpolator `smoothing` values tried by _choose_smoothing().
