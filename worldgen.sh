@@ -53,6 +53,11 @@ CAT=${CAT_ARG:-$(get scale_category)};  [ -n "$CAT" ]   || CAT=all
 MODEL=${MODEL_ARG:-$(get crop_model)};  [ -n "$MODEL" ] || MODEL=plant
 WD=${WD_ARG:-$(get weed_density)};      [ -n "$WD" ]    || WD=10
 
+LOCKFILE="$WORLD.lock"
+mkdir -p "$(dirname "$WORLD")"
+exec 9>"$LOCKFILE"
+flock 9
+
 KEY=$(
     {
         echo "PS=$PS RW=$RW SC=$SC CAT=$CAT MODEL=$MODEL WD=$WD"
@@ -65,11 +70,6 @@ KEY=$(
         md5sum /workspace/topo_to_forest3d.py
     } | md5sum | awk '{print $1}'
 )
-
-LOCKFILE="$WORLD.lock"
-mkdir -p "$(dirname "$WORLD")"
-exec 9>"$LOCKFILE"
-flock 9
 
 if [ -f "$WORLD" ] && [ -f "$KEYFILE" ] && [ "$KEY" = "$(cat "$KEYFILE")" ]; then
     echo "[world] up-to-date — skipping regeneration"

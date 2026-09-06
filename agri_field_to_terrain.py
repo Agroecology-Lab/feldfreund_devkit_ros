@@ -26,6 +26,7 @@ from stl import mesh as stl_mesh
 
 SCALE = 0.01  # 1:100 — km-scale field down to sim metres (all axes)
 GRID = 200.0  # resample spacing in real metres (decimation of surfaces_3D)
+MAX_GRID_CELLS = 4_000_000
 
 
 def read_surface(ply_path):
@@ -172,6 +173,18 @@ def main():
         raise SystemExit(f"ERROR: {ply} not found")
 
     polygon = read_field_polygon(args.dataset, args.field)
+    xmin, ymin, xmax, ymax = polygon.bounds
+    spans = (xmax - xmin, ymax - ymin)
+    if any(span > args.grid * MAX_GRID_CELLS for span in spans):
+        grid_cells = MAX_GRID_CELLS + 1
+    else:
+        n_cols, n_rows = (int(np.ceil(span / args.grid)) for span in spans)
+        grid_cells = n_cols * n_rows
+    if grid_cells > MAX_GRID_CELLS:
+        raise SystemExit(
+            f'ERROR: --grid would create more than {MAX_GRID_CELLS:,} cells '
+            f'for the field bounds; increase the spacing')
+
     surface = read_surface(ply)
     print(f"Field {args.field}: {len(surface):,} surface points, "
           f"elevation {surface[:, 2].min():.0f}..{surface[:, 2].max():.0f} m")
