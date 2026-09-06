@@ -66,32 +66,35 @@ line-length = 120
 indent-width = 4
 target-version = "py311"
 
+[tool.ruff.lint.isort]
+known-first-party = ["devkit_ui", "devkit_driver", "devkit_f2c_planner"]
+
 [tool.ruff.lint]
 select = [
-    "B", # bugbear
-    "E", # pycodestyle
-    "F", # pyflakes
-    "I", # isort
-    "PL", # pylint
+    "B",   # bugbear
+    "E",   # pycodestyle
+    "F",   # pyflakes
+    "I",   # isort
+    "PL",  # pylint
     "RUF", # ruff
-    "UP", # pyupgrade
-    "W", # pycodestyle
+    "UP",  # pyupgrade
+    "W",   # pycodestyle
 ]
 fixable = [
-    "I", # isort
+    "I",      # isort
     "RUF022", # `__all__` is not sorted
 ]
 ignore = [
-    "RUF001", # string contains ambiguous char
-    "RUF002", # docstring contains ambiguous char
-    "RUF003", # comment contains ambiguous char
-    "E501", # line too long
-    "B024", # abstract base class without abstract methods
+    "RUF001",  # string contains ambiguous char
+    "RUF002",  # docstring contains ambiguous char
+    "RUF003",  # comment contains ambiguous char
+    "E501",    # line too long
+    "B024",    # abstract base class without abstract methods
     "PLR0911", # too many return statements
     "PLR0912", # too many branches
     "PLR0913", # too many arguments
     "PLR0915", # too many statements
-	"PLR0917", # too many positional arguments
+    "PLR0917", # too many positional arguments
     "PLR2004", # magic value comparison
     "PLC0415", # import should be at top of file
 ]
