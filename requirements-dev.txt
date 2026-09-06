@@ -1,4 +1,6 @@
 -r requirements.txt
+scikit-image
+shapely
 deepdiff
 pytest
 pytest-asyncio
