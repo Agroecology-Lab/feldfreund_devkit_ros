@@ -20,7 +20,6 @@ from collections.abc import Callable
 from datetime import UTC, datetime
 from importlib import resources
 from itertools import pairwise
-from operator import attrgetter
 from pathlib import Path
 
 import numpy as np
@@ -101,13 +100,16 @@ from devkit_ui.obstacles import (
     attach_mission_sidebar_controls,
     attach_nav_card,
 )
+from devkit_ui.pages.run.drop_node_card import DropNodeCard
 from devkit_ui.pages.run.joystick_control_card import JoystickControlCard
+from devkit_ui.pages.run.navigation_sidebar import NavigationSidebar
 from devkit_ui.pages.run.node_map_card import NodeMapCard
+from devkit_ui.pages.run.row_discovery_card import RowDiscoveryCard
 from devkit_ui.pages.run.track_card import TrackCard
 from devkit_ui.parse import dump_topo_yaml, parse_topo_json, parse_topo_yaml
-from devkit_ui.stores.global_store import GlobalStore
-from devkit_ui.stores.run_store import RunStore
 from devkit_ui.utils.topo_renderer import build_robot_svg, build_svg, inject_click_js
+from devkit_ui.view_models.global_view_model import GlobalViewModel
+from devkit_ui.view_models.run_view_model import RunViewModel
 
 _TOPO_SRV_OK = False
 try:
@@ -353,8 +355,15 @@ def _plan_contour_rows(corners_ll: list, obstacle_rings: list, tool_width: float
 class NiceGuiNode(Node):
 
     def __init__(self) -> None:
-        """Set up ROS subscriptions/publishers, GUI state, and the terrain/F2C planning wiring."""
+        """
+        Initialize the ROS node, GUI view models, navigation interfaces, sensor state, and mission-planning components.
+        
+        In simulation, configure the dedicated fallback GPS source used when no recent real GPS fix is available. Register the NiceGUI root page and initialize topology, obstacle, mission, safety, and navigation state.
+        """
         super().__init__(NODE_NAME)
+
+        self._global_vm = GlobalViewModel()
+        self._run_vm = RunViewModel()
 
         # Dedicated wall clock for the real/fake-GPS freshness bookkeeping
         # below (store_gps, store_fake_gps, _publish_fake_gps,
@@ -512,8 +521,12 @@ class NiceGuiNode(Node):
         self.create_subscription(Odometry, '/odometry/global',
                                  self._odom_fallback, _ODOM_QOS)
 
-        self.create_subscription(String, '/current_node',
-                                 lambda m: setattr(self, 'topo_current', m.data), _SENSOR_QOS)
+        self.create_subscription(
+            String,
+            '/current_node',
+            lambda m: setattr(self._run_vm.topo, 'current_node', m.data),
+            _SENSOR_QOS,
+        )
 
         self._topo_doc:  TopoDoc | None = _demo_doc()
         self._topo_demo: bool           = False
@@ -540,9 +553,7 @@ class NiceGuiNode(Node):
         self._row_discovery_stop_cli = self.create_client(
             Trigger, '/row_discovery_node/stop_discovery')
         self.create_subscription(String, '/row_discovery/status',
-            lambda m: setattr(self, 'discovery_status', m.data), _SENSOR_QOS)
-        self.discovery_active: bool = False
-        self.discovery_status: str  = 'idle'
+            lambda m: setattr(self._run_vm.discovery, 'status', m.data), _SENSOR_QOS)
 
         self.latest_odom:    Odometry | None     = None
         self.latest_gps:     NavSatFix | None    = None
@@ -556,12 +567,8 @@ class NiceGuiNode(Node):
         self.linear_velocity            = 0.0
         self.angular_velocity           = 0.0
 
-        self.topo_selected:   str    | None = None
-        self.topo_current:    str           = '—'
-        self.topo_nav_status: str           = 'Idle'
-        self.topo_navigating: bool          = False
         self._nav_goal_handle               = None
-        self.drop_status:     str           = ''
+        self._nav_cancel_requested          = False
 
         self._track_timer:   object  | None   = None
         self._track_counter: int              = 0
@@ -574,7 +581,6 @@ class NiceGuiNode(Node):
         self._f2c_contour_used: bool = False
         self._f2c_origin_ll = None
         self.f2c_save_status: str   = ''
-        self.delete_status:   str   = ''
 
         # OBSTACLE: manager owns obstacles.yaml + /obstacles publisher.
         # Attach after latest_odom / latest_gps fields exist so the
@@ -599,13 +605,14 @@ class NiceGuiNode(Node):
 
         self._pose_fail_log_t = 0.0
 
-        self._global_store = GlobalStore()
-        self._run_store = RunStore()
-        self._run_store.node_map.map_svg = build_svg(self._topo_doc, None, None)
-        self._run_store.node_map.robot_svg = build_robot_svg(self._topo_doc.nodes, None)
+        self._run_vm.node_map.map_svg = build_svg(self._topo_doc, None, None)
+        self._run_vm.node_map.robot_svg = build_robot_svg(self._topo_doc.nodes, None)
 
         @ui.page('/')
         def page():
+            """
+            Builds the NiceGUI application content.
+            """
             self.content()
 
     # ── odom fallback ─────────────────────────────────────────────────────────
@@ -678,80 +685,124 @@ class NiceGuiNode(Node):
     # ── nav actions ───────────────────────────────────────────────────────────
 
     def send_nav_goal(self, target: str) -> None:
+        """Send a navigation goal to the specified topology node.
+        
+        Parameters:
+        	target (str): Name of the topology node to navigate to.
+        """
         if not _ACTION_OK:
-            self.topo_nav_status = 'action unavailable (import failed)'
+            self._run_vm.topo.nav_status = 'action unavailable (import failed)'
             return
-        self.topo_nav_status = f'connecting → {target}…'
-        self.topo_navigating = True
+        if self._run_vm.topo.navigating or self._global_vm.soft_estop_active:
+            self.get_logger().warn(
+                'send_nav_goal: rejected — navigation already in progress '
+                'or soft-estop active')
+            return
+        self._nav_cancel_requested = False
+        self._run_vm.topo.nav_status = f'connecting → {target}…'
+        self._run_vm.topo.navigating = True
         def _send():
+            """Send a navigation goal to the action server and update navigation status."""
             ready = self._nav_ac.wait_for_server(timeout_sec=5.0)
             if not ready:
-                self.topo_nav_status = 'action server not ready (5s timeout)'
-                self.topo_navigating = False
+                self._run_vm.topo.nav_status = 'action server not ready (5s timeout)'
+                self._run_vm.topo.navigating = False
                 return
             goal = GotoNode.Goal()
             goal.target = target
-            self.topo_nav_status = f'→ {target}'
+            self._run_vm.topo.nav_status = f'→ {target}'
             future = self._nav_ac.send_goal_async(goal, feedback_callback=self._nav_feedback)
             future.add_done_callback(self._nav_accepted)
         threading.Thread(target=_send, daemon=True).start()
 
     def _nav_accepted(self, future) -> None:
+        """Handle acceptance of a navigation goal and register its result callback.
+
+        If cancellation was requested while the goal was still pending acceptance,
+        cancel this handle immediately instead of letting it run unchecked.
+        """
         gh = future.result()
         if not gh.accepted:
-            self.topo_nav_status = 'goal rejected'
-            self.topo_navigating = False
+            self._run_vm.topo.nav_status = 'goal rejected'
+            self._run_vm.topo.navigating = False
+            self._nav_cancel_requested = False
             return
         self._nav_goal_handle = gh
+        if self._nav_cancel_requested:
+            self._nav_cancel_requested = False
+            self._run_vm.topo.nav_status = 'cancelling…'
+            gh.cancel_goal_async()
         gh.get_result_async().add_done_callback(self._nav_result)
 
     def _nav_feedback(self, feedback_msg) -> None:
+        """Update the navigation status with the current feedback location."""
         fb  = feedback_msg.feedback
         loc = getattr(fb, 'current_node', None) or getattr(fb, 'status', '…')
-        self.topo_nav_status = f'en route · {loc}'
+        self._run_vm.topo.nav_status = f'en route · {loc}'
 
     def _nav_result(self, future) -> None:
+        """Update navigation state after a navigation goal completes."""
         success = getattr(future.result().result, 'success', True)
-        self.topo_nav_status = 'arrived' if success else 'failed'
-        self.topo_navigating = False
+        self._run_vm.topo.nav_status = 'arrived' if success else 'failed'
+        self._run_vm.topo.navigating = False
         self._nav_goal_handle = None
 
     def cancel_nav_goal(self) -> None:
+        """Cancel the active navigation goal.
+
+        If the goal has already been accepted, cancel it now. If a send is still
+        in flight (accepted status not yet known), flag it so `_nav_accepted`
+        cancels it the moment it arrives, and keep `navigating` set so a second
+        goal cannot be accepted in the meantime.
+        """
         if self._nav_goal_handle:
             self._nav_goal_handle.cancel_goal_async()
             self._nav_goal_handle = None
-        self.topo_nav_status = 'cancelled'
-        self.topo_navigating = False
+            self._run_vm.topo.nav_status = 'cancelled'
+            self._run_vm.topo.navigating = False
+        elif self._run_vm.topo.navigating:
+            self._nav_cancel_requested = True
+            self._run_vm.topo.nav_status = 'cancelling…'
 
     # ── node dropping ─────────────────────────────────────────────────────────
 
     def drop_topo_node(self, name: str, row_id: int | None,
                        row_role: str = 'entry') -> None:
+        """
+                       Add a topology node at the current robot position and persist it to the active map.
+                       
+                       Parameters:
+                       	name (str): Name for the new node.
+                       	row_id (int | None): Row identifier to associate with the node, or None for a navigation node.
+                       	row_role (str): Role of the node within its row, such as "entry" or "exit".
+                       """
         name = re.sub(r'[^A-Z0-9_]', '', name.strip().upper().replace(' ', '_'))
         if not name:
-            self.drop_status = 'ERROR: node name required'
+            self._run_vm.drop_node.status = 'ERROR: node name required'
             return
         if not _NAME_RE.match(name):
-            self.drop_status = f'ERROR: invalid name "{name}"'
-            return
-        if self._topo_doc.has_node(name):
-            self.drop_status = f'ERROR: {name} already exists'
-            return
-        if self.latest_odom is None and not self._is_sim:
-            self.drop_status = 'ERROR: no odometry'
+            self._run_vm.drop_node.status = f'ERROR: invalid name "{name}"'
             return
         if not self._topo_doc:
-            self.drop_status = 'ERROR: map not loaded'
+            self._run_vm.drop_node.status = 'ERROR: map not loaded'
+            return
+        if self._topo_doc.has_node(name):
+            self._run_vm.drop_node.status = f'ERROR: {name} already exists'
+            return
+        if self.latest_odom is None and not self._is_sim:
+            self._run_vm.drop_node.status = 'ERROR: no odometry'
             return
 
         x = round(self.latest_odom.pose.pose.position.x, 3) if self.latest_odom else 0.0
         y = round(self.latest_odom.pose.pose.position.y, 3) if self.latest_odom else 0.0
-        connect_to = (self.topo_current
-                      if self.topo_current not in ('—', 'none', 'None', '', None) else None)
+        current_node = self._run_vm.topo.current_node
+        connect_to = (current_node
+                      if current_node not in ('—', 'none', 'None', '', None) else None)
         if connect_to and not self._topo_doc.has_node(connect_to):
             connect_to = None
-        if not connect_to and self.topo_selected and self._topo_doc.has_node(self.topo_selected):
-            connect_to = self.topo_selected
+        selected_node = self._run_vm.topo.selected_node
+        if not connect_to and selected_node and self._topo_doc.has_node(selected_node):
+            connect_to = selected_node
         map_name  = self._topo_doc.name
         nav_frame = self._topo_doc.transformation.get('topo_frame_id', 'map')
         is_row    = row_id is not None
@@ -808,9 +859,15 @@ class NiceGuiNode(Node):
         gps_str  = (f' [{gps_meta["gps_lat"]:.5f},{gps_meta["gps_lon"]:.5f}]'
                     if gps_meta else '')
         row_str  = f' row={row_id}/{row_role}' if is_row else ''
-        self.drop_status = f'{name}{conn_str} at ({x}, {y}){row_str}{gps_str} — writing…'
+        self._run_vm.drop_node.status = f'{name}{conn_str} at ({x}, {y}){row_str}{gps_str} — writing…'
 
         def _publish_and_persist():
+            """Persist the updated topology map and make it available to the navigation system.
+            
+            Writes the map to YAML, updates the in-memory topology document, and switches or
+            publishes the map. Reports duplicate nodes, failures, and operation status through
+            the node's view model and logger.
+            """
             try:
                 map_file      = f'/workspace/maps/{map_name}'
                 installed_src = ('/workspace/install/topological_navigation/share/'
@@ -834,8 +891,10 @@ class NiceGuiNode(Node):
 
                 self._topo_doc = file_doc
 
-                self.drop_status = (f'{name}{conn_str} at ({x}, {y})'
-                                    f'{row_str}{gps_str} — reloading…')
+                self._run_vm.drop_node.status = (
+                    f'{name}{conn_str} at ({x}, {y})'
+                    f'{row_str}{gps_str} — reloading…'
+                )
 
                 def _call(client, req, timeout=5.0):
                     ev = threading.Event()
@@ -853,21 +912,25 @@ class NiceGuiNode(Node):
                     sw.no_alias = True
                     sr = _call(self._switch_map_cli, sw)
                     if sr and sr.success:
-                        self.drop_status = (f'{name}{conn_str} at ({x},{y})'
-                                            f'{row_str}{gps_str} — live')
+                        self._run_vm.drop_node.status = (
+                            f'{name}{conn_str} at ({x},{y})'
+                            f'{row_str}{gps_str} — live'
+                        )
                     else:
                         self._topo_map_pub.publish(_topo_to_msg(self._topo_doc))
                         err = sr.message if sr else 'timeout'
-                        self.drop_status = f'{name}{conn_str} saved (switch failed: {err})'
+                        self._run_vm.drop_node.status = f'{name}{conn_str} saved (switch failed: {err})'
                         self.get_logger().warn(f'switch_topological_map failed ({err})')
                 else:
                     self._topo_map_pub.publish(_topo_to_msg(self._topo_doc))
-                    self.drop_status = (f'{name}{conn_str} at ({x},{y})'
-                                        f'{row_str}{gps_str} — live (no srv)')
+                    self._run_vm.drop_node.status = (
+                        f'{name}{conn_str} at ({x},{y})'
+                        f'{row_str}{gps_str} — live (no srv)'
+                    )
                 self.get_logger().info(
                     f'Node dropped: {name} at ({x:.3f},{y:.3f}){conn_str}{row_str}{gps_str}')
             except Exception as e:
-                self.drop_status = f'ERROR: {e}'
+                self._run_vm.drop_node.status = f'ERROR: {e}'
                 self.get_logger().error(f'drop_topo_node failed: {e} ({type(e)}\n{traceback.format_exc()})')
 
         threading.Thread(target=_publish_and_persist, daemon=True).start()
@@ -877,14 +940,23 @@ class NiceGuiNode(Node):
 
     def start_track(self, prefix: str, interval: float,
                     row_id: int | None, row_role: str | None) -> None:
+        """
+                    Start periodic recording of topology nodes using the specified naming prefix.
+                    
+                    Parameters:
+                        prefix (str): Prefix used for numbered node names after normalization.
+                        interval (float): Time in seconds between recorded nodes.
+                        row_id (int | None): Optional row identifier associated with each node.
+                        row_role (str | None): Role assigned to recorded nodes when no row identifier is provided.
+                    """
         prefix = re.sub(r'[^A-Z0-9_]', '', prefix.strip().upper().replace(' ', '_'))
         if not prefix:
-            self._run_store.track.running = False
-            self._run_store.track.status = 'ERROR: prefix required'
+            self._run_vm.track.running = False
+            self._run_vm.track.status = 'ERROR: prefix required'
             return
         if self._track_timer is not None:
-            self._run_store.track.running = True
-            self._run_store.track.status = 'ERROR: already running'
+            self._run_vm.track.running = True
+            self._run_vm.track.status = 'ERROR: already running'
             return
         existing = [n.name for n in self._topo_doc.nodes
                     if n.name.startswith(prefix + '_') and n.name[len(prefix)+1:].isdigit()]
@@ -892,16 +964,17 @@ class NiceGuiNode(Node):
                                if existing else 0)
         self._track_first  = True
 
-        self._run_store.track.prefix = prefix
-        self._run_store.track.interval = interval
-        self._run_store.track.row_id = row_id
-        self._run_store.track.row_role = row_role or 'entry'
-        self._run_store.track.running = True
-        self._run_store.track.status = ''
+        self._run_vm.track.prefix = prefix
+        self._run_vm.track.interval = interval
+        self._run_vm.track.row_id = row_id
+        self._run_vm.track.row_role = row_role or 'entry'
+        self._run_vm.track.running = True
+        self._run_vm.track.status = ''
 
         is_row = row_id is not None
 
         def _drop() -> None:
+            """Record the next topology node in the active tracking sequence and update tracking status."""
             self._track_counter += 1
             node_name = f'{prefix}_{self._track_counter}'
             if is_row:
@@ -910,85 +983,104 @@ class NiceGuiNode(Node):
             else:
                 role = row_role
             self.drop_topo_node(node_name, row_id, role)
-            self._run_store.track.status = f'recording  {node_name}  (#{self._track_counter})'
+            self._run_vm.track.status = f'recording  {node_name}  (#{self._track_counter})'
 
         _drop()
         self._track_timer = self.create_timer(interval, _drop)
 
     def stop_track(self) -> None:
+        """Stop tracking and mark the last tracked node as the row exit when applicable."""
         if self._track_timer is not None:
             self._track_timer.cancel()
             self._track_timer = None
-        is_row = self._run_store.track.row_id is not None
+        is_row = self._run_vm.track.row_id is not None
         if is_row and self._track_counter > 0:
-            last_name = f'{self._run_store.track.prefix}_{self._track_counter}'
+            last_name = f'{self._run_vm.track.prefix}_{self._track_counter}'
             self._patch_node_role(last_name, 'exit')
-            self._run_store.track.status = (f'stopped — {last_name} marked exit'
+            self._run_vm.track.status = (f'stopped — {last_name} marked exit'
                                       f'  (#{self._track_counter} nodes)')
         else:
-            self._run_store.track.status = f'stopped at #{self._track_counter}'
-        self._run_store.track.running = False
+            self._run_vm.track.status = f'stopped at #{self._track_counter}'
+        self._run_vm.track.running = False
         self._track_counter = 0
         self._track_first = True
-        self._run_store.track.prefix = ''
-        self._run_store.track.row_id = None
-        self._run_store.track.row_role = 'entry'
+        self._run_vm.track.prefix = ''
+        self._run_vm.track.row_id = None
+        self._run_vm.track.row_role = 'entry'
 
     # ── shared topo-map persistence helper ────────────────────────────────────
 
     # ── Row discovery ────────────────────────────────────────────────────────
 
     def start_discovery(self) -> None:
-        """Call row_discovery_node's start_discovery Trigger service.
-
-        NOTE: this only gates the UI confirmation flow (see _nav_content) --
-        it is not itself a safety interlock. There is no person-detection
-        system wired into this codebase to check against yet; the operator
-        confirmation dialog is the only guard that exists right now.
+        """Initiate row discovery through the configured ROS 2 Trigger service.
+        
+        Updates the discovery status as the request starts, completes, or fails.
         """
-        self.discovery_status = 'starting…'
+        self._run_vm.discovery.status = 'starting…'
         def _work():
+            """
+            Start row discovery and update its status based on service availability and response.
+            """
             if not self._row_discovery_start_cli.wait_for_service(timeout_sec=2.0):
-                self.discovery_active = False
-                self.discovery_status = 'ERROR: row_discovery_node not running'
+                self._run_vm.discovery.active = False
+                self._run_vm.discovery.status = 'ERROR: row_discovery_node not running'
                 return
             def _cb(f):
                 try:
                     res = f.result()
-                    self.discovery_active = res.success
-                    self.discovery_status = res.message or (
+                    self._run_vm.discovery.active = res.success
+                    self._run_vm.discovery.status = res.message or (
                         'running' if res.success else 'failed to start')
                 except Exception as e:
-                    self.discovery_active = False
-                    self.discovery_status = f'ERROR: {e}'
+                    self._run_vm.discovery.active = False
+                    self._run_vm.discovery.status = f'ERROR: {e}'
             self._row_discovery_start_cli.call_async(
                 Trigger.Request()).add_done_callback(_cb)
         threading.Thread(target=_work, daemon=True).start()
 
     def stop_discovery(self) -> None:
+        """Stop row discovery and update its status when the request completes."""
         def _work():
             def _cb(f):
                 try:
                     res = f.result()
-                    self.discovery_status = res.message or 'stopped'
+                    if res.success:
+                        self._run_vm.discovery.active = False
+                        self._run_vm.discovery.status = res.message or 'stopped'
+                    else:
+                        self._run_vm.discovery.status = res.message or (
+                            'ERROR: stop failed — discovery state unknown')
                 except Exception as e:
-                    self.discovery_status = f'ERROR: {e}'
-                finally:
-                    self.discovery_active = False
+                    self._run_vm.discovery.status = f'ERROR: {e} — discovery state unknown'
             self._row_discovery_stop_cli.call_async(
                 Trigger.Request()).add_done_callback(_cb)
         threading.Thread(target=_work, daemon=True).start()
 
-    def _persist_and_reload(self, modify_fn: Callable[[TopoDoc], None], status_attr: str,
-                             success_msg: str) -> None:
-        """Run modify_fn against the on-disk topo map in a thread, then reload and report status."""
+    def _persist_and_reload(self, modify_fn: Callable[[TopoDoc], None], status_owner: object,
+                             status_attr: str, success_msg: str) -> None:
+        """
+                             Apply a topology modification, persist the updated map, and make it live.
+                             
+                             Parameters:
+                                 modify_fn (Callable[[TopoDoc], None]): Function that mutates the topology document.
+                                 status_owner (object): Object whose status attribute receives progress or error messages.
+                                 status_attr (str): Name of the status attribute to update.
+                                 success_msg (str): Message reported after the map is persisted successfully.
+                             """
         map_name = self._topo_doc.name
         map_file = f'/workspace/maps/{map_name}'
         installed_src = ('/workspace/install/topological_navigation/share/'
                          'topological_navigation/config/mixed_actions_map.yaml')
 
         def _work():
-            """Load the on-disk map, apply modify_fn, save it, and reload it into the UI."""
+            """
+            Apply a topology modification, persist the updated map, and reload it for live use.
+            
+            The map is loaded from the configured file or installed source, with the current
+            topology used as a fallback. Persistence and reload failures are recorded in the
+            provided status owner.
+            """
             try:
                 if os.path.exists(map_file):
                     file_doc = parse_topo_yaml(map_file)
@@ -1025,18 +1117,18 @@ class NiceGuiNode(Node):
                     sw.no_alias = True
                     sr = _call(self._switch_map_cli, sw)
                     if sr and sr.success:
-                        setattr(self, status_attr, f'{success_msg} — live')
+                        setattr(status_owner, status_attr, f'{success_msg} — live')
                     else:
                         self._topo_map_pub.publish(_topo_to_msg(self._topo_doc))
                         err = sr.message if sr else 'timeout'
-                        setattr(self, status_attr,
+                        setattr(status_owner, status_attr,
                                 f'{success_msg} (switch failed: {err})')
                 else:
                     self._topo_map_pub.publish(_topo_to_msg(self._topo_doc))
-                    setattr(self, status_attr, f'{success_msg} — live (no srv)')
+                    setattr(status_owner, status_attr, f'{success_msg} — live (no srv)')
                 self.get_logger().info(f'_persist_and_reload: {success_msg}')
             except Exception as e:
-                setattr(self, status_attr, f'ERROR: {e}')
+                setattr(status_owner, status_attr, f'ERROR: {e}')
                 self.get_logger().error(f'_persist_and_reload failed: {e} ({type(e)}\n{traceback.format_exc()})')
 
         threading.Thread(target=_work, daemon=True).start()
@@ -1045,7 +1137,14 @@ class NiceGuiNode(Node):
 
     def save_f2c_rows_to_topo(self, prefix: str, row_id_start: int,
                               overwrite: bool = False) -> None:
-        """Write the last-planned F2C swaths into the loaded topo map as named rows."""
+        """
+                              Save the most recently planned F2C swaths as rows in the loaded topology map.
+                              
+                              Parameters:
+                                  prefix (str): Prefix used to name the generated row nodes.
+                                  row_id_start (int): Identifier assigned to the first planned row.
+                                  overwrite (bool): Whether to replace existing nodes with the specified prefix.
+                              """
         prefix = re.sub(r'[^A-Z0-9_]', '',
                         (prefix or '').strip().upper().replace(' ', '_'))
         if not prefix:
@@ -1110,13 +1209,15 @@ class NiceGuiNode(Node):
         nav_frame = self._topo_doc.transformation.get('topo_frame_id', 'map')
         timestamp = datetime.now(UTC).strftime('%d-%m-%Y_%H-%M-%S')
 
-        connect_to = (self.topo_current
-                      if self.topo_current not in ('—', 'none', 'None', '', None)
+        current_node = self._run_vm.topo.current_node
+        connect_to = (current_node
+                      if current_node not in ('—', 'none', 'None', '', None)
                       else None)
         if connect_to and not self._topo_doc.has_node(connect_to):
             connect_to = None
-        if not connect_to and self.topo_selected and self._topo_doc.has_node(self.topo_selected):
-            connect_to = self.topo_selected
+        selected_node = self._run_vm.topo.selected_node
+        if not connect_to and selected_node and self._topo_doc.has_node(selected_node):
+            connect_to = selected_node
 
         new_topo_nodes: dict[NodeID, TopoNode] = {}
 
@@ -1278,7 +1379,12 @@ class NiceGuiNode(Node):
             f'writing {len(added)} rows · {prefix}{splice_str}{skip_str}…')
 
         def _modify(file_doc):
-            """Insert (or overwrite) the planned row nodes/edges into file_doc."""
+            """Update the topology document with the planned row nodes and edges.
+            
+            When overwrite is enabled, existing nodes for the configured row prefix are
+            removed before the planned nodes are inserted. Existing nodes with matching
+            names are preserved.
+            """
             if overwrite:
                 old_names = {
                     e.name
@@ -1304,14 +1410,19 @@ class NiceGuiNode(Node):
                 file_doc.insert_node(entry)
 
         self._persist_and_reload(
-            _modify, 'f2c_save_status',
+            _modify, self, 'f2c_save_status',
             f'saved {len(added)} rows · {prefix}{splice_str}{skip_str}',
         )
 
     # ── Repair row connectivity ──────────────────────────────────────────────
 
     def repair_row_connectivity(self, connect_to: str | None = None) -> None:
-        """Rebuild missing entry/waypoint/exit edges for existing rows in the loaded map."""
+        """
+        Rebuild missing in-row and headland connections for existing rows in the loaded topology map.
+        
+        Parameters:
+        	connect_to (str | None): Optional node name to connect bidirectionally to the first row entry and last row exit.
+        """
         if not self._topo_doc:
             self.f2c_save_status = 'ERROR: map not loaded'
             return
@@ -1420,48 +1531,77 @@ class NiceGuiNode(Node):
         target_str = (f' @ {connect_to}' if connect_to
                       else ' — NO SPLICE, chain still isolated')
         self._persist_and_reload(
-            _modify, 'f2c_save_status',
+            _modify, self, 'f2c_save_status',
             f'repair: wired {added_count} edges{target_str}',
         )
 
     # ── Delete topo nodes / rows ─────────────────────────────────────────────
 
     def delete_topo_node(self, name: str) -> None:
+        """Delete a topology node and persist the updated map.
+        
+        Parameters:
+        	name (str): Name of the topology node to delete.
+        """
         if not self._topo_doc:
-            self.delete_status = 'ERROR: map not loaded'
+            self._run_vm.topo.delete_status = 'ERROR: map not loaded'
             return
         if not name or not self._topo_doc.has_node(name):
-            self.delete_status = f'ERROR: {name!r} not in map'
+            self._run_vm.topo.delete_status = f'ERROR: {name!r} not in map'
             return
 
-        if self.topo_selected == name:
-            self.topo_selected = None
-        self.delete_status = f'deleting {name}…'
+        if self._run_vm.topo.selected_node == name:
+            self._run_vm.topo.selected_node = None
+        self._run_vm.topo.delete_status = f'deleting {name}…'
 
         def _modify(file_doc):
+            """
+            Remove the node identified by ``name`` from the topology document.
+            
+            Parameters:
+            	file_doc: Topology document to modify.
+            """
             file_doc.remove_node(name)
 
-        self._persist_and_reload(_modify, 'delete_status', f'deleted {name}')
+        self._persist_and_reload(
+            _modify, self._run_vm.topo, 'delete_status', f'deleted {name}'
+        )
 
     def delete_row(self, row_id: int) -> None:
+        """
+        Delete all topology nodes belonging to a row and persist the updated map.
+        
+        Parameters:
+        	row_id (int): Identifier of the row whose nodes should be deleted.
+        """
         targets = {node.name for node in self._topo_doc.nodes
                    if node.meta.get('row_id') == row_id}
         if not targets:
-            self.delete_status = f'ERROR: no nodes for row {row_id}'
+            self._run_vm.topo.delete_status = f'ERROR: no nodes for row {row_id}'
             return
         if not self._topo_doc:
-            self.delete_status = 'ERROR: map not loaded'
+            self._run_vm.topo.delete_status = 'ERROR: map not loaded'
             return
 
-        if self.topo_selected in targets:
-            self.topo_selected = None
-        self.delete_status = f'deleting row {row_id} ({len(targets)} nodes)…'
+        if self._run_vm.topo.selected_node in targets:
+            self._run_vm.topo.selected_node = None
+        self._run_vm.topo.delete_status = f'deleting row {row_id} ({len(targets)} nodes)…'
 
         def _modify(file_doc):
+            """
+            Remove the selected nodes from a topology document.
+            
+            Parameters:
+            	file_doc: The topology document to modify.
+            """
             file_doc.remove_nodes(targets)
 
-        self._persist_and_reload(_modify, 'delete_status',
-                                  f'deleted row {row_id} ({len(targets)} nodes)')
+        self._persist_and_reload(
+            _modify,
+            self._run_vm.topo,
+            'delete_status',
+            f'deleted row {row_id} ({len(targets)} nodes)',
+        )
 
     # ── Confirmation dialogs ─────────────────────────────────────────────────
 
@@ -1542,6 +1682,7 @@ class NiceGuiNode(Node):
 
     def _nav_content(self) -> None:
 
+        """Builds the navigation interface and keeps its displayed state synchronized with the robot and topology."""
         with ui.row().classes('w-full gap-3 items-stretch'):
 
             with ui.column().classes('flex-1 gap-3').style('min-width:0'):
@@ -1549,176 +1690,85 @@ class NiceGuiNode(Node):
                 with ui.row().classes('w-full gap-3 items-stretch'):
 
                     JoystickControlCard(
-                        global_store=self._global_store,
-                        state=self._run_store.joystick,
+                        global_store=self._global_vm,
+                        state=self._run_vm.joystick,
                         on_move=self.send_speed,
                         on_stop=lambda: self.send_speed(0.0, 0.0),
                         on_estop=self.toggle_estop
                     )
 
                     NodeMapCard(
-                        state=self._run_store.node_map,
+                        state=self._run_vm.node_map,
                     )
 
                 with ui.row().classes('w-full gap-3 items-start'):
 
                     TrackCard(
-                        state=self._run_store.track,
+                        state=self._run_vm.track,
                         on_start=self.start_track,
                         on_stop=self.stop_track
                     )
 
-                    with ui.card().classes('flex-1').style('padding:12px 14px'):
-                        with ui.row().classes('items-baseline gap-2 mb-2'):
-                            ui.label('Drop Node').classes('font-semibold')
-                            ui.label('pins at current pose').classes('text-xs').style(
-                                'color:#8c959f')
-                        with ui.row().classes('items-center gap-2 w-full'):
-                            name_input = ui.input(
-                                placeholder='e.g. ROW_D_IN', label='Name',
-                            ).classes('flex-1')
-                        with ui.row().classes('items-center gap-2 w-full mt-1'):
-                            row_id_input = ui.number(
-                                label='Row ID', placeholder='blank=standard',
-                                min=1, step=1, precision=0,
-                            ).classes('w-28')
-                            row_role_toggle = ui.toggle(
-                                {'entry': 'Entry', 'exit': 'Exit'}, value='entry',
-                            ).props('dense')
-                            row_hint = ui.label('').classes('text-xs font-mono').style(
-                                'color:#8c959f')
-                        with ui.row().classes('items-center gap-2 mt-2'):
-                            cur_drop_lbl = ui.label('').classes('text-xs font-mono').style(
-                                'color:#8c959f')
-                            ui.button(
-                                'Drop',
-                                on_click=lambda: self.drop_topo_node(
-                                    name_input.value,
-                                    int(row_id_input.value) if row_id_input.value else None,
-                                    row_role_toggle.value,
-                                ),
-                            ).classes('ml-auto').props('color=positive no-caps dense')
-                        drop_status_lbl = ui.label('').classes('text-xs font-mono mt-1')
+                    DropNodeCard(
+                        state=self._run_vm.drop_node,
+                        topo_state=self._run_vm.topo,
+                        on_drop=self.drop_topo_node,
+                    )
 
-                    with ui.card().classes('flex-1').style('padding:12px 14px'):
-                        ui.label('Row Discovery').classes('font-semibold mb-2')
-                        ui.html(
-                            '<div style="font-size:12px;color:#9a6700;'
-                            'background:#fff8dc;border:1px solid #d4a72c;'
-                            'border-radius:4px;padding:6px 8px;margin-bottom:8px;">'
-                            '⚠ Discovery mode drives the robot autonomously '
-                            'through the field with no operator override. '
-                            'Only enable this with the person-detection '
-                            'safety system active and confirmed running.</div>'
-                        )
-                        with ui.row().classes('items-center gap-2'):
-                            discovery_checkbox = ui.checkbox('Discovery mode').bind_value(
-                                self, 'discovery_active')
-                            ui.label().classes('text-xs font-mono ml-2').bind_text_from(
-                                self, 'discovery_status')
-
-                        async def _on_discovery_change(e, _cb=discovery_checkbox) -> None:
-                            if e.args:  # ticked on
-                                with ui.dialog() as d, ui.card():
-                                    ui.label(
-                                        'Confirm person-detection safety system'
-                                    ).classes('font-semibold')
-                                    ui.label(
-                                        'Discovery mode will drive the robot with '
-                                        'no operator override. Confirm the '
-                                        'person-detection safety system is running '
-                                        'and active before continuing.'
-                                    ).classes('text-sm').style('max-width:320px')
-                                    with ui.row().classes('justify-end gap-2 mt-2'):
-                                        ui.button('Cancel',
-                                            on_click=lambda: d.submit('cancel')).props(
-                                            'flat no-caps')
-                                        ui.button('Confirmed — Start', color='positive',
-                                            on_click=lambda: d.submit('go')).props(
-                                            'no-caps')
-                                result = await d
-                                if result != 'go':
-                                    _cb.value = False
-                                    return
-                                self.start_discovery()
-                            else:
-                                self.stop_discovery()
-
-                        discovery_checkbox.on('update:model-value', _on_discovery_change)
+                    RowDiscoveryCard(
+                        state=self._run_vm.discovery,
+                        on_start=self.start_discovery,
+                        on_stop=self.stop_discovery,
+                    )
 
                     # OBSTACLE: Mark Obstacle card next to Drop Node
                     attach_nav_card(self, self._obstacle_mgr)
 
-            with ui.card().classes('nav-sidebar').style('padding:14px'):
-                ui.html('<div class="sec-label">Current node</div>')
-                cur_lbl = ui.label('—').classes('text-sm font-mono font-bold')
-
-                ui.html('<div class="sec-label mt-3">Destination</div>')
-                sel_lbl = ui.label('—').classes('text-sm font-mono').style('color:#8c959f')
-
-                ui.html('<div class="sec-label mt-3">Status</div>')
-                stat_lbl = ui.label('idle').classes('text-xs font-mono').style('color:#57606a')
-
-                ui.separator().classes('my-2')
-
-                go_btn   = ui.button('Go',     color='positive').classes('w-full').props('no-caps')
-                stop_btn = ui.button('Cancel', color='negative').classes('w-full').props(
-                    'no-caps flat')
-                del_btn  = ui.button('Delete Node', color='negative').classes('w-full').props(
-                    'no-caps outline')
-
-                ui.html('<div class="sec-label mt-3">Status</div>')
-                del_status_lbl = ui.label('').classes('text-xs font-mono').style(
-                    'color:#57606a;word-break:break-all')
-
-                ui.html('<div class="sec-label mt-3">Nodes</div>')
-                with ui.scroll_area().style('flex:1;min-height:0'):
-                    node_col = ui.column().style('gap:1px;width:100%')
-
-        go_btn.on_click(
-            lambda: self.send_nav_goal(self.topo_selected) if self.topo_selected else None)
-        stop_btn.on_click(self.cancel_nav_goal)
-        del_btn.on_click(lambda: self.confirm_delete_node(self.topo_selected))
+            navigation_sidebar = NavigationSidebar(
+                global_store=self._global_vm,
+                topo_state=self._run_vm.topo,
+                on_go=lambda: self.send_nav_goal(self._run_vm.topo.selected_node) if self._run_vm.topo.selected_node else None,
+                on_cancel=self.cancel_nav_goal,
+                on_delete=lambda: self.confirm_delete_node(self._run_vm.topo.selected_node),
+                on_select=lambda name: setattr(self._run_vm.topo, 'selected_node', name),
+            )
 
         def on_node_clicked(e) -> None:
+            """Selects the clicked topology node when it exists in the current map."""
             n = (e.args or {}).get('node')
             if n and self._topo_doc.has_node(n):
-                self.topo_selected = n
+                self._run_vm.topo.selected_node = n
         ui.on('topo_node_clicked', on_node_clicked)
 
         _prev: dict = {}
 
         def refresh_nav() -> None:
+            """
+            Refresh the navigation view with the latest robot pose, topology, and navigation state.
+            """
             odom = self.latest_odom
             gps  = self.latest_gps
             if odom is not None:
                 px, py  = odom.pose.pose.position.x, odom.pose.pose.position.y
                 gps_str = (f'\n{gps.latitude:.5f}\n{gps.longitude:.5f}'
                         if gps and gps.status.status >= 0 else '')
-                self._run_store.joystick.pose_lbl = f'({px:.2f}, {py:.2f}){gps_str}'
+                self._run_vm.joystick.pose_lbl = f'({px:.2f}, {py:.2f}){gps_str}'
             else:
-                self._run_store.joystick.pose_lbl = 'no odom'
+                self._run_vm.joystick.pose_lbl = 'no odom'
 
-
-            cur = self.topo_current
-            if cur and cur != '—':
-                cur_drop_lbl.set_text(f'→ {cur}')
-                cur_drop_lbl.style('color:#1a7f37')
-            else:
-                cur_drop_lbl.set_text('no current node')
-                cur_drop_lbl.style('color:#8c959f')
-            row_hint.set_text(ROW_ACTION if row_id_input.value else NAV_ACTION)
-            row_hint.style('color:#0969da' if row_id_input.value else 'color:#8c959f')
-            drop_status_lbl.set_text(self.drop_status)
-            drop_status_lbl.style(
-                'color:#cf222e' if self.drop_status.startswith('ERROR') else 'color:#1a7f37')
+            current_node = self._run_vm.topo.current_node
 
             rp = self._robot_pose()
             rp_key = None if rp is None else (round(rp[0], 1), round(rp[1], 1),
                                             round(rp[2], 2))
-            snap = {'sel': self.topo_selected, 'cur': self.topo_current,
-                    'stat': self.topo_nav_status, 'nav': self.topo_navigating,
-                    'nodes': set(self._topo_doc.nodes), 'robot': rp_key}
+            snap = {
+                'sel': self._run_vm.topo.selected_node,
+                'cur': current_node,
+                'stat': self._run_vm.topo.nav_status,
+                'nav': self._run_vm.topo.navigating,
+                'nodes': set(self._topo_doc.nodes),
+                'robot': rp_key
+            }
             nonlocal _prev
             changed = {k for k, v in snap.items() if _prev.get(k) != v}
             if not changed:
@@ -1726,53 +1776,21 @@ class NiceGuiNode(Node):
             _prev.update(snap)
 
             if changed & {'robot', 'nodes'}:
-                self._run_store.node_map.robot_svg = build_robot_svg(self._topo_doc.nodes, rp)
+                self._run_vm.node_map.robot_svg = build_robot_svg(self._topo_doc.nodes, rp)
 
             if changed & {'sel', 'cur', 'nodes'}:
-                self._run_store.node_map.map_svg = build_svg(
+                self._run_vm.node_map.map_svg = build_svg(
                     self._topo_doc,
-                    self.topo_selected,
-                    self.topo_current
+                    self._run_vm.topo.selected_node,
+                    current_node,
                 )
                 inject_click_js()
 
             if changed & {'sel', 'nodes'}:
-                node_col.clear()
-                with node_col:
-                    node_names = sorted(self._topo_doc.nodes, key=attrgetter('name'))
-                    for nd in node_names:
-                        is_row   = nd.meta.get('row_id') is not None
-                        rid_v    = nd.meta.get('row_id', '')
-                        rrole_v  = nd.meta.get('row_role', '')
-                        glat     = nd.meta.get('gps_lat', '')
-                        glon     = nd.meta.get('gps_lon', '')
-                        title    = (f'Row {rid_v} {rrole_v} | {glat} {glon}'.strip()
-                                    if is_row else f'{glat} {glon}'.strip())
-                        cls      = ('node-item'
-                                    + (' sel' if nd.name == self.topo_selected else '')
-                                    + (' row' if is_row else ''))
-                        n = nd.name
-                        ui.html(
-                            f'<div class="{cls}" title="{title}">'
-                            f'{nd.name}{"  · row" if is_row else ""}</div>'
-                        ).on('click', lambda _, n=n: setattr(self, 'topo_selected', n))
-
-            cur_lbl.set_text(self.topo_current or '—')
-            sel_lbl.set_text(self.topo_selected or '—')
-            sel_lbl.style('color:#9a6700' if self.topo_selected else 'color:#8c959f')
-            stat_lbl.set_text(self.topo_nav_status)
-            stat_lbl.style(
-                'color:#cf222e' if 'fail' in self.topo_nav_status else
-                'color:#1a7f37' if self.topo_nav_status == 'arrived' else 'color:#57606a')
-            can_go = (bool(self.topo_selected) and not self.topo_navigating
-                    and not self._global_store.soft_estop_active)
-            go_btn.set_enabled(can_go)
-            stop_btn.set_enabled(self.topo_navigating)
-            del_btn.set_enabled(bool(self.topo_selected))
-            del_status_lbl.set_text(self.delete_status)
-            del_status_lbl.style(
-                'color:#cf222e' if self.delete_status.startswith('ERROR') else
-                'color:#1a7f37' if self.delete_status else 'color:#57606a')
+                navigation_sidebar.render_nodes(
+                    self._topo_doc.nodes,
+                    self._run_vm.topo.selected_node,
+                )
 
         ui.timer(0.2, refresh_nav)
         inject_click_js()
@@ -2077,12 +2095,14 @@ class NiceGuiNode(Node):
         save_btn.on_click(do_save)
 
         async def do_repair():
-            cur = self.topo_current
+            """Open a dialog to repair row connectivity and optionally connect the repaired chain to a base node."""
+            cur = self._run_vm.topo.current_node
+            selected = self._run_vm.topo.selected_node
             default_base = ''
             if cur not in ('—', 'none', 'None', '', None) and self._topo_doc.has_node(cur):
                 default_base = cur
-            elif self.topo_selected and self._topo_doc.has_node(self.topo_selected):
-                default_base = self.topo_selected
+            elif selected and self._topo_doc.has_node(selected):
+                default_base = selected
 
             row_count = sum(
                 1 for nd in self._topo_doc.nodes
@@ -2456,21 +2476,12 @@ class NiceGuiNode(Node):
                     f'_publish_tool_msgs({topic}, enable={enable}): {exc}')
 
     def _run_mission(self, queue: list, status_lbl) -> None:
-        """Launch a mission from the UI queue.
-
-        queue: list of (row_id, action_key, action_params) triples.
-        Each queued row is TWO nav goals, not one:
-          1. transit to the row's entry node (implement OFF — this may be
-             headland travel through other rows/edges)
-          2. entry -> exit (implement ON) — this is the leg
-             topological_navigation actually resolves to a limbic_row_follow
-             edge, i.e. the row is actually traversed here.
-        Sending only the entry-node goal (previous behaviour) meant a
-        queued row was never actually driven through at all — any row
-        that DID get row-followed was only a side effect of the router's
-        path to reach a LATER row's entry passing through this row's exit.
-        A single-row mission, or the last row in a multi-row queue, was
-        silently never traversed.
+        """
+        Start executing the queued row mission.
+        
+        Parameters:
+        	queue (list): Tuples containing a row ID, action key, and action parameters.
+        	status_lbl: UI status label updated with mission progress and outcome.
         """
         if not queue:
             status_lbl.set_text('ERROR: queue is empty')
@@ -2520,9 +2531,17 @@ class NiceGuiNode(Node):
         status_lbl.style('color:#57606a')
 
         def _execute():
+            """
+            Execute the queued mission steps and update the mission status.
+            
+            Each step navigates to its entry node with the implement disabled, then
+            traverses to its exit node with the configured action enabled. Stops on
+            cancellation, soft-estop activation, or navigation failure, and resets the
+            mission state when execution ends.
+            """
             success_overall = True
             for step_idx, (rid, entry_node, exit_node, action, params) in enumerate(steps):
-                if self._mission_cancel or self._global_store.soft_estop_active:
+                if self._mission_cancel or self._global_vm.soft_estop_active:
                     status_lbl.set_text('Cancelled')
                     status_lbl.style('color:#9a6700')
                     success_overall = False
@@ -2543,7 +2562,7 @@ class NiceGuiNode(Node):
                     success_overall = False
                     break
 
-                if self._mission_cancel or self._global_store.soft_estop_active:
+                if self._mission_cancel or self._global_vm.soft_estop_active:
                     status_lbl.set_text('Cancelled')
                     status_lbl.style('color:#9a6700')
                     success_overall = False
@@ -2576,8 +2595,15 @@ class NiceGuiNode(Node):
         threading.Thread(target=_execute, daemon=True).start()
 
     def _send_goal_sync(self, target: str, timeout_sec: float = 300.0) -> bool:
-        """Send a GotoNode goal and block until success/failure/cancel/timeout.
-        Returns True on success.  Runs in the executor thread."""
+        """Synchronously execute navigation to a topological node.
+        
+        Parameters:
+            target (str): Name of the destination node.
+            timeout_sec (float): Maximum time to wait for navigation completion.
+        
+        Returns:
+            bool: True if navigation succeeds, False if it fails, is cancelled, times out, or the action server is unavailable.
+        """
         if not _ACTION_OK:
             return False
 
@@ -2590,25 +2616,37 @@ class NiceGuiNode(Node):
 
         goal = GotoNode.Goal()
         goal.target = target
-        self.topo_nav_status = f'→ {target}'
-        self.topo_navigating = True
+        self._run_vm.topo.nav_status = f'→ {target}'
+        self._run_vm.topo.navigating = True
 
         def _on_accepted(future):
+            """
+            Handle acceptance of a navigation goal and register its result callback.
+            
+            Parameters:
+                future: Future containing the navigation goal handle.
+            """
             gh = future.result()
             if not gh.accepted:
                 result_holder[0] = False
-                self.topo_nav_status = 'goal rejected'
-                self.topo_navigating = False
+                self._run_vm.topo.nav_status = 'goal rejected'
+                self._run_vm.topo.navigating = False
                 done_event.set()
                 return
             self._nav_goal_handle = gh
             gh.get_result_async().add_done_callback(_on_result)
 
         def _on_result(future):
+            """
+            Handle completion of a navigation goal and update its status.
+            
+            Parameters:
+            	future: Future containing the navigation result.
+            """
             success = getattr(future.result().result, 'success', True)
             result_holder[0] = success
-            self.topo_nav_status = 'arrived' if success else 'failed'
-            self.topo_navigating = False
+            self._run_vm.topo.nav_status = 'arrived' if success else 'failed'
+            self._run_vm.topo.navigating = False
             self._nav_goal_handle = None
             done_event.set()
 
@@ -2624,7 +2662,7 @@ class NiceGuiNode(Node):
                 self.get_logger().warn(f'_send_goal_sync: timeout for {target}')
                 self.cancel_nav_goal()
                 return False
-            if self._mission_cancel or self._global_store.soft_estop_active:
+            if self._mission_cancel or self._global_vm.soft_estop_active:
                 self.cancel_nav_goal()
                 done_event.wait(timeout=2.0)
                 return False
@@ -2708,7 +2746,7 @@ class NiceGuiNode(Node):
     # ── System tab ────────────────────────────────────────────────────────────
 
     def _system_content(self) -> None:
-        """Build the System tab UI: telemetry sliders and manual control widgets."""
+        """Build the System tab interface for telemetry, safety monitoring, GPS, simulation tools, plant configuration, and map management."""
         with ui.row().classes('items-stretch w-full gap-3'):
             with ui.card().classes('flex-1'):
                 ui.label('Telemetry').classes('font-semibold mb-2')
@@ -3659,12 +3697,22 @@ class NiceGuiNode(Node):
                 'color=negative outline no-caps').classes('px-4')
 
     def toggle_estop(self) -> None:
-        self._global_store.soft_estop_active = not self._global_store.soft_estop_active
+        """
+        Toggle the soft emergency-stop state and publish the updated value.
+        """
+        self._global_vm.soft_estop_active = not self._global_vm.soft_estop_active
         msg = Bool()
-        msg.data = self._global_store.soft_estop_active
+        msg.data = self._global_vm.soft_estop_active
         self.estop_publisher.publish(msg)
 
     def send_speed(self, x: float, y: float) -> None:
+        """
+        Publish a velocity command and update the stored velocity values.
+        
+        Parameters:
+        	x (float): Linear velocity command.
+        	y (float): Angular velocity command.
+        """
         msg = Twist()
         msg.linear.x = x
         msg.angular.z = -y

@@ -44,6 +44,7 @@ import logging
 from pathlib import Path
 
 import numpy as np
+from devkit_f2c_planner.f2c_planner import _f2c_latlon_to_xy, _f2c_xy_to_latlon
 from scipy.interpolate import RBFInterpolator
 from shapely.geometry import LineString, Point
 from skimage import measure
