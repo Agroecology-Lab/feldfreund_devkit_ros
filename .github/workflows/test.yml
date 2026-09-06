@@ -10,9 +10,6 @@ jobs:
     strategy:
       matrix:
         tools:
-          # Mypy is disabled until we figure out how to generate stubs for ROS messages, or how
-          # to link together the packages.
-          #- command: "make mypy"
           - command: "make pylint"
           - command: "make ruff"
           - command: "make test"
@@ -30,5 +27,7 @@ jobs:
             requirements-dev.txt
       - name: install dependencies
         run: pip install -r requirements-dev.txt
+      - name: auto-fix ruff errors
+        run: make ruff-fix
       - name: ${{ matrix.tools.command }}
         run: ${{ matrix.tools.command }}
