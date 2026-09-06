@@ -175,7 +175,7 @@ TMAP_QOS = QoSProfile(
 # Mission sidebar (tightens simplify_tolerance_m too) rather than
 # shortening this interval — a denser waypoint chain along the same
 # under-resolved chord doesn't add information the chord doesn't have.
-_CONTOUR_WAYPOINT_INTERVAL_M = 1.0
+_CONTOUR_WAYPOINT_INTERVAL_M = 2.5
 
 
 def _topo_to_msg(doc: TopoDoc) -> String:
