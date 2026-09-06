@@ -1098,8 +1098,14 @@ if __name__ == '__main__':
     ap.add_argument('--spawn-out', default='/workspace/spawn_pose.txt',
                     help='Output path for the robot spawn pose (x y z), '
                          'read by sim.launch.py')
-    ap.add_argument('--spawn-z', type=float, default=0.01,
-                    help='Spawn height above ground (base_footprint)')
+    ap.add_argument('--spawn-z', type=float, default=1.0,
+                    help='Spawn height (base_footprint), as a world-Z drop '
+                         'point rather than a ground-level offset — this '
+                         'script does not sample the generated terrain\'s '
+                         'actual elevation at (x, y), so a near-zero value '
+                         'spawns the robot embedded in any non-flat terrain. '
+                         'A ~1.0m drop lets gravity settle it onto the mesh '
+                         'regardless of terrain shape at the spawn point.')
     args = ap.parse_args()
 
     nodes = load_topo(args.topo)

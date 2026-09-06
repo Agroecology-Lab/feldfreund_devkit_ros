@@ -108,8 +108,15 @@ def generate_launch_description():
                 'read -r SPAWN_X SPAWN_Y SPAWN_Z < "$SPAWN_FILE"; '
                 'echo "[spawn] using spawn pose from $SPAWN_FILE: $SPAWN_X $SPAWN_Y $SPAWN_Z"; '
                 'else '
-                'SPAWN_X=0.0; SPAWN_Y=0.0; SPAWN_Z=0.01; '
-                'echo "[spawn] WARNING: $SPAWN_FILE not found — falling back to (0,0,0.01)"; '
+                # 1.0m drop height, not a ground-level offset: terrain
+                # elevation at (0,0) varies with each generated world, so a
+                # near-zero Z (the old 0.01 default) spawns the robot
+                # partially embedded in non-flat terrain, tanking the physics
+                # real-time factor and producing bad wheel contact. Dropping
+                # from 1.0m and letting gravity settle onto the mesh is
+                # robust regardless of terrain shape at this fallback point.
+                'SPAWN_X=0.0; SPAWN_Y=0.0; SPAWN_Z=1.0; '
+                'echo "[spawn] WARNING: $SPAWN_FILE not found — falling back to (0,0,1.0), robot will drop onto terrain"; '
                 'fi; '
                 f'URDF=$(xacro {urdf_dir}/$_URDF) && '
                 'ros2 run ros_gz_sim create'
