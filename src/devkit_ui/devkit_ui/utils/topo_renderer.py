@@ -126,7 +126,14 @@ def build_svg(doc: TopoDoc, selected: str | None, current: str | None) -> str:
         if is_row:
             role = str(nd.meta.get('row_role') or '?')
             row_id = str(nd.meta.get('row_id', ''))
-            label_text = f"{role[0].upper()}{row_id}"
+            # role[0].upper() alone collides: 'entry' and 'exit' both start
+            # with 'e', so IN/OUT nodes would render identically. Map the
+            # roles that actually occur to distinct glyphs matching the
+            # _IN/_OUT/_W{k} name suffixes; fall back to the first letter
+            # for any other role string.
+            glyph = {'entry': 'I', 'exit': 'O', 'waypoint': 'W'}.get(
+                role, role[0].upper() if role else '?')
+            label_text = f"{glyph}{row_id}"
             escaped_text = html.escape(label_text, quote=True)
 
             parts.append(
