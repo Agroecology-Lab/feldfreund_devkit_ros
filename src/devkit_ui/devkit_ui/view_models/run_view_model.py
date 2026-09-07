@@ -1,7 +1,7 @@
 from dataclasses import dataclass
 
+from devkit_ui.application_services.drive_application_service import DriveApplicationService
 from devkit_ui.constants import ROW_ACTION
-from devkit_ui.facades.drive_facade import DriveFacade
 
 
 class RunViewModel:
@@ -45,7 +45,7 @@ class RunViewModel:
         active: bool = False
         status: str = 'idle'
 
-    def __init__(self, drive_facade: DriveFacade) -> None:
+    def __init__(self, drive_app_service: DriveApplicationService) -> None:
         """Initialize the run screen state with default values for each view-model component."""
         self.joystick = self.Joystick()
         self.node_map = self.NodeMap()
@@ -54,10 +54,10 @@ class RunViewModel:
         self.topo = self.Topo()
         self.discovery = self.Discovery()
 
-        self._drive_facade = drive_facade
+        self._drive_app_service = drive_app_service
 
     def move_joystick(self, x: float, y: float) -> None:
-        self._drive_facade.move_joystick(x, y)
+        self._drive_app_service.move_joystick(x, y)
 
     def stop_joystick(self) -> None:
         self.move_joystick(0.0, 0.0)
