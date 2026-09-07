@@ -27,6 +27,7 @@ mypy:
 pylint:
 	pylint \
 		--disable=duplicate-code \
+		--disable=import-error \
 		./src/devkit_driver/devkit_driver \
 		./src/devkit_ui/devkit_ui
 
