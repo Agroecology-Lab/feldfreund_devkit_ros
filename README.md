@@ -137,7 +137,7 @@ This repo may contain traces of LLM slop, We've done our best to mitigate this. 
 
 #### Linux 
 - [Git](https://github.com/git-guides/install-git)
-- [Docker](https://docs.docker.com/engine/install/)
+- [Docker](https://docs.docker.com/engine/install/debian/#install-using-the-repository)
 - ```sudo apt install python3-serial```
 
 #### Mac
