@@ -157,8 +157,19 @@ Open a terminal on your host machine and download the workspace:
 git clone -b caatinga-dev https://github.com/Agroecology-Lab/feldfreund_devkit_ros.git
 cd feldfreund_devkit_ros
 ```
+### 2. If using Avaota configure Docker networking
+```bash
+mkdir -p /etc/docker
+cat > /etc/docker/daemon.json <<'EOF'
+{
+  "iptables": false
+}
+EOF
+systemctl restart docker
+systemctl status docker.service --no-pager
+```
 
-### 2. Build & Launch
+### 3. Build & Launch
 Use the management script to build the ROS 2 workspace and launch the robot stack. This script automatically handles hardware discovery and port permissions:
 ```bash
 ./manage.py full-build
