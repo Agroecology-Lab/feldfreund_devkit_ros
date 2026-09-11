@@ -1,6 +1,5 @@
 #!/usr/bin/env python3
 import os
-import platform
 import re
 import subprocess
 from pathlib import Path
@@ -182,6 +181,28 @@ def detect_camera() -> tuple[str, str]:
     return '/dev/video0', 'fallback /dev/video0'
 
 
+def detect_jetson() -> bool:
+    """Detect a genuine NVIDIA Jetson board.
+
+    CPU architecture alone (aarch64) is not sufficient — plenty of non-Jetson
+    SBCs (e.g. Allwinner/Rockchip/Broadcom boards) are also aarch64, and would
+    incorrectly match a bare `platform.machine() == 'aarch64'` check. Jetsons
+    specifically ship /etc/nv_tegra_release, and their devicetree model string
+    identifies them explicitly — check both.
+    """
+    if Path('/etc/nv_tegra_release').exists():
+        return True
+    model_path = Path('/proc/device-tree/model')
+    if model_path.exists():
+        try:
+            model = model_path.read_bytes().decode('utf-8', 'ignore').lower()
+            if 'jetson' in model or 'nvidia' in model:
+                return True
+        except OSError:
+            pass
+    return False
+
+
 def scan_and_export():
     print('Scanning for Open Agbot Hardware...')
     check_host_tools()
@@ -189,8 +210,7 @@ def scan_and_export():
     # Check/Request Safety Acknowledgement
     safety_ack = handle_safety_disclaimer()
 
-    arch = platform.machine()
-    is_jetson = (arch == 'aarch64')
+    is_jetson = detect_jetson()
     ports = serial.tools.list_ports.comports()
 
     gnss_found = []
@@ -206,9 +226,12 @@ def scan_and_export():
             mcu_device = p.device
             print(f'Found ESP32 MCU: {mcu_device}')
 
-    if not mcu_device and is_jetson:
+    if not mcu_device and is_jetson and Path('/dev/ttyTHS0').exists():
         mcu_device = '/dev/ttyTHS0'
         print(f'Using Jetson Header MCU: {mcu_device}')
+    elif not mcu_device:
+        print('Warning: No ESP32-S3 found on USB (and no Jetson header UART fallback applies).')
+        print('         Check the ESP32 is connected and powered — MCU_PORT will be set to \'virtual\'.')
 
     # ── Deterministic receiver assignment ────────────────────────────────────
     # USB enumeration order is NOT stable across reboots or reconnects.
