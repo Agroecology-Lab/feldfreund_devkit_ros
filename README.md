@@ -133,12 +133,17 @@ This repo may contain traces of LLM slop, We've done our best to mitigate this. 
 
 ## Quick Start
 
+### Supported SBC configuration
+
+- [Avaota A1](https://pine64.com/product/yuzuki-avaota-a1-single-board-computer-4gb-32gb/)
+- [Armbian](https://armbian.com/boards/avaota-a1) (note flash with official Armbian flasher)
+
 ### 0. Install dependencies
 
 #### Linux 
 - [Git](https://github.com/git-guides/install-git)
 - [Docker](https://docs.docker.com/engine/install/debian/#install-using-the-repository)
-- ```sudo apt install python3-serial```
+- ```sudo apt install python3-serial setserial v4l-utils```
 
 #### Mac
 - xcode-select --install
@@ -157,17 +162,7 @@ Open a terminal on your host machine and download the workspace:
 git clone -b caatinga-dev https://github.com/Agroecology-Lab/feldfreund_devkit_ros.git
 cd feldfreund_devkit_ros
 ```
-### 2. If using Avaota configure Docker networking
-```bash
-mkdir -p /etc/docker
-cat > /etc/docker/daemon.json <<'EOF'
-{
-  "iptables": false
-}
-EOF
-systemctl restart docker
-systemctl status docker.service --no-pager
-```
+
 
 ### 3. Build & Launch
 Use the management script to build the ROS 2 workspace and launch the robot stack. This script automatically handles hardware discovery and port permissions:
