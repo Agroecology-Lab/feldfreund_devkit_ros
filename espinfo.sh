@@ -23,6 +23,10 @@ fi
 # Priority: .env MCU_PORT > Auto-detect
 MCU_PORT=${MCU_PORT:-$(ls /dev/ttyACM* 2>/dev/null | head -n 1)}
 
+# Points at a checkout of https://github.com/Agroecology-Lab/lizard (separate repo).
+LIZARD_DIR="${LIZARD_DIR:-../lizard}"
+LOCAL_FIRMWARE="$LIZARD_DIR/build/lizard.bin"
+
 if [ -z "$MCU_PORT" ]; then
     echo "Error: No ESP32-S3 detected on /dev/ttyACM*."
     exit 1
@@ -34,7 +38,7 @@ echo "--- ESP32-S3 Interrogation: $MCU_PORT ---"
 echo "[📡] Reading flash state..."
 $VENV_PYTHON -m esptool --chip esp32s3 --port "$MCU_PORT" read_flash 0x8000 0xC00 dumped_partitions.bin > /dev/null 2>&1
 $VENV_PYTHON -m esptool --chip esp32s3 --port "$MCU_PORT" read_flash 0xd000 0x20 ota_state.bin > /dev/null 2>&1
-$VENV_PYTHON -m esptool --chip esp32s3 --port "$MCU_PORT" read_flash 0x20000 16 app_header.bin > /dev/null 2>&1
+$VENV_PYTHON -m esptool --chip esp32s3 --port "$MCU_PORT" read_flash 0x10000 16 app_header.bin > /dev/null 2>&1
 
 # 3. Comprehensive Analysis via Python
 $VENV_PYTHON -c "
@@ -70,12 +74,15 @@ def parse():
             header = f.read(16)
             magic = header[0:1].hex()
             print(f'  Remote Magic Byte: {magic} (Valid: {\"YES\" if magic==\"e9\" else \"NO\"})')
-            if os.path.exists('firmware.bin'):
-                with open('firmware.bin', 'rb') as f2:
+            local_fw = '$LOCAL_FIRMWARE'
+            if os.path.exists(local_fw):
+                with open(local_fw, 'rb') as f2:
                     if header == f2.read(16):
-                        print('  Match: Local firmware.bin matches Remote (0x20000).')
+                        print(f'  Match: {local_fw} matches Remote (0x10000).')
                     else:
-                        print('  Mismatch: Local firmware.bin differs from Flashed firmware.')
+                        print(f'  Mismatch: {local_fw} differs from Flashed firmware.')
+            else:
+                print(f'  ({local_fw} not found locally — skipping comparison)')
 parse()
 "
 
