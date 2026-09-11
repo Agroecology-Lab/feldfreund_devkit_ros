@@ -18,10 +18,14 @@ fi
 # Prioritise .env MCU_PORT
 MCU_PORT=${MCU_PORT:-$(ls /dev/ttyACM* 2>/dev/null | head -n 1)}
 
-# 2. Binary Path Resolution (Validated from Environment Scan)
-BOOTLOADER="./src/basekit_driver/build/bootloader/bootloader.bin"
-PARTITIONS="./src/basekit_driver/build/partition_table/partition-table.bin"
-FIRMWARE="./firmware.bin"
+# 2. Binary Path Resolution
+# LIZARD_DIR points at a checkout of https://github.com/Agroecology-Lab/lizard
+# (a separate ESP-IDF project, not part of this repo). Override with:
+#   LIZARD_DIR=/path/to/lizard ./flash-lizard.sh
+LIZARD_DIR="${LIZARD_DIR:-../lizard}"
+BOOTLOADER="$LIZARD_DIR/build/bootloader/bootloader.bin"
+PARTITIONS="$LIZARD_DIR/build/partition_table/partition-table.bin"
+FIRMWARE="$LIZARD_DIR/build/lizard.bin"
 
 # Check for existence before proceeding
 for bin in "$BOOTLOADER" "$PARTITIONS" "$FIRMWARE"; do
@@ -39,13 +43,15 @@ fi
 echo "🚀 Starting Lizard Flash on $MCU_PORT..."
 
 # 4. Official Lizard/Zauberzeug Flash Sequence (Modern esptool v5.1+)
-# S3 Spec: Bootloader @ 0x0 | Partitions @ 0x8000 | Firmware @ 0x20000
+# S3 Spec: Bootloader @ 0x0 | Partitions @ 0x8000 | Firmware @ 0x10000
+# (matches Agroecology-Lab/lizard's own documented flash offsets — do not
+# change without checking that repo's README/partitions.csv)
 python3 -m esptool --chip esp32s3 --port "$MCU_PORT" --baud 921600 \
     --before default-reset --after hard-reset write-flash \
     -z --flash-mode dio --flash-freq 80m --flash-size detect \
     0x0 "$BOOTLOADER" \
     0x8000 "$PARTITIONS" \
-    0x20000 "$FIRMWARE"
+    0x10000 "$FIRMWARE"
 
 # 5. The "Lizard Kick" (USB stability)
 echo "⚡ Stabilising TTY and triggering hardware boot..."
