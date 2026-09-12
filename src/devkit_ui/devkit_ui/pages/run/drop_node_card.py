@@ -4,12 +4,13 @@ from nicegui import ui
 
 from devkit_ui.constants import NAV_ACTION, ROW_ACTION, VISION_ROW_ACTION
 from devkit_ui.view_models.run_view_model import RunViewModel
+from devkit_ui.view_models.topology_view_model import TopologyViewModel
 
 
 class DropNodeCard(ui.card):
     def __init__(self,
                  state: RunViewModel.DropNode,
-                 topo_state: RunViewModel.Topo,
+                 topo_vm: TopologyViewModel,
                  on_drop: Callable[[str, int | None, str], None],
                  on_row_action: Callable[[str], None] | None = None):
         """
@@ -17,7 +18,7 @@ class DropNodeCard(ui.card):
 
                  Parameters:
                      state: Drop-node configuration and operation status state.
-                     topo_state: Topology state used to display the current node.
+                     topo_vm: Topology view model used to display the current node.
                      on_drop: Callback invoked with the node name, row ID, and row role.
                      on_row_action: Optional callback invoked with the selected action when
                          the row-driving toggle changes.
@@ -108,7 +109,7 @@ class DropNodeCard(ui.card):
                     return f'→ {current_node}' if has_current else 'no current node'
 
                 self.current_node_lbl.bind_text_from(
-                    topo_state, 'current_node', backward=sync_current_node
+                    topo_vm, 'current_node', backward=sync_current_node
                 )
 
                 ui.button(

@@ -1,7 +1,14 @@
-from dataclasses import dataclass
+from __future__ import annotations
 
-from devkit_ui.application_services.drive_application_service import DriveApplicationService
+from dataclasses import dataclass
+from typing import TYPE_CHECKING
+
 from devkit_ui.constants import ROW_ACTION
+
+if TYPE_CHECKING:
+    from devkit_ui.application_services.drive_application_service import (
+        DriveApplicationService,
+    )
 
 
 class RunViewModel:
@@ -11,8 +18,7 @@ class RunViewModel:
 
     @dataclass
     class NodeMap:
-        map_svg: str = ''
-        robot_svg: str = ''
+        robot_pose: tuple | None = None
 
     @dataclass
     class Track:
@@ -34,8 +40,6 @@ class RunViewModel:
 
     @dataclass
     class Topo:
-        current_node: str = '—'
-        selected_node: str | None = None
         navigating: bool = False
         nav_status: str = 'idle'
         delete_status: str = ''

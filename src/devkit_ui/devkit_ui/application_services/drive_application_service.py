@@ -1,6 +1,9 @@
 from __future__ import annotations
 
-from devkit_ui.domain_services.drive_domain_service import DriveDomainService
+from typing import TYPE_CHECKING
+
+if TYPE_CHECKING:
+    from devkit_ui.domain_services.drive_domain_service import DriveDomainService
 
 
 class DriveApplicationService:
