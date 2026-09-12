@@ -138,7 +138,7 @@ actions:
         header:
           frame_id: ${{node.nav_frame}}
         pose: ${{node.pose}}
-      behavior_tree: ''
+      behavior_tree: ${{definitions.row_traversal_bt}}
 
 nodes:
 """
