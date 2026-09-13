@@ -20,16 +20,11 @@ Proper industrial safety bumpers with published PL ratings:
 
 | Supplier | Model | Notes |
 |---|---|---|
+| [Unchained Robotics](https://unchainedrobotics.de/en/brands/aso-safety-solutions) | ASO SENTIR | PLc-d from €860 |
 | [Tapeswitch Corp.](https://www.tapeswitch.com/bumpers.html) | VBL, SE-45D, SE-75D, custom SE-C series | **Selected.** 2-wire configuration with PRSU/2 controller, Category 1. Datasheets and quote request forms |
 | [ABB Safety](https://new.abb.com/low-voltage/products/safety-products/pressure-sensitive-devices/asb) | ASB safety bumper | CAD drawings, 2D/3D data, custom foam or leather lengths 0.2m to 3.0m |
 | [Schmersal](https://products.schmersal.com/en_US/safety-related-bumper-1000074843) | SSG-SBL | Dual-channel, heavy-duty, technical specs and contact form |
 | [Mayser](https://www.mayser.com/en/safety-technology/products/safety-bumpers) | Custom safety bumpers | Optoelectronic and polyurethane foam options, configuration portal |
-
-Direct-checkout option, cheaper but check the rating before citing it against a PLc target:
-
-| Supplier | Model | Price |
-|---|---|---|
-| [Unchained Robotics](https://unchainedrobotics.de/en/brands/aso-safety-solutions) | ASO SENTIR | from €860 |
 
 ## 2. Monitoring
 
