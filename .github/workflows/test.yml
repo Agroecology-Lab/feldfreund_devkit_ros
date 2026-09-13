@@ -3,16 +3,23 @@ name: Run Tests
 on: [push]
 
 permissions:
-  contents: read
+  contents: write
 
 jobs:
   code-checks:
     strategy:
       matrix:
         tools:
-          - command: "make pylint"
-          - command: "make ruff"
-          - command: "make test"
+          - name: pylint
+            command: >-
+              pylint --disable=duplicate-code
+              ./src/devkit_driver/devkit_driver
+              ./src/devkit_ui/devkit_ui
+              --fail-under=10.0
+          - name: ruff
+            command: make ruff
+          - name: test
+            command: make test
     runs-on: ubuntu-latest
     timeout-minutes: 5
     steps:
@@ -28,6 +35,12 @@ jobs:
       - name: install dependencies
         run: pip install -r requirements-dev.txt
       - name: auto-fix ruff errors
+        if: matrix.tools.name == 'ruff'
         run: make ruff-fix
-      - name: ${{ matrix.tools.command }}
+      - name: commit ruff fixes
+        if: matrix.tools.name == 'ruff'
+        uses: stefanzweifel/git-auto-commit-action@v5
+        with:
+          commit_message: "style: auto-fix ruff errors [skip ci]"
+      - name: ${{ matrix.tools.name }}
         run: ${{ matrix.tools.command }}
