@@ -3,7 +3,7 @@ from datetime import UTC, datetime
 
 import yaml
 
-from devkit_ui.models import TopoDoc, TopoNode, TopoProperties
+from devkit_ui.models import TopoDoc, TopoEdge, TopoNode, TopoProperties
 
 
 def _topo_from_dict(doc: dict) -> TopoDoc:
@@ -17,7 +17,20 @@ def _topo_from_dict(doc: dict) -> TopoDoc:
         edges = []
         for e in n.get('edges', []):
             if isinstance(e, dict) and 'node' in e:
-                edges.append(e['node'])
+                # Preserve the edge's action/edge_id — collapsing this to a
+                # bare node-name string (the old behaviour) drops 'action'
+                # entirely, and TopoNode.__init__ silently defaults any
+                # non-TopoEdge entry to action=''. Every load — both this
+                # (disk YAML, via parse_topo_yaml) and the live
+                # /topological_map_2 JSON republish (parse_topo_json) go
+                # through this same function, so that corruption was
+                # getting baked permanently into the map on the very next
+                # save after any load.
+                edges.append(TopoEdge(
+                    action=e.get('action', ''),
+                    edge_id=e.get('edge_id', f"{name}_{e['node']}"),
+                    node=e['node'],
+                ))
             else:
                 edges.append(e)
         nodes.append(TopoNode(
