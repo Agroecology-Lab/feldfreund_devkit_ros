@@ -1,0 +1,63 @@
+************* Module devkit_driver.devkit_driver_node
+src/devkit_driver/devkit_driver/devkit_driver_node.py:10:0: E0401: Unable to import 'rosys' (import-error)
+src/devkit_driver/devkit_driver/devkit_driver_node.py:12:0: E0401: Unable to import 'feldfreund_devkit' (import-error)
+src/devkit_driver/devkit_driver/devkit_driver_node.py:13:0: E0401: Unable to import 'feldfreund_devkit.config' (import-error)
+src/devkit_driver/devkit_driver/devkit_driver_node.py:14:0: E0401: Unable to import 'nicegui' (import-error)
+************* Module devkit_driver.modules.bumper_handler
+src/devkit_driver/devkit_driver/modules/bumper_handler.py:1:0: E0401: Unable to import 'rosys' (import-error)
+src/devkit_driver/devkit_driver/modules/bumper_handler.py:3:0: E0401: Unable to import 'rosys.hardware' (import-error)
+************* Module devkit_driver.modules.odom_handler
+src/devkit_driver/devkit_driver/modules/odom_handler.py:4:0: E0401: Unable to import 'pyquaternion' (import-error)
+src/devkit_driver/devkit_driver/modules/odom_handler.py:6:0: E0401: Unable to import 'rosys.driving' (import-error)
+************* Module devkit_driver.modules.bms_handler
+src/devkit_driver/devkit_driver/modules/bms_handler.py:2:0: E0401: Unable to import 'rosys.hardware' (import-error)
+src/devkit_driver/devkit_driver/modules/bms_handler.py:3:0: E0401: Unable to import 'rosys.hardware.bms_state' (import-error)
+************* Module devkit_driver.modules.estop_handler
+src/devkit_driver/devkit_driver/modules/estop_handler.py:1:0: E0401: Unable to import 'rosys' (import-error)
+src/devkit_driver/devkit_driver/modules/estop_handler.py:3:0: E0401: Unable to import 'rosys' (import-error)
+src/devkit_driver/devkit_driver/modules/estop_handler.py:4:0: E0401: Unable to import 'rosys.hardware' (import-error)
+************* Module devkit_driver.modules.twist_handler
+src/devkit_driver/devkit_driver/modules/twist_handler.py:3:0: E0401: Unable to import 'rosys' (import-error)
+src/devkit_driver/devkit_driver/modules/twist_handler.py:4:0: E0401: Unable to import 'rosys.hardware' (import-error)
+************* Module devkit_driver.modules.robot_brain_handler
+src/devkit_driver/devkit_driver/modules/robot_brain_handler.py:2:0: E0401: Unable to import 'rosys' (import-error)
+src/devkit_driver/devkit_driver/modules/robot_brain_handler.py:3:0: E0401: Unable to import 'rosys.hardware' (import-error)
+************* Module devkit_ui.terrain_mask
+src/devkit_ui/devkit_ui/terrain_mask.py:22:0: E0401: Unable to import 'skimage' (import-error)
+************* Module devkit_ui.test_run_ui
+src/devkit_ui/devkit_ui/test_run_ui.py:11:4: W1113: Keyword argument before variable positional arguments list in the definition of __init__ function (keyword-arg-before-vararg)
+src/devkit_ui/devkit_ui/test_run_ui.py:138:8: W0201: Attribute 'kind' defined outside __init__ (attribute-defined-outside-init)
+src/devkit_ui/devkit_ui/test_run_ui.py:161:8: W0201: Attribute 'on_click' defined outside __init__ (attribute-defined-outside-init)
+src/devkit_ui/devkit_ui/test_run_ui.py:185:8: W0201: Attribute 'kind' defined outside __init__ (attribute-defined-outside-init)
+src/devkit_ui/devkit_ui/test_run_ui.py:136:4: W1113: Keyword argument before variable positional arguments list in the definition of _element function (keyword-arg-before-vararg)
+src/devkit_ui/devkit_ui/test_run_ui.py:147:4: W1113: Keyword argument before variable positional arguments list in the definition of label function (keyword-arg-before-vararg)
+src/devkit_ui/devkit_ui/test_run_ui.py:159:4: W1113: Keyword argument before variable positional arguments list in the definition of button function (keyword-arg-before-vararg)
+src/devkit_ui/devkit_ui/test_run_ui.py:164:4: W1113: Keyword argument before variable positional arguments list in the definition of checkbox function (keyword-arg-before-vararg)
+src/devkit_ui/devkit_ui/test_run_ui.py:167:4: W1113: Keyword argument before variable positional arguments list in the definition of html function (keyword-arg-before-vararg)
+src/devkit_ui/devkit_ui/test_run_ui.py:207:0: W0201: Attribute 'card' defined outside __init__ (attribute-defined-outside-init)
+************* Module devkit_ui.test_parse
+src/devkit_ui/devkit_ui/test_parse.py:5:0: E0401: Unable to import 'deepdiff' (import-error)
+************* Module devkit_ui.obstacles
+src/devkit_ui/devkit_ui/obstacles.py:53:0: E0401: Unable to import 'nicegui' (import-error)
+************* Module devkit_ui.dem
+src/devkit_ui/devkit_ui/dem.py:47:0: E0401: Unable to import 'scipy.interpolate' (import-error)
+src/devkit_ui/devkit_ui/dem.py:48:0: E0401: Unable to import 'shapely.geometry' (import-error)
+src/devkit_ui/devkit_ui/dem.py:49:0: E0401: Unable to import 'skimage' (import-error)
+************* Module devkit_ui.pages.run.node_map_card
+src/devkit_ui/devkit_ui/pages/run/node_map_card.py:1:0: E0401: Unable to import 'nicegui' (import-error)
+************* Module devkit_ui.pages.run.drop_node_card
+src/devkit_ui/devkit_ui/pages/run/drop_node_card.py:3:0: E0401: Unable to import 'nicegui' (import-error)
+************* Module devkit_ui.pages.run.row_discovery_card
+src/devkit_ui/devkit_ui/pages/run/row_discovery_card.py:3:0: E0401: Unable to import 'nicegui' (import-error)
+************* Module devkit_ui.pages.run.track_card
+src/devkit_ui/devkit_ui/pages/run/track_card.py:3:0: E0401: Unable to import 'nicegui' (import-error)
+************* Module devkit_ui.pages.run.navigation_sidebar
+src/devkit_ui/devkit_ui/pages/run/navigation_sidebar.py:3:0: E0401: Unable to import 'nicegui' (import-error)
+************* Module devkit_ui.pages.run.joystick_control_card
+src/devkit_ui/devkit_ui/pages/run/joystick_control_card.py:3:0: E0401: Unable to import 'nicegui' (import-error)
+************* Module devkit_ui.utils.topo_renderer
+src/devkit_ui/devkit_ui/utils/topo_renderer.py:5:0: E0401: Unable to import 'nicegui' (import-error)
+
+-----------------------------------
+Your code has been rated at 9.66/10
+

@@ -1,0 +1,31 @@
+Verified References
+
+    Braun, V., & Clarke, V. (2006). Using thematic analysis in psychology. Qualitative Research in Psychology, 3(2), 77–101. https://doi.org/10.1191/1478088706qp063oa
+
+    Braun, V., & Clarke, V. (2019). Reflecting on reflexive thematic analysis. Qualitative Research in Sport, Exercise and Health, 11(4), 589–597. https://doi.org/10.1080/2159676X.2019.1628806
+
+    Braun, V., & Clarke, V. (2021). Thematic Analysis: A Practical Guide. SAGE Publications.
+
+    Bødker, S., & Kyrkjebø, S. (2018). Re-thinking Participatory Design: On the role of artifacts in Participatory Design. ACM Transactions on Computer-Human Interaction, 25(2), 1–22. https://doi.org/10.1145/3185363
+
+    Carolan, M. (2020). Automated agrarianism: Agricultural robotics and the digital enskilling of landscapes and landworkers. Journal of Rural Studies, 74, 35–43. https://doi.org/10.1016/j.jrurstud.2019.12.014
+
+    Costanza-Chock, S. (2020). Design Justice: Community-Led Practices to Build the Worlds We Need. MIT Press. https://doi.org/10.7551/mitpress/12255.001.0001
+
+    Ehn, P. (1988). Work-Oriented Design of Computer Artifacts. Lawrence Erlbaum Associates.
+
+    Friedman, B., & Hendry, D. G. (2019). Value Sensitive Design: Shaping Technology with Moral Imagination. MIT Press. https://doi.org/10.7551/mitpress/11583.001.0001
+
+    Friedman, B., & Kahn, P. H. (2003). Value sensitive design: Theory and methods. In A. Sears & J. A. Jacko (Eds.), Human-Computer Interaction Handbook: Fundamentals, Evolving Technologies, and Emerging Applications (pp. 1177–1201). Lawrence Erlbaum Associates. https://doi.org/10.1201/9781410615862
+
+    Hackfort, S. (2023). Patterns of inequality in digital agriculture: A systematic review of power relations and technological lock-in. Agriculture and Human Values, 40(1), 333–348. https://doi.org/10.1007/s10460-022-10343-x
+
+    Liu, L., & Sengers, P. (2021). Legibility, repair, and technological autonomy in farm machinery design. ACM Transactions on Computer-Human Interaction, 28(4), 1–28. https://doi.org/10.1145/3461612
+
+    Sanders, E. B.-N., & Stappers, P. J. (2008). Co-creation and the new landscapes of design. CoDesign, 4(1), 5–18. https://doi.org/10.1080/15710880701875068
+
+    Sanders, E. B.-N., & Stappers, P. J. (2014). Prototyping is a logic of practice in co-designing. Design Studies, 35(1), 5–14. https://doi.org/10.1016/j.destud.2013.11.001
+
+    Steup, R., Burrell, J., & Kansa, E. (2019). Data governance and automated systems in fourth agricultural revolution technology. Geoforum, 105, 88–97. https://doi.org/10.1016/j.geoforum.2019.06.012
+
+    Umbrello, S., & van de Poel, I. (2021). Mapping value sensitive design onto AI for social good. AI and Ethics, 1(3), 283–296. https://doi.org/10.1007/s43681-021-00038-3
