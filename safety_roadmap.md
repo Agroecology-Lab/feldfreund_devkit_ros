@@ -35,7 +35,7 @@
 | Item | Status | Notes |
 |---|---|---|
 | ESP32 + Lizard DSL | DONE, current | hard real-time motor PID and bumper cutoff |
-| STM32H7 + Ardurover migration | TO DO | EKF3, failsafes, geofencing, SITL testing, community scrutiny  |
+| STM32H7 + Ardurover migration | TO DO | EKF3, failsafes, geofencing, SITL testing, community scrutiny. In time should buy IEC 61508 REF: [ArduPilot Zephyr HAL: Flying on a BeagleV-Fire](https://www.beagleboard.org/projects/ardupilot-on-zephyr-flying-on-the-beaglev-fire) · [Zephyr Safety Overview](https://docs.zephyrproject.org/latest/safety/safety_overview.html)  |
 
 ## 5. Regulatory compliance roadmap
 
