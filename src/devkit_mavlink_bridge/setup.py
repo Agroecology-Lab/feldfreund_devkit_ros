@@ -16,7 +16,7 @@ setup(
         # This ensures any config files actually in this package are installed
         (os.path.join('share', package_name, 'config'), glob(os.path.join('config', '*'))),
     ],
-    install_requires=['setuptools'],
+    install_requires=['setuptools', 'pymavlink'],
     zip_safe=True,
     maintainer='Agroecology Lab',
     description='MAVLink bridge from Sowbot cmd_vel/localisation to an ArduPilot Rover RTU in GUIDED mode.',

@@ -19,9 +19,12 @@ not just in this comment, when one of these lands):
      nothing here works until it's set.
 """
 
-from pymavlink import mavutil
+import os
+import time
+
 import rclpy
 from geometry_msgs.msg import Twist
+from pymavlink import mavutil
 from rclpy.node import Node
 
 from devkit_mavlink_bridge.modules.position_target_handler import (
@@ -33,9 +36,8 @@ from devkit_mavlink_bridge.modules.position_target_handler import (
 # even while the last command is still "current" from the bridge's POV.
 _REPUBLISH_PERIOD_S = 0.5
 
-# TODO: confirm against item 1 in ardurover.md -- not yet known what
-# device/baud the RTU's MAVLink port actually is.
-_MAVLINK_CONNECTION_STR = 'TODO_SERIAL_DEVICE_HERE'
+_MAVLINK_ENDPOINT_ENV = 'MAVLINK_ENDPOINT'
+_MAVLINK_ENDPOINT_PLACEHOLDER = 'TODO_SERIAL_DEVICE_HERE'
 _MAVLINK_BAUD = 115200
 
 
@@ -47,8 +49,13 @@ class MavlinkBridgeNode(Node):
 
         self._last_twist = Twist()
 
+        mavlink_endpoint = os.environ.get(_MAVLINK_ENDPOINT_ENV, '').strip()
+        if not mavlink_endpoint or mavlink_endpoint.upper() == _MAVLINK_ENDPOINT_PLACEHOLDER:
+            raise ValueError(
+                f'{_MAVLINK_ENDPOINT_ENV} must be set to a valid MAVLink connection endpoint')
+
         self._mav = mavutil.mavlink_connection(
-            _MAVLINK_CONNECTION_STR, baud=_MAVLINK_BAUD)
+            mavlink_endpoint, baud=_MAVLINK_BAUD)
 
         self.create_subscription(Twist, 'cmd_vel', self._on_cmd_vel, 10)
         self.create_timer(_REPUBLISH_PERIOD_S, self._republish)
@@ -64,7 +71,7 @@ class MavlinkBridgeNode(Node):
         fields = twist_to_position_target(
             linear_x=self._last_twist.linear.x,
             angular_z=self._last_twist.angular.z,
-            time_boot_ms=self.get_clock().now().nanoseconds // 1_000_000,
+            time_boot_ms=(time.monotonic_ns() // 1_000_000) & 0xFFFFFFFF,
         )
         self._mav.mav.set_position_target_local_ned_send(**fields)
 

@@ -22,9 +22,7 @@
   <exec_depend>rclpy</exec_depend>
   <exec_depend>geometry_msgs</exec_depend>
   <exec_depend>sensor_msgs</exec_depend>
-  <!-- Not a rosdep key -- installed via pip in the Dockerfile, same
-       pattern as python3-shapely in devkit_f2c_planner. -->
-  <exec_depend>pymavlink</exec_depend>
+  <exec_depend>python3-pymavlink-pip</exec_depend>
 
   <export>
     <build_type>ament_python</build_type>
