@@ -7,6 +7,7 @@ from devkit_ui.models import TopoDoc, TopoEdge, TopoNode, TopoProperties
 
 
 def _topo_from_dict(doc: dict) -> TopoDoc:
+    """Build a topology document from a decoded YAML or JSON mapping."""
     nodes = []
     for entry in doc.get('nodes', []):
         n = entry.get('node', {})

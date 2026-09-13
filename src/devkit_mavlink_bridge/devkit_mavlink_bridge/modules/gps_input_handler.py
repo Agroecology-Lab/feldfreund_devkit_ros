@@ -14,6 +14,7 @@ this module can do.
 
 
 def fused_pose_to_gps_input(*_args, **_kwargs) -> dict:
+    """Reject conversion until the FusionCore output interface is known."""
     raise NotImplementedError(
         'FusionCore output topic/type not yet confirmed -- see '
         'ardurover.md item 2 in Sowbot_Data before implementing this.')

@@ -45,6 +45,7 @@ class MavlinkBridgeNode(Node):
     """Bridges cmd_vel to an ArduPilot Rover RTU over MAVLink (GUIDED mode)."""
 
     def __init__(self):
+        """Connect to MAVLink and register the ROS subscription and timer."""
         super().__init__('devkit_mavlink_bridge_node')
 
         self._last_twist = Twist()
@@ -65,9 +66,11 @@ class MavlinkBridgeNode(Node):
             f'{_REPUBLISH_PERIOD_S}s (GUID_TIMEOUT margin)')
 
     def _on_cmd_vel(self, msg: Twist) -> None:
+        """Cache the latest velocity command for periodic publishing."""
         self._last_twist = msg
 
     def _republish(self) -> None:
+        """Translate and resend the latest velocity command over MAVLink."""
         fields = twist_to_position_target(
             linear_x=self._last_twist.linear.x,
             angular_z=self._last_twist.angular.z,
@@ -77,6 +80,7 @@ class MavlinkBridgeNode(Node):
 
 
 def main(args=None):
+    """Run the MAVLink bridge node until ROS shuts down."""
     rclpy.init(args=args)
     node = MavlinkBridgeNode()
     try:
