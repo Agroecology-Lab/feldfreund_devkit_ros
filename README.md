@@ -381,6 +381,8 @@ All launch files and configuration files (except for the UI) are stored in the `
 
 The DevKit driver (based on [ATB Potsdam's field_friend_driver](https://github.com/ATB-potsdam-automation/field_friend_driver)) manages the communication with the ESP32 microcontroller running [Lizard](https://lizard.dev/) firmware - a domain-specific language for defining hardware behavior on embedded systems.
 
+For the separate local Lizard firmware checkout, build, and flash workflow, see [Local Lizard Firmware Setup](docs/lizard-firmware-setup.md).
+
 The package provides:
 
 - `config/devkit.liz`: Basic Lizard configuration for DevKit robot
