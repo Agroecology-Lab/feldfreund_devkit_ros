@@ -8,10 +8,29 @@
 | /estop/front, /estop/back (hardware state topics) | DONE | driver-level |
 | Bumper topics (front_top, front_bottom, back) | DONE | real-time cutoff on ESP32 |
 | Physical hard-wired E-stop | Work in progress | README states it is mandatory, not confirmed built or tested on current hardware |
-| Bumper e-stops (physical) | TO DO | hardware bumper strips wired direct to E-stop circuit, separate from the software bumper topics above |
-| Wireless failsafe pendant | TO DO | - E-stop: [Indus 1S transmitter](https://telemandosybaterias.com/en/p/indus-1s-868mhz-tyro-remotes-e-stop-wireless) — €725 + [Gemini 1S receiver](https://telemandosybaterias.com/en/p/gemini-230vac-tyro-remotes-e-stop-wireless) — €771 (both excl. VAT, excl. delivery) = **€1,496 for the pair** PL-c (EN ISO 13849-1) |
-| First-run terminal acceptance of E-stop / safety warning & disclaimer| DONE | prompted by manage.py during .env setup |
-| Resume confirmation after a stop | TO DO | no step requires a human to confirm before the robot resumes after bumper, e-stop, or sentor-triggered stop |
+| Bumper e-stops (physical) | TO DO | hardware bumper strips wired direct to E-stop circuit, separate from the software bumper topics above. See sourcing table below |
+| Wireless failsafe pendant | TO DO | [Indus 1S transmitter](https://telemandosybaterias.com/en/p/indus-1s-868mhz-tyro-remotes-e-stop-wireless), €725, plus [Gemini 1S receiver](https://telemandosybaterias.com/en/p/gemini-230vac-tyro-remotes-e-stop-wireless), €771 (both excl. VAT, excl. delivery), €1,496 for the pair, PL-c (EN ISO 13849-1) |
+| Reversing alarm and flashing LED, motion-active | TO DO | [Brigade self-adjusting white sound reversing alarm](https://brigade-electronics.com/warning-systems/reversing-and-warning-alarms/self-adjusting-white-sound-reversing-alarms/), ambient-adjusting, integrated LED. Wire to motion state generally, not just reverse, since the spec calls for it whenever the robot is moving. Confirm 12/24V compatibility with the current battery bus |
+| First-run terminal acceptance of E-stop / safety warning and disclaimer | DONE | prompted by manage.py during .env setup |
+| Resume confirmation after a stop | TO DO | no step requires a human to confirm before the robot resumes after a bumper, e-stop, or sentor-triggered stop |
+
+### Bumper switch sourcing
+
+Proper industrial safety bumpers with published PL ratings
+
+| Supplier | Model | Notes |
+|---|---|---|
+| [Tapeswitch Corp.](https://www.tapeswitch.com/bumpers.html) | VBL, SE-45D, SE-75D, custom SE-C series | Datasheets and quote request forms |
+| [ABB Safety](https://new.abb.com/low-voltage/products/safety-products/pressure-sensitive-devices/asb) | ASB safety bumper | CAD drawings, 2D/3D data, custom foam or leather lengths 0.2m to 3.0m |
+| [Schmersal](https://products.schmersal.com/en_US/safety-related-bumper-1000074843) | SSG-SBL | Dual-channel, heavy-duty, technical specs and contact form |
+| [Mayser](https://www.mayser.com/en/safety-technology/products/safety-bumpers) | Custom safety bumpers | Optoelectronic and polyurethane foam options, configuration portal |
+
+Direct-checkout option, cheaper but check the rating before citing it against a PLc target:
+
+| Supplier | Model | Price |
+|---|---|---|
+| [Unchained Robotics](https://unchainedrobotics.de/en/brands/aso-safety-solutions) | ASO SENTIR | from €860 |
+
 
 ## 2. Monitoring
 
@@ -35,9 +54,9 @@
 | Item | Status | Notes |
 |---|---|---|
 | ESP32 + Lizard DSL | DONE, current | hard real-time motor PID and bumper cutoff |
-| STM32H7 + Ardurover migration | TO DO | EKF3, failsafes, geofencing, SITL testing, community scrutiny. In time should buy IEC 61508 REF: [ArduPilot Zephyr HAL: Flying on a BeagleV-Fire](https://www.beagleboard.org/projects/ardupilot-on-zephyr-flying-on-the-beaglev-fire) · [Zephyr Safety Overview](https://docs.zephyrproject.org/latest/safety/safety_overview.html)  |
+| STM32H7 + Ardurover migration | TO DO | EKF3, failsafes, geofencing, SITL testing, community scrutiny. In time should buy IEC 61508. Reference: [ArduPilot Zephyr HAL: Flying on a BeagleV-Fire](https://www.beagleboard.org/projects/ardupilot-on-zephyr-flying-on-the-beaglev-fire), [Zephyr Safety Overview](https://docs.zephyrproject.org/latest/safety/safety_overview.html) |
 
-## 5. Regulatory compliance roadmap
+## 5. Regulatory compliance 
 
 No compliance claimed. Reference standards only until formal assessment or audit is done.
 
@@ -66,7 +85,7 @@ No certification work needed at this phase. Reference the standards, do not clai
 
 ### Phase 2: OEM modular subsystems
 
-Audience: existing ag equipment manufacturers integrating Sowbot's drive/safety core.
+Audience: Startups integrating Sowbot's drive/safety core.
 
 | Item | Status |
 |---|---|
@@ -87,13 +106,12 @@ Audience: commercial growers, farm management enterprises.
 | Field trial history | REQUIRED before sale |
 | Insurance and liability structure | NOT YET SCOPED |
 
-
 ## Build order
 
 1. Confirm battery cutoff threshold
 2. Build and test physical hard-wired E-stop and bumper e-stops on current hardware
 3. Add wireless failsafe pendant
-4. sentor hardware smoke test
-5. ros2_medkit black-box logging
-6. Decide on resume-confirmation behaviour
-
+4. Add reversing alarm and flashing LED, wired to motion state
+5. sentor hardware smoke test
+6. ros2_medkit black-box logging
+7. Decide on resume-confirmation behaviour
