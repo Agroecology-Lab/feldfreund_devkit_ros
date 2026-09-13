@@ -1506,10 +1506,10 @@ class NiceGuiNode(Node):
         for src, tgt, _action in wanted_edges:
             if src not in new_topo_nodes or src == tgt:
                 continue
-            cur = new_topo_nodes[src].edges
-            if tgt in cur:
+            node = new_topo_nodes[src]
+            if node.is_connected_to(tgt):
                 continue
-            cur.append(tgt)
+            node.add_edge(tgt, action=_action)
             added_count += 1
 
         if added_count == 0:
@@ -1520,13 +1520,14 @@ class NiceGuiNode(Node):
         self.f2c_save_status = f'repair: adding {added_count} edges…'
 
         def _modify(file_doc):
+            """Add missing desired connections to the persisted topology."""
             for src, tgt, action in wanted_edges:
                 if src == tgt:
                     continue
                 for entry in file_doc.nodes:
                     if entry.name != src:
                         continue
-                    if any(e.name == tgt for e in entry.edges):
+                    if entry.is_connected_to(tgt):
                         break
                     entry.add_edge(tgt, action=action)
                     break
@@ -2286,11 +2287,12 @@ class NiceGuiNode(Node):
             # ── available rows refresh ────────────────────────────────────────
             _avail_prev: list[set[TopoNode]] = [set()]
             def _refresh_available():
+                """Refresh available rows after the topology snapshot stabilizes."""
                 nonlocal _avail_prev
                 snap = set(self._topo_doc.nodes)
-                if snap != _avail_prev[0]:
+                prev, _avail_prev[0] = _avail_prev[0], snap
+                if snap != prev:
                     return
-                _avail_prev[0] = snap
                 rows: dict[int, str] = {}
                 for nd in self._topo_doc.nodes:
                     meta = nd.meta

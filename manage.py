@@ -399,11 +399,29 @@ class DevkitManager:
         topo_world = ("/workspace/install/devkit_simulation/share/"
                       "devkit_simulation/worlds/maize.world")
         world_gen = (
-            # Map bootstrap only. The Gazebo world is derived from the topo map
-            # by sowbot_sim.launch.py (world_gen step), so it is regenerated
-            # whenever the user presses Launch Sim — not baked on every boot.
-            # This keeps boot fast and makes the world always match the map at
-            # the moment Gazebo actually starts.
+            # Map bootstrap: ensure a topo map exists (unchanged — still only
+            # runs once, on first-ever boot).
+            #
+            # spawn_pose.txt MUST also exist before sim_nav.launch.py starts
+            # below, because sim_nav.launch.py runs at container boot and
+            # publishes the map->odom static transform from it immediately
+            # (see sim_nav.launch.py's _read_spawn_xy()). worldgen.sh is what
+            # writes spawn_pose.txt (via topo_to_forest3d.py), but it was
+            # previously only invoked from sowbot_sim.launch.py's world_gen
+            # step, which only runs when the user later presses Launch Sim.
+            # That left a window — every fresh boot — where sim_nav.launch.py
+            # read a nonexistent spawn_pose.txt, fell back to (0,0), and
+            # published an identity map->odom: the robot's believed map-frame
+            # position was then off by the entire real spawn offset until the
+            # user pressed Launch Sim and fix_map_to_odom (sowbot_sim.launch.py)
+            # got around to correcting it 30-45s later.
+            #
+            # Running worldgen.sh here, synchronously, before nav_launch_cmd,
+            # closes that window: spawn_pose.txt is guaranteed to exist and be
+            # correct for the current map before sim_nav.launch.py ever reads
+            # it. worldgen.sh's own input-keyed cache keeps this fast on every
+            # boot after the first — it regenerates only when the map/settings
+            # actually changed, same as the Launch Sim button.
             "([ -f /workspace/maps/maize_map ] || ("
             "ros2 run virtual_maize_field generate_world fre22_task_navigation_mini 2>/dev/null && "
             "python3 /workspace/get_maize_topo.py "
@@ -411,6 +429,8 @@ class DevkitManager:
             f"--out /workspace/maps/maize_map --name maize_map --rows 6 "
             f"--lat {datum_lat} --lon {datum_lon} --alt {datum_alt})) && "
             "echo '[world] map ready' && "
+            "bash /workspace/worldgen.sh && "
+            "echo '[world] spawn pose ready' && "
         ) if is_sim == 'true' else ""
 
         # In sim mode launch sowbot_sim (real Nav2 + topo nav + UI) instead of

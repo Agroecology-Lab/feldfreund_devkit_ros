@@ -1,0 +1,30 @@
+<?xml version="1.0"?>
+<?xml-model href="http://download.ros.org/schema/package_format3.xsd" schematypens="http://www.w3.org/2001/XMLSchema"?>
+<package format="3">
+  <name>devkit_mavlink_bridge</name>
+  <version>0.0.1</version>
+  <description>
+    MAVLink bridge between the Sowbot ROS2 stack and an ArduPilot Rover
+    RTU (GUIDED mode). Outbound: cmd_vel -> SET_POSITION_TARGET_LOCAL_NED.
+    Inbound: FusionCore fused pose -> GPS_INPUT. See
+    research/ardurover.md in Sowbot_Data for the message-level design.
+  </description>
+  <maintainer email="ros@agroecologylab.org">Agroecology Lab Ltd</maintainer>
+  <license>MIT</license>
+
+  <buildtool_depend>ament_python</buildtool_depend>
+
+  <test_depend>ament_copyright</test_depend>
+  <test_depend>ament_flake8</test_depend>
+  <test_depend>ament_pep257</test_depend>
+  <test_depend>python3-pytest</test_depend>
+
+  <exec_depend>rclpy</exec_depend>
+  <exec_depend>geometry_msgs</exec_depend>
+  <exec_depend>sensor_msgs</exec_depend>
+  <exec_depend>python3-pymavlink-pip</exec_depend>
+
+  <export>
+    <build_type>ament_python</build_type>
+  </export>
+</package>
