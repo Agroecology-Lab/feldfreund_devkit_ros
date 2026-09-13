@@ -803,7 +803,7 @@ class NiceGuiNode(Node):
         if not connect_to and selected_node and self._topo_doc.has_node(selected_node):
             connect_to = selected_node
         map_name  = self._topo_doc.name
-        nav_frame = self._topo_doc.transformation.get('topo_frame_id', 'map')
+        nav_frame = self._topo_doc.transformation.get('topo_frame_id') or 'map'
         is_row    = row_id is not None
 
         if is_row:
@@ -1205,7 +1205,7 @@ class NiceGuiNode(Node):
         fix_type   = int(self.latest_gps.status.status)
 
         map_name  = self._topo_doc.name or 'mixed_test_map'
-        nav_frame = self._topo_doc.transformation.get('topo_frame_id', 'map')
+        nav_frame = self._topo_doc.transformation.get('topo_frame_id') or 'map'
         timestamp = datetime.now(UTC).strftime('%d-%m-%Y_%H-%M-%S')
 
         current_node = self._run_vm.topo.current_node
@@ -1252,6 +1252,10 @@ class NiceGuiNode(Node):
                 # made every row node fall back to '?', regardless of type.
                 meta={'map': map_name, 'node': name, 'row_id': rid, 'row_role': role}
             )
+
+        self.get_logger().info(
+            f'F2C save: nav_frame={nav_frame!r}, '
+            f'topo_doc type={type(self._topo_doc).__name__}')
 
         for i, swath in enumerate(self._f2c_swaths):
             if len(swath) < 2:

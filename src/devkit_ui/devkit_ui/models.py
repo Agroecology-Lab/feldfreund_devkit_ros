@@ -105,7 +105,7 @@ class TopoNode:
 
         self._name: NodeID = name
         self._pointset: str = pointset or name
-        self._nav_frame: str = nav_frame or name
+        self._nav_frame: str = nav_frame or 'map'
         self._edges = {}
         for edge in edges or []:
             if isinstance(edge, TopoEdge):
