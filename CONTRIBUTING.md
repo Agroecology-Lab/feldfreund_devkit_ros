@@ -1,6 +1,6 @@
-# Contributing to feldfreund_devkit_ros
+# Contributing to Sowbot
 
-Thank you for your interest in contributing to feldfreund_devkit_ros!
+Thank you for your interest in contributing to Sowbot/ feldfreund_devkit_ros!
 This document provides guidelines to help you get started.
 
 ## Reporting Issues
@@ -25,25 +25,7 @@ Please be respectful and constructive in all interactions.
 
 ### Local Setup
 
-1. Fork and clone the repository
-2. Create a virtual environment:
-
-```bash
-python -m venv .venv
-source .venv/bin/activate  # On Windows: .venv\Scripts\activate
-```
-
-3. Install dependencies:
-
-```bash
-make sync
-```
-
-4. Install pre-commit hooks:
-
-```bash
-pre-commit install
-```
+Before diving into contributing, see the [Quick Start](https://github.com/Agroecology-Lab/feldfreund_devkit_ros#quick-start) section of the main README to get a working build running first.
 
 ## Coding Style
 
@@ -89,11 +71,11 @@ pre-commit install
 
 1. **Understand the requirements** - Ensure you know what needs to be done
 2. **Check existing code** - Look for similar patterns or functionality
-3. **Discuss significant changes** - Open an issue or discussion for large changes
+3. **Discuss significant changes** - Open an issue or discussion for large changes, or raise it on [Discord](https://discord.com/invite/dmX4sxfjfd) first
 
 ### Making Changes
 
-1. Create a feature branch from `main`
+1. Create a feature branch from `caatinga-dev`
 2. Make focused commits with clear messages
 3. Write or update tests for your changes
 4. Ensure all tests pass
@@ -136,7 +118,7 @@ make pre-commit # which runs:
 ### Submitting
 
 1. Push your changes to your fork
-2. Open a pull request against `main`
+2. Open a pull request against `caatinga-dev` branch
 3. Provide a clear description of the changes
 4. Reference any related issues
 5. Ensure CI checks pass
@@ -193,6 +175,8 @@ Ensure to address any valid feedback. This will make your life and that of the m
 ## Questions?
 
 If you have questions or need help:
+- Join our [Discord server](https://discord.com/invite/dmX4sxfjfd) for the quickest response
+- Check the [Quick Start](https://github.com/Agroecology-Lab/feldfreund_devkit_ros#quick-start) section of the main README
 - Open a discussion in the issue tracker
 - Reach out to maintainers
 - Check existing issues and pull requests
