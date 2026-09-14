@@ -1,6 +1,25 @@
 # Sowbot Safety Roadmap, v0.2
 
-## 1. E-stop and safety hardware
+## 1. E-stop and safety hardware+24V Safety Power
+```
+       │
+┌──────┴──────┐
+│  Gemini 1S  │  (Wireless E-Stop Relay Contacts)
+└──────┬──────┘
+       │
+┌──────┴──────┐
+│   PRSU/2    │  (Tapeswitch VBL Bumper Relay Contacts)
+└──────┬──────┘
+       ├───┬────────────────────────────────┐
+       │   │                                │
+    ┌──┴───┴───┐                        ┌───┴──────┐
+    │ SW180 #1 │ (24V Coil)             │ SW180 #2 │ (24V Coil)
+    │ [TVS/Res]│                        │ [TVS/Res]│
+    └──┬───┬───┘                        └───┬──────┘
+       │   │                                │
+       └───┴────────────────────────────────┘
+
+```
 
 | Item | Status | Notes |
 |---|---|---|
@@ -30,23 +49,6 @@
 |---|---|---|---|
 | Albright SW180, 24V coil variant | 24VDC | 200A continuous, 400A peak, magnetic blowout, silver alloy contacts | Matches PRSU/2 output rating directly, no interposing relay needed. ~$70-130/unit. No aux contact by default, order aux-contact variant or add-on kit separately |
 
-+24V Safety Power
-       │
-┌──────┴──────┐
-│  Gemini 1S  │  (Wireless E-Stop Relay Contacts)
-└──────┬──────┘
-       │
-┌──────┴──────┐
-│   PRSU/2    │  (Tapeswitch VBL Bumper Relay Contacts)
-└──────┬──────┘
-       ├───┬────────────────────────────────┐
-       │   │                                │
-    ┌──┴───┴───┐                        ┌───┴──────┐
-    │ SW180 #1 │ (24V Coil)             │ SW180 #2 │ (24V Coil)
-    │ [TVS/Res]│                        │ [TVS/Res]│
-    └──┬───┬───┘                        └───┬──────┘
-       │   │                                │
-       └───┴────────────────────────────────┘
 
 ## 2. Monitoring
 
