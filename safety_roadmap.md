@@ -2,23 +2,44 @@
 
 ## 1. E-stop and safety hardware+24V Safety Power
 ```
-       │
-┌──────┴──────┐
-│  Gemini 1S  │  (Wireless E-Stop Relay Contacts)
-└──────┬──────┘
-       │
-┌──────┴──────┐
-│   PRSU/2    │  (Tapeswitch VBL Bumper Relay Contacts)
-└──────┬──────┘
-       ├───┬────────────────────────────────┐
-       │   │                                │
-    ┌──┴───┴───┐                        ┌───┴──────┐
-    │ SW180 #1 │ (24V Coil)             │ SW180 #2 │ (24V Coil)
-    │ [TVS/Res]│                        │ [TVS/Res]│
-    └──┬───┬───┘                        └───┬──────┘
-       │   │                                │
-       └───┴────────────────────────────────┘
+======================= 24V SAFETY CONTROL LOOP =======================
 
++24V Safety Power
+       │
+┌──────┴──────────────────────────────────────┐
+│  Physical E-Stop Buttons                    │  (Schneider XALK178, 2x NC Contacts)
+└──────┬──────────────────────────────────────┘
+       │
+┌──────┴──────────────────────────────────────┐
+│  Gemini 1S Receiver                         │  (Tyro Wireless E-Stop Contacts)
+└──────┬──────────────────────────────────────┘
+       │
+┌──────┴──────────────────────────────────────┐
+│  PRSU/2 Controller                          │  (Tapeswitch VBL Bumper Contacts)
+└──────┬──────────────────────────────────────┘
+       ├──────────────────────┐
+       │                      │
+┌──────┴───────────┐   ┌──────┴───────────┐
+│ SW180 #1 Coil    │   │ SW180 #2 Coil    │  (24V DC Actuation Coils)
+│ [TVS Suppressor] │   │ [TVS Suppressor] │
+└──────┬───────────┘   └──────┬───────────┘
+       │                      │
+───────┴──────────────────────┴──────────────────────────────── GND (24V)
+
+
+======================= 48V TRACTION POWER BUS =======================
+
++48V Battery (B+)
+       │
+ ┌─────┴──────────────┐
+ │ SW180 #1 Contacts  │  (First Isolation Break)
+ └─────┬──────────────┘
+       │  (48V Series Link)
+ ┌─────┴──────────────┐
+ │ SW180 #2 Contacts  │  (Second Isolation Break)
+ └─────┬──────────────┘
+       │
+  Motor Controllers 
 ```
 
 | Item | Status | Notes |
