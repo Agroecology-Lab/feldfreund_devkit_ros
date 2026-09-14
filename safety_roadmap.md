@@ -44,25 +44,22 @@
 
 | Item | Status | Notes |
 |---|---|---|
-| /estop/soft (software) | DONE | driver-level, devkit_driver |
+| /estop/soft (software) | DONE | driver-level, devkit_driver, supplemental to formal safety system |
 | /estop/front, /estop/back (hardware state topics) | DONE | driver-level |
-| Bumper topics (front_top, front_bottom, back) | DONE | real-time cutoff on ESP32 |
-| Physical hard-wired E-stop | Work in progress | README states it is mandatory, not confirmed built or tested on current hardware |
-| Bumper e-stops (physical) | TO DO | Tapeswitch selected, 2-wire configuration, PRSU/2 controller. See sourcing and calculation notes below |
-| E-stop/bumper output stage (power cutoff) | TO DO | PRSU/2 output relays cannot switch the 48V/40A motor bus directly. See contactor sourcing below |
-| Wireless failsafe pendant | TO DO | [Indus 1S transmitter](https://telemandosybaterias.com/en/p/indus-1s-868mhz-tyro-remotes-e-stop-wireless), €725, plus [Gemini 1S receiver](https://telemandosybaterias.com/en/p/gemini-230vac-tyro-remotes-e-stop-wireless), €771 (both excl. VAT, excl. delivery), €1,496 for the pair. Manufacturer claims PL-c, not yet checked against their declaration of conformity |
-| Reversing alarm and flashing LED, motion-active | TO DO | [Brigade self-adjusting white sound reversing alarm](https://brigade-electronics.com/warning-systems/reversing-and-warning-alarms/self-adjusting-white-sound-reversing-alarms/), ambient-adjusting, integrated LED. Wire to motion state generally, not just reverse. Confirm 12/24V compatibility with the current battery bus. This supports the avoidance assumption in the risk graph below, it is not part of the stop function itself |
+| Bumper topics (front_top, front_bottom, back) | DONE | Not used in formal safety system |
+| Physical hard-wired E-stop | Work in progress | Spec above |
+| Bumper e-stops (physical) | Work in progress | Spec above |
+| E-stop/bumper output stage (power cutoff) | Work in progress| Spec above |
+| Wireless failsafe pendant | Work in progress | [Indus 1S transmitter](https://telemandosybaterias.com/en/p/indus-1s-868mhz-tyro-remotes-e-stop-wireless), €725, plus [Gemini 1S receiver](https://telemandosybaterias.com/en/p/gemini-230vac-tyro-remotes-e-stop-wireless), €771 (both excl. VAT, excl. delivery), €1,496 for the pair. Manufacturer claims PL-c, not yet checked against their declaration of conformity |
+| Reversing alarm and flashing LED, motion-active | TO DO | [Brigade self-adjusting white sound reversing alarm](https://brigade-electronics.com/warning-systems/reversing-and-warning-alarms/self-adjusting-white-sound-reversing-alarms/), ambient-adjusting, integrated LED. Wire to motion state generally, not just reverse. 24V on safety circuit. This supports the avoidance assumption in the risk graph below, it is not part of the stop function itself |
 | First-run terminal acceptance of E-stop / safety warning and disclaimer | DONE | prompted by manage.py during .env setup |
-| Resume confirmation after a stop | TO DO | no step requires a human to confirm before the robot resumes after a bumper, e-stop, or sentor-triggered stop |
+| Resume confirmation after a stop | Work in progress | After safety circuit triggered requires manual re-arm |
 
-### Bumper switch sourcing
-
+## Safety circuit components
 
 | Supplier | Model | Notes |
 |---|---|---|
 | [Tapeswitch Corp.](https://www.tapeswitch.com/bumpers.html) | VBL, SE-45D, SE-75D, custom SE-C series | **Selected.** 4-wire configuration with PRSU/2 controller, Category 3. Datasheets and quote request forms |
-
-### PRSU/2 controller, output rating
 
 [PRSU/2](https://www.tapeswitch.com/controllers/prsu2.html) device rating: Category 3, PL-e, TÜV-assessed, response < 30ms. Output stage: 2 N.O. positive-guided safety relays, AgSnO2 contacts, switching voltage 250VAC or 24VDC, max switch/relay current 6A individual, 13.8A combined.
 
