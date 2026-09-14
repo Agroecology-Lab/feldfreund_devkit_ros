@@ -17,34 +17,36 @@
 
 ### Bumper switch sourcing
 
-Proper industrial safety bumpers with published PL ratings:
 
 | Supplier | Model | Notes |
 |---|---|---|
-| [Unchained Robotics](https://unchainedrobotics.de/en/brands/aso-safety-solutions) | ASO SENTIR | PLc-d from €860 |
 | [Tapeswitch Corp.](https://www.tapeswitch.com/bumpers.html) | VBL, SE-45D, SE-75D, custom SE-C series | **Selected.** 2-wire configuration with PRSU/2 controller, Category 1. Datasheets and quote request forms |
-| [ABB Safety](https://new.abb.com/low-voltage/products/safety-products/pressure-sensitive-devices/asb) | ASB safety bumper | CAD drawings, 2D/3D data, custom foam or leather lengths 0.2m to 3.0m |
-| [Schmersal](https://products.schmersal.com/en_US/safety-related-bumper-1000074843) | SSG-SBL | Dual-channel, heavy-duty, technical specs and contact form |
-| [Mayser](https://www.mayser.com/en/safety-technology/products/safety-bumpers) | Custom safety bumpers | Optoelectronic and polyurethane foam options, configuration portal |
 
 ### PRSU/2 controller, output rating
 
 [PRSU/2](https://www.tapeswitch.com/controllers/prsu2.html) device rating: Category 3, PL-e, TÜV-assessed, response < 30ms. Output stage: 2 N.O. positive-guided safety relays, AgSnO2 contacts, switching voltage 250VAC or 24VDC, max switch/relay current 6A individual, 13.8A combined.
 
-This output cannot switch the sowbot 48V/40A motor bus directly, both current and DC voltage exceed the relay's rating. PRSU/2 output must drive a downstream contactor, not the motor bus itself.
-
-### Contactor sourcing (output stage)
-
-Requirement: DC-rated contactor (not an AC relay, DC arcing has no zero-crossing), continuous rating with margin above 40A, coil voltage compatible with PRSU/2's 24VDC/250VAC output rating.
-
 | Part | Coil | Rating | Notes |
 |---|---|---|---|
 | Albright SW180, 24V coil variant | 24VDC | 200A continuous, 400A peak, magnetic blowout, silver alloy contacts | Matches PRSU/2 output rating directly, no interposing relay needed. ~$70-130/unit. No aux contact by default, order aux-contact variant or add-on kit separately |
-| Albright SW180B-108 (the [Amazon listing](https://www.amazon.co.uk/Heavy-Duty-SW180B-108-Industrial-Environment-Applications/dp/B0G52P4Q9H)) | 48V coil | 200A continuous | **Coil voltage mismatch.** 48V coil exceeds PRSU/2's 24VDC output rating. Avoid unless an interposing 24V pilot relay is added per channel. Aftermarket clone (Hconcet/COPACHI-style), not genuine Albright, confirm magnetic blowout is actually present before ordering |
-| TE Connectivity Kilovac EV200 | typically 12/24V | 500A/900VDC | Sealed, aux contact available, ~$150-300+, oversized for 40A |
-| Gigavac GX11/GX14 | 12/24/48V options | 200-500A | Sealed, aux contact standard, similar price band to EV200 |
 
-Decision needed: single contactor (sufficient for well-tried component status under the Category 1/PLc architecture already targeted below) versus two contactors in series with aux-contact cross-monitoring (Category 3-style redundancy, not required for the current PLc target, would be a step toward PLd/e if that's ever needed in Phase 3). Not yet decided, flagged as an outstanding item.
++24V Safety Power
+       │
+┌──────┴──────┐
+│  Gemini 1S  │  (Wireless E-Stop Relay Contacts)
+└──────┬──────┘
+       │
+┌──────┴──────┐
+│   PRSU/2    │  (Tapeswitch VBL Bumper Relay Contacts)
+└──────┬──────┘
+       ├───┬────────────────────────────────┐
+       │   │                                │
+    ┌──┴───┴───┐                        ┌───┴──────┐
+    │ SW180 #1 │ (24V Coil)             │ SW180 #2 │ (24V Coil)
+    │ [TVS/Res]│                        │ [TVS/Res]│
+    └──┬───┬───┘                        └───┬──────┘
+       │   │                                │
+       └───┴────────────────────────────────┘
 
 ## 2. Monitoring
 
