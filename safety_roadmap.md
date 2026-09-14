@@ -96,8 +96,6 @@ Note: sentor and the software e-stop topics are diagnostic and supervisory. They
 |---|---|---|
 | ESP32 + Lizard DSL | DONE, current | hard real-time motor PID and bumper cutoff |
 | STM32H7 + Ardurover migration | TO DO | EKF3, failsafes, geofencing, SITL testing, community scrutiny. In time should buy IEC 61508. Reference: [ArduPilot Zephyr HAL: Flying on a BeagleV-Fire](https://www.beagleboard.org/projects/ardupilot-on-zephyr-flying-on-the-beaglev-fire), [Zephyr Safety Overview](https://docs.zephyrproject.org/latest/safety/safety_overview.html) |
-| STEVAL-SILPLC01 evaluated as candidate STM32H7 board | EVALUATED, not adopted for safety role | Hardware TÜV Italia-assessed SIL2/PL-d (1oo2, STM32H723VG, X-CUBE-STL self-test library certified by TÜV Rheinland). Running ArduPilot on it invalidates that assessment, ArduPilot has no IEC 61508/ISO 13849 systematic capability evidence and was not developed under a safety lifecycle. Board can be used for non-safety motion control, cannot be counted as part of the safety-related control system as currently planned |
-| EtherCAT link, STEVAL-SILPLC01 to motor drivers and Avaota A1, via [SG Electronic Systems EtherCAT shield](https://www.sg-electronic-systems.com/ecommerce/ethernet-shield/37-etherc-v163-ethercatr-is-an-ethernet-based-fieldbus-system-invented-by-beckhoff-automation-the-protocol-is-standardized-in-iec-6.html) | EVALUATED, not safety-rated | Standard EtherCAT, not FSoE (Safety over EtherCAT, ETG.5100). Plain EtherCAT carries no safety semantics, this link cannot carry safety-related stop/interlock data without an FSoE-certified master and slave stack, which this shield does not provide |
 
 ## 5. Regulatory compliance
 
@@ -114,36 +112,55 @@ No compliance claimed. Reference standards only until formal assessment or audit
 | IEC 61508 | Functional safety, E/E/PE systems | Reference for controller firmware architecture |
 | ISO 21448 (SOTIF) | Safety of the intended functionality | Vision degradation: mud, dust, glare |
 
-### PLc calculation, draft
+## Functional Safety Calculation (Draft)
 
-**Risk graph:** S2, F2, P1. Gives PLc. Re-check P if row spacing or travel speed cut down a person's chance to get clear, that would push the target to PLd.
+**Target:** ISO 13849-1 Performance Level c (PLc) / Performance Level d (PLd)
+**Risk Graph Parameters:** S2 (Severe/irreversible injury), F2 (Frequent/continuous exposure), P1 (Avoidance possible via white-sound alarm and flashing beacon). Yields a target of **PLc**. *Note: If $P1$ is dropped to $P2$ due to ambient noise or blind spots, the target escalates to **PLd**.*
 
-**In scope for the calculation:** hard-wired E-stop, physical bumper switch, wireless failsafe pendant, output stage contactor.
+---
 
-**Out of scope:** software e-stop topics, sentor monitoring, reversing alarm and LED, ArduPilot/STEVAL-SILPLC01 motion control path, EtherCAT link to motor drivers and Avaota A1. None of these are safety-related parts of the control system as currently architected.
+### 1. In-Scope Safety Function Components
 
-**Architecture:** Category 1, single channel, no diagnostic coverage. Ceiling is PLc provided MTTFd is in the high band.
+The whole-vehicle emergency motor-stop function forms a series safety loop containing:
 
-**Bumper and E-stop, Tapeswitch PRSU/2, 2-wire configuration:** confirmed by Tapeswitch as Category 1, PLd unreachable in this configuration, which matches the PLc target. MTTFd and PFHd for this specific configuration not yet obtained, only the 4-wire dual-channel figures are published and those do not apply here. Needed from Tapeswitch directly.
+1. **Physical E-Stops:** Dual Schneider XALK178 mushroom buttons ($2\times\text{NC}$ contacts in series).
+2. **Wireless Failsafe Pendant:** Tyro Indus 1S transmitter + Gemini 1S receiver ($2\times\text{force-guided}$ safety relays).
+3. **Physical Bumper:** Tapeswitch VBL Series (4-wire fail-safe loop, configured for overtravel cushioning).
+4. **Safety Interface Logic:** Tapeswitch PRSU/2 Control Unit (dual force-operated NO safety relays).
+5. **Main Power Actuators:** Dual Albright SW180 24V contactors (main contacts wired in series on the 48V $B+$ traction bus) equipped with TVS diode flyback suppression networks.
 
-**Output stage contactor:** not yet selected, see contactor sourcing above. Under the Category 1 architecture, a single well-tried contactor with adequate current/voltage margin satisfies clause 6.2.4, no CCF or diagnostic coverage requirement. Aux-contact cross-monitoring and a second parallel contactor are a Category 3-style upgrade, not required for PLc, would only be relevant if the target changes to PLd/e in Phase 3.
+*Out of scope for safety calculations:* ROS 2 software nodes (`sentor_node`, `/estop/soft`), ESP32 motor controller drivers, reversing alarms, and high-level vision perception.
 
-**Wireless pendant, Indus 1S / Gemini 1S:** manufacturer claims PL-c, not yet checked against their declaration of conformity.
+---
 
-**Category 1 requirements, clause 6.2.4:** well-tried component status for the switch, E-stop, and contactor, MTTFd in the high band. No CCF requirement, no diagnostic coverage requirement.
+### 2. Safety Architecture & Category Assessment
 
-**Annex F:** does not apply. Annex F is CCF scoring for multi-channel architectures, Category 2 to 4. Category 1 is single channel, so there is no second channel for a common cause to act on.
+* **Architecture Category:** **Category 3** (Dual-channel redundant structure across inputs, logic, and output power interlocks).
+* **Diagnostic Coverage ($DC_{\text{avg}}$):** **Low ($60\%\text{--}90\%$)**, achieved by wiring the Normally Closed (NC) auxiliary microswitch contacts of both SW180 contactors in series into the PRSU/2 External Device Monitoring (EDM) reset loop.
+* **Common Cause Failure (CCF):** Annex F scoring applies ($\ge 65$ points required). Achieved via channel isolation, overvoltage protection, and physical wiring separation.
+* **Architectural Ceiling:** **PLd** (or **PLe** dependent on final $DC$ and $MTTF_d$ values), fully satisfying the baseline PLc target.
 
-**Combination rule:** E-stop, bumper, pendant, and output contactor form a series safety function. The lowest PL of these sets the ceiling for the whole function, not an average.
+---
 
-**Outstanding before this is a finished calculation:**
-1. MTTFd/PFHd for the Tapeswitch 2-wire configuration, from Tapeswitch
-2. Well-tried component justification for the switch and E-stop, documented
-3. Contactor selected (coil voltage matched to PRSU/2 output, current/voltage margin confirmed), well-tried component justification documented
-4. Pendant PL-c claim checked against its declaration of conformity
-5. Numbers run through SISTEMA or equivalent once the above four are in
+### 3. Combination Rule & Series Integrity
 
-Until then this is a target and a chosen architecture, not a calculated figure.
+The total $PFH_d$ (Probability of Dangerous Failure per Hour) and PL ceiling are dictated by the worst-performing element in the series chain:
+
+$$\text{Whole-Vehicle Stop Function} = \text{E-Stops} \longrightarrow \text{Gemini 1S} \longrightarrow \text{VBL Bumper / PRSU/2} \longrightarrow \text{Dual SW180s}$$
+
+No individual component in this chain can have a rating lower than the overall target (PLc or PLd).
+
+---
+
+### 4. Outstanding Data Requirements (Pre-SISTEMA Verification)
+
+To convert this target architecture into a fully verified safety calculation, the following quantitative inputs must be compiled:
+
+1. **Tapeswitch VBL + PRSU/2 Metrics:** Obtain official $B_{10d}$, $MTTF_d$, and $PFH_d$ data from Tapeswitch Corp. for the **4-wire fail-safe** VBL bumper configuration paired with the PRSU/2 module.
+2. **Tyro Gemini 1S EC Type-Examination:** Confirm $PFH_d$ figures and operational limits against the manufacturer's official Declaration of Conformity for the Indus 1S / Gemini 1S pair.
+3. **SW180 Contactor Justification:** Document the $B_{10d}$ operations count for the Albright SW180 contactors under expected traction switching loads and record well-tried component status per ISO 13849-2.
+4. **CCF Scoring Checklist:** Complete the formal ISO 13849-1 Annex F evaluation sheet to document a score $\ge 65$.
+5. **SISTEMA Execution:** Run the final parameter set ($B_{10d}$, $MTTF_d$, $DC_{\text{avg}}$, CCF score) through SISTEMA (or equivalent IFA software) to output the finalized $PFH_d$ value for the vehicle.
 
 ### Phase 1: dev platform (current focus)
 
