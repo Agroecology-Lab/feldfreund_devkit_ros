@@ -60,7 +60,7 @@
 
 | Supplier | Model | Notes |
 |---|---|---|
-| [Tapeswitch Corp.](https://www.tapeswitch.com/bumpers.html) | VBL, SE-45D, SE-75D, custom SE-C series | **Selected.** 2-wire configuration with PRSU/2 controller, Category 1. Datasheets and quote request forms |
+| [Tapeswitch Corp.](https://www.tapeswitch.com/bumpers.html) | VBL, SE-45D, SE-75D, custom SE-C series | **Selected.** 4-wire configuration with PRSU/2 controller, Category 3. Datasheets and quote request forms |
 
 ### PRSU/2 controller, output rating
 
