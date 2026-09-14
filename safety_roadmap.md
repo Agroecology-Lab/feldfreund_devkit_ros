@@ -1,4 +1,4 @@
-# Sowbot Safety Roadmap, v0.1
+# Sowbot Safety Roadmap, v0.2
 
 ## 1. E-stop and safety hardware
 
@@ -9,6 +9,7 @@
 | Bumper topics (front_top, front_bottom, back) | DONE | real-time cutoff on ESP32 |
 | Physical hard-wired E-stop | Work in progress | README states it is mandatory, not confirmed built or tested on current hardware |
 | Bumper e-stops (physical) | TO DO | Tapeswitch selected, 2-wire configuration, PRSU/2 controller. See sourcing and calculation notes below |
+| E-stop/bumper output stage (power cutoff) | TO DO | PRSU/2 output relays cannot switch the 48V/40A motor bus directly. See contactor sourcing below |
 | Wireless failsafe pendant | TO DO | [Indus 1S transmitter](https://telemandosybaterias.com/en/p/indus-1s-868mhz-tyro-remotes-e-stop-wireless), €725, plus [Gemini 1S receiver](https://telemandosybaterias.com/en/p/gemini-230vac-tyro-remotes-e-stop-wireless), €771 (both excl. VAT, excl. delivery), €1,496 for the pair. Manufacturer claims PL-c, not yet checked against their declaration of conformity |
 | Reversing alarm and flashing LED, motion-active | TO DO | [Brigade self-adjusting white sound reversing alarm](https://brigade-electronics.com/warning-systems/reversing-and-warning-alarms/self-adjusting-white-sound-reversing-alarms/), ambient-adjusting, integrated LED. Wire to motion state generally, not just reverse. Confirm 12/24V compatibility with the current battery bus. This supports the avoidance assumption in the risk graph below, it is not part of the stop function itself |
 | First-run terminal acceptance of E-stop / safety warning and disclaimer | DONE | prompted by manage.py during .env setup |
@@ -25,6 +26,25 @@ Proper industrial safety bumpers with published PL ratings:
 | [ABB Safety](https://new.abb.com/low-voltage/products/safety-products/pressure-sensitive-devices/asb) | ASB safety bumper | CAD drawings, 2D/3D data, custom foam or leather lengths 0.2m to 3.0m |
 | [Schmersal](https://products.schmersal.com/en_US/safety-related-bumper-1000074843) | SSG-SBL | Dual-channel, heavy-duty, technical specs and contact form |
 | [Mayser](https://www.mayser.com/en/safety-technology/products/safety-bumpers) | Custom safety bumpers | Optoelectronic and polyurethane foam options, configuration portal |
+
+### PRSU/2 controller, output rating
+
+[PRSU/2](https://www.tapeswitch.com/controllers/prsu2.html) device rating: Category 3, PL-e, TÜV-assessed, response < 30ms. Output stage: 2 N.O. positive-guided safety relays, AgSnO2 contacts, switching voltage 250VAC or 24VDC, max switch/relay current 6A individual, 13.8A combined.
+
+This output cannot switch the sowbot 48V/40A motor bus directly, both current and DC voltage exceed the relay's rating. PRSU/2 output must drive a downstream contactor, not the motor bus itself.
+
+### Contactor sourcing (output stage)
+
+Requirement: DC-rated contactor (not an AC relay, DC arcing has no zero-crossing), continuous rating with margin above 40A, coil voltage compatible with PRSU/2's 24VDC/250VAC output rating.
+
+| Part | Coil | Rating | Notes |
+|---|---|---|---|
+| Albright SW180, 24V coil variant | 24VDC | 200A continuous, 400A peak, magnetic blowout, silver alloy contacts | Matches PRSU/2 output rating directly, no interposing relay needed. ~$70-130/unit. No aux contact by default, order aux-contact variant or add-on kit separately |
+| Albright SW180B-108 (the [Amazon listing](https://www.amazon.co.uk/Heavy-Duty-SW180B-108-Industrial-Environment-Applications/dp/B0G52P4Q9H)) | 48V coil | 200A continuous | **Coil voltage mismatch.** 48V coil exceeds PRSU/2's 24VDC output rating. Avoid unless an interposing 24V pilot relay is added per channel. Aftermarket clone (Hconcet/COPACHI-style), not genuine Albright, confirm magnetic blowout is actually present before ordering |
+| TE Connectivity Kilovac EV200 | typically 12/24V | 500A/900VDC | Sealed, aux contact available, ~$150-300+, oversized for 40A |
+| Gigavac GX11/GX14 | 12/24/48V options | 200-500A | Sealed, aux contact standard, similar price band to EV200 |
+
+Decision needed: single contactor (sufficient for well-tried component status under the Category 1/PLc architecture already targeted below) versus two contactors in series with aux-contact cross-monitoring (Category 3-style redundancy, not required for the current PLc target, would be a step toward PLd/e if that's ever needed in Phase 3). Not yet decided, flagged as an outstanding item.
 
 ## 2. Monitoring
 
@@ -51,6 +71,8 @@ Note: sentor and the software e-stop topics are diagnostic and supervisory. They
 |---|---|---|
 | ESP32 + Lizard DSL | DONE, current | hard real-time motor PID and bumper cutoff |
 | STM32H7 + Ardurover migration | TO DO | EKF3, failsafes, geofencing, SITL testing, community scrutiny. In time should buy IEC 61508. Reference: [ArduPilot Zephyr HAL: Flying on a BeagleV-Fire](https://www.beagleboard.org/projects/ardupilot-on-zephyr-flying-on-the-beaglev-fire), [Zephyr Safety Overview](https://docs.zephyrproject.org/latest/safety/safety_overview.html) |
+| STEVAL-SILPLC01 evaluated as candidate STM32H7 board | EVALUATED, not adopted for safety role | Hardware TÜV Italia-assessed SIL2/PL-d (1oo2, STM32H723VG, X-CUBE-STL self-test library certified by TÜV Rheinland). Running ArduPilot on it invalidates that assessment, ArduPilot has no IEC 61508/ISO 13849 systematic capability evidence and was not developed under a safety lifecycle. Board can be used for non-safety motion control, cannot be counted as part of the safety-related control system as currently planned |
+| EtherCAT link, STEVAL-SILPLC01 to motor drivers and Avaota A1, via [SG Electronic Systems EtherCAT shield](https://www.sg-electronic-systems.com/ecommerce/ethernet-shield/37-etherc-v163-ethercatr-is-an-ethernet-based-fieldbus-system-invented-by-beckhoff-automation-the-protocol-is-standardized-in-iec-6.html) | EVALUATED, not safety-rated | Standard EtherCAT, not FSoE (Safety over EtherCAT, ETG.5100). Plain EtherCAT carries no safety semantics, this link cannot carry safety-related stop/interlock data without an FSoE-certified master and slave stack, which this shield does not provide |
 
 ## 5. Regulatory compliance
 
@@ -66,35 +88,37 @@ No compliance claimed. Reference standards only until formal assessment or audit
 | ISO 3691-4 | AGV obstacle detection | Clearance rules, braking distance, detection envelope sizing |
 | IEC 61508 | Functional safety, E/E/PE systems | Reference for controller firmware architecture |
 | ISO 21448 (SOTIF) | Safety of the intended functionality | Vision degradation: mud, dust, glare |
-PLc calculation, draft
 
-Risk graph: S2, F2, P1. Gives PLc. Re-check P if row spacing or travel speed cut down a person's chance to get clear, that would push the target to PLd.
+### PLc calculation, draft
 
-In scope for the calculation: hard-wired E-stop, physical bumper switch, wireless failsafe pendant, output stage contactor.
+**Risk graph:** S2, F2, P1. Gives PLc. Re-check P if row spacing or travel speed cut down a person's chance to get clear, that would push the target to PLd.
 
-Out of scope: software e-stop topics, sentor monitoring, reversing alarm and LED, ArduPilot/STEVAL-SILPLC01 motion control path, EtherCAT link to motor drivers and Avaota A1. None of these are safety-related parts of the control system as currently architected.
+**In scope for the calculation:** hard-wired E-stop, physical bumper switch, wireless failsafe pendant, output stage contactor.
 
-Architecture: Category 1, single channel, no diagnostic coverage. Ceiling is PLc provided MTTFd is in the high band.
+**Out of scope:** software e-stop topics, sentor monitoring, reversing alarm and LED, ArduPilot/STEVAL-SILPLC01 motion control path, EtherCAT link to motor drivers and Avaota A1. None of these are safety-related parts of the control system as currently architected.
 
-Bumper and E-stop, Tapeswitch PRSU/2, 2-wire configuration: confirmed by Tapeswitch as Category 1, PLd unreachable in this configuration, which matches the PLc target. MTTFd and PFHd for this specific configuration not yet obtained, only the 4-wire dual-channel figures are published and those do not apply here. Needed from Tapeswitch directly.
+**Architecture:** Category 1, single channel, no diagnostic coverage. Ceiling is PLc provided MTTFd is in the high band.
 
-Output stage contactor: not yet selected, see contactor sourcing above. Under the Category 1 architecture, a single well-tried contactor with adequate current/voltage margin satisfies clause 6.2.4, no CCF or diagnostic coverage requirement. Aux-contact cross-monitoring and a second parallel contactor are a Category 3-style upgrade, not required for PLc, would only be relevant if the target changes to PLd/e in Phase 3.
+**Bumper and E-stop, Tapeswitch PRSU/2, 2-wire configuration:** confirmed by Tapeswitch as Category 1, PLd unreachable in this configuration, which matches the PLc target. MTTFd and PFHd for this specific configuration not yet obtained, only the 4-wire dual-channel figures are published and those do not apply here. Needed from Tapeswitch directly.
 
-Wireless pendant, Indus 1S / Gemini 1S: manufacturer claims PL-c, not yet checked against their declaration of conformity.
+**Output stage contactor:** not yet selected, see contactor sourcing above. Under the Category 1 architecture, a single well-tried contactor with adequate current/voltage margin satisfies clause 6.2.4, no CCF or diagnostic coverage requirement. Aux-contact cross-monitoring and a second parallel contactor are a Category 3-style upgrade, not required for PLc, would only be relevant if the target changes to PLd/e in Phase 3.
 
-Category 1 requirements, clause 6.2.4: well-tried component status for the switch, E-stop, and contactor, MTTFd in the high band. No CCF requirement, no diagnostic coverage requirement.
+**Wireless pendant, Indus 1S / Gemini 1S:** manufacturer claims PL-c, not yet checked against their declaration of conformity.
 
-Annex F: does not apply. Annex F is CCF scoring for multi-channel architectures, Category 2 to 4. Category 1 is single channel, so there is no second channel for a common cause to act on.
+**Category 1 requirements, clause 6.2.4:** well-tried component status for the switch, E-stop, and contactor, MTTFd in the high band. No CCF requirement, no diagnostic coverage requirement.
 
-Combination rule: E-stop, bumper, pendant, and output contactor form a series safety function. The lowest PL of these sets the ceiling for the whole function, not an average.
+**Annex F:** does not apply. Annex F is CCF scoring for multi-channel architectures, Category 2 to 4. Category 1 is single channel, so there is no second channel for a common cause to act on.
 
-Outstanding before this is a finished calculation:
+**Combination rule:** E-stop, bumper, pendant, and output contactor form a series safety function. The lowest PL of these sets the ceiling for the whole function, not an average.
 
-- MTTFd/PFHd for the Tapeswitch 2-wire configuration, from Tapeswitch
-Well-tried component justification for the switch and E-stop, documented
-- Contactor selected (coil voltage matched to PRSU/2 output, current/voltage margin confirmed), well-tried component justification documented
-- Pendant PL-c claim checked against its declaration of conformity
-- Numbers run through SISTEMA or equivalent 
+**Outstanding before this is a finished calculation:**
+1. MTTFd/PFHd for the Tapeswitch 2-wire configuration, from Tapeswitch
+2. Well-tried component justification for the switch and E-stop, documented
+3. Contactor selected (coil voltage matched to PRSU/2 output, current/voltage margin confirmed), well-tried component justification documented
+4. Pendant PL-c claim checked against its declaration of conformity
+5. Numbers run through SISTEMA or equivalent once the above four are in
+
+Until then this is a target and a chosen architecture, not a calculated figure.
 
 ### Phase 1: dev platform (current focus)
 
@@ -137,10 +161,11 @@ Audience: commercial growers, farm management enterprises.
 
 1. Confirm battery cutoff threshold
 2. Get MTTFd/PFHd figures from Tapeswitch for the 2-wire configuration
-3. Build and test physical hard-wired E-stop and bumper e-stops on current hardware
-4. Add wireless failsafe pendant, check PL-c claim against declaration of conformity
-5. Add reversing alarm and flashing LED, wired to motion state
-6. Document well-tried component justification and finish the PLc calculation
-7. sentor hardware smoke test
-8. ros2_medkit black-box logging
-9. Decide on resume-confirmation behaviour
+3. Select output stage contactor, resolve coil voltage against PRSU/2 output rating, decide single vs redundant contactor
+4. Build and test physical hard-wired E-stop and bumper e-stops on current hardware
+5. Add wireless failsafe pendant, check PL-c claim against declaration of conformity
+6. Add reversing alarm and flashing LED, wired to motion state
+7. Document well-tried component justification and finish the PLc calculation
+8. sentor hardware smoke test
+9. ros2_medkit black-box logging
+10. Decide on resume-confirmation behaviour
