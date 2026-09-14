@@ -46,12 +46,12 @@
 
 | # | Component | Model / Supplier | Role in loop | Key spec | Status | Data still needed |
 |---|---|---|---|---|---|---|
-| 1 | Physical E-stops | Schneider XALK178 ×2 | Input (series NC) | 2×NC contacts | WIP | None |
-| 2 | Wireless failsafe pendant | [Tyro Indus 1S transmitter](https://telemandosybaterias.com/en/p/indus-1s-868mhz-tyro-remotes-e-stop-wireless) (€725) + [Gemini 1S receiver](https://telemandosybaterias.com/en/p/gemini-230vac-tyro-remotes-e-stop-wireless) (€771), both excl. VAT and delivery | Input | 868MHz, €1,496/pair | WIP | PFHd vs. manufacturer's DoC (PL-c claim unverified) |
-| 3 | Bumper | [Tapeswitch VBL](https://www.tapeswitch.com/bumpers.html) (SE-45D/SE-75D/custom SE-C) | Input | 4-wire fail-safe loop | Selected | B10d, MTTFd, PFHd from Tapeswitch |
-| 4 | Safety logic | [Tapeswitch PRSU/2](https://www.tapeswitch.com/controllers/prsu2.html) | Logic | Cat 3, PL-e, TÜV-assessed, <30ms response; 2×N.O. positive-guided safety relays, AgSnO2 contacts, 250VAC/24VDC, 6A individual/13.8A combined | Selected | None |
-| 5 | Output contactors | Albright SW180 24V ×2 (series, 48V B+ bus) | Output | 200A cont/400A peak, magnetic blowout, silver alloy contacts, TVS suppressors, ~$70–130/unit. No aux contact by default, add [2180-796 auxiliary micro-switch kit](https://www.arc-components.com/auxiliary-micro-switches-for-albright-contactors.html) (£32.09 excl. VAT;) | WIP | B10d under traction load;  |
-| 6 | Reversing alarm/beacon | [Brigade self-adjusting white sound alarm](https://brigade-electronics.com/warning-systems/reversing-and-warning-alarms/self-adjusting-white-sound-reversing-alarms/) with integrated LED | Not in stop function, avoidance measure only | 24V, motion-linked, wire to motion state generally not just reverse | TO DO | None |
+| 1 | Physical E-stops | Schneider XALK178 ×2, [Kempston Controls](https://www.kempstoncontrols.co.uk/XALK178/Schneider/sku/479749), £29.05 each excl. VAT | Input (series NC) | 2×NC contacts | WIP | None |
+| 2 | Wireless failsafe pendant | [Tyro Indus 1S transmitter](https://telemandosybaterias.com/en/p/indus-1s-868mhz-tyro-remotes-e-stop-wireless), €725, + [Gemini 1S receiver](https://telemandosybaterias.com/en/p/gemini-230vac-tyro-remotes-e-stop-wireless), €771, both excl. VAT and delivery | Input | 868MHz | WIP | PFHd vs. manufacturer's DoC (PL-c claim unverified) |
+| 3 | Bumper | [Tapeswitch VBL](https://www.tapeswitch.com/bumpers.html) (SE-45D/SE-75D/custom SE-C), quote-only, no fixed web price | Input | 4-wire fail-safe loop | Selected | B10d, MTTFd, PFHd from Tapeswitch |
+| 4 | Safety logic | [Tapeswitch PRSU/2](https://www.tapeswitch.com/store/products.php?cat=Interface+Controllers), $315.00 from Tapeswitch's own store | Logic | Cat 3, PL-e, TÜV-assessed, <30ms response; 2×N.O. positive-guided safety relays, AgSnO2 contacts, 250VAC/24VDC, 6A individual/13.8A combined | Selected | None |
+| 5 | Output contactors | Albright SW180 24V ×2 (series, 48V B+ bus), [Arc Components](https://www.arc-components.com/sw180-3-albright-single-acting-solenoid-contactor-24v-intermittent.html), £74.69 each excl. VAT.  [2180-796 auxiliary micro-switch kit](https://www.arc-components.com/auxiliary-micro-switches-for-albright-contactors.html) (fits SW180/SW182), £32.09 excl. VAT | Output | 200A cont/400A peak, magnetic blowout, silver alloy contacts, TVS suppressors | WIP | B10d under traction load;  |
+| 6 | Reversing alarm/beacon | [Brigade SA-BBS-97 self-adjusting white sound alarm](https://www.suburbanseats.com/products/brigade-electronics-white-sound-smart-backup-alarm-97-decibels), £90, Add flashing LED ~£40 | Not in stop function, avoidance measure only | 24V, wire to motion state generally not just reverse | TO DO | None |
 
 ### Software and control status
 
@@ -61,8 +61,9 @@
 | /estop/front, /estop/back (hardware state topics) | DONE | driver-level |
 | Bumper topics (front_top, front_bottom, back) | DONE | Not used in formal safety system |
 | First-run terminal acceptance of E-stop / safety warning and disclaimer | DONE | prompted by manage.py during .env setup |
-| Resume confirmation after a E-stop | WIP | after safety circuit triggered, requires manual re-arm |
+| Resume confirmation after a stop | WIP | after safety circuit triggered, requires manual re-arm |
 
+Hardware build status (physical E-stop, bumper e-stops, output stage, wireless pendant) is tracked in the component table above, not repeated here.
 
 ## 2. Monitoring
 
@@ -71,6 +72,7 @@
 | sentor (sowbot_monitor.yaml) | WIP, ~75% | monitors e-stop, bumpers, battery, camera, odom, neo heartbeat |
 | sentor_node.py wired into devkit.launch.py | DONE | |
 | sentor hardware smoke test | TO DO | validated in sim only so far |
+| Battery voltage cutoff threshold | TO DO | marked `# TODO: CONFIRM` in sowbot_monitor.yaml, no value set |
 | ros2_medkit black-box logging | TO DO | not in repo or dependency list yet, adding ASAP |
 
 Note: sentor and the software e-stop topics are diagnostic and supervisory. They do not count as safety-related parts of the control system for the PLc calculation below.
@@ -150,11 +152,11 @@ Audience: university labs, ag-tech researchers, software startups.
 | Standards used as design reference | YES, informal |
 | Liability position | User's own risk, standard for a research/dev kit, stated in README |
 
-No certification work needed at this phase.
+No certification work needed at this phase. Reference the standards, do not claim them.
 
 ### Phase 2: OEM modular subsystems
 
-Audience: startups integrating Sowbot's drive/safety core systems.
+Audience: startups integrating Sowbot's drive/safety core.
 
 | Item | Status |
 |---|---|
