@@ -66,34 +66,35 @@ No compliance claimed. Reference standards only until formal assessment or audit
 | ISO 3691-4 | AGV obstacle detection | Clearance rules, braking distance, detection envelope sizing |
 | IEC 61508 | Functional safety, E/E/PE systems | Reference for controller firmware architecture |
 | ISO 21448 (SOTIF) | Safety of the intended functionality | Vision degradation: mud, dust, glare |
+PLc calculation, draft
 
-### PLc calculation, draft
+Risk graph: S2, F2, P1. Gives PLc. Re-check P if row spacing or travel speed cut down a person's chance to get clear, that would push the target to PLd.
 
-**Risk graph:** S2, F2, P1. Gives PLc. Re-check P if row spacing or travel speed cut down a person's chance to get clear, that would push the target to PLd.
+In scope for the calculation: hard-wired E-stop, physical bumper switch, wireless failsafe pendant, output stage contactor.
 
-**In scope for the calculation:** hard-wired E-stop, physical bumper switch, wireless failsafe pendant.
+Out of scope: software e-stop topics, sentor monitoring, reversing alarm and LED, ArduPilot/STEVAL-SILPLC01 motion control path, EtherCAT link to motor drivers and Avaota A1. None of these are safety-related parts of the control system as currently architected.
 
-**Out of scope:** software e-stop topics, sentor monitoring, reversing alarm and LED. None of these are safety-related parts of the control system.
+Architecture: Category 1, single channel, no diagnostic coverage. Ceiling is PLc provided MTTFd is in the high band.
 
-**Architecture:** Category 1, single channel, no diagnostic coverage. Ceiling is PLc provided MTTFd is in the high band.
+Bumper and E-stop, Tapeswitch PRSU/2, 2-wire configuration: confirmed by Tapeswitch as Category 1, PLd unreachable in this configuration, which matches the PLc target. MTTFd and PFHd for this specific configuration not yet obtained, only the 4-wire dual-channel figures are published and those do not apply here. Needed from Tapeswitch directly.
 
-**Bumper and E-stop, Tapeswitch PRSU/2, 2-wire configuration:** confirmed by Tapeswitch as Category 1, PLd unreachable in this configuration, which matches the PLc target. MTTFd and PFHd for this specific configuration not yet obtained, only the 4-wire dual-channel figures are published and those do not apply here. Needed from Tapeswitch directly.
+Output stage contactor: not yet selected, see contactor sourcing above. Under the Category 1 architecture, a single well-tried contactor with adequate current/voltage margin satisfies clause 6.2.4, no CCF or diagnostic coverage requirement. Aux-contact cross-monitoring and a second parallel contactor are a Category 3-style upgrade, not required for PLc, would only be relevant if the target changes to PLd/e in Phase 3.
 
-**Wireless pendant, Indus 1S / Gemini 1S:** manufacturer claims PL-c, not yet checked against their declaration of conformity.
+Wireless pendant, Indus 1S / Gemini 1S: manufacturer claims PL-c, not yet checked against their declaration of conformity.
 
-**Category 1 requirements, clause 6.2.4:** well-tried component status for the switch and E-stop, MTTFd in the high band. No CCF requirement, no diagnostic coverage requirement.
+Category 1 requirements, clause 6.2.4: well-tried component status for the switch, E-stop, and contactor, MTTFd in the high band. No CCF requirement, no diagnostic coverage requirement.
 
-**Annex F:** does not apply. Annex F is CCF scoring for multi-channel architectures, Category 2 to 4. Category 1 is single channel, so there is no second channel for a common cause to act on.
+Annex F: does not apply. Annex F is CCF scoring for multi-channel architectures, Category 2 to 4. Category 1 is single channel, so there is no second channel for a common cause to act on.
 
-**Combination rule:** E-stop, bumper, and pendant form a series safety function. The lowest PL of the three sets the ceiling for the whole function, not an average.
+Combination rule: E-stop, bumper, pendant, and output contactor form a series safety function. The lowest PL of these sets the ceiling for the whole function, not an average.
 
-**Outstanding before this is a finished calculation:**
-1. MTTFd/PFHd for the Tapeswitch 2-wire configuration, from Tapeswitch
-2. Well-tried component justification for the switch and E-stop, documented
-3. Pendant PL-c claim checked against its declaration of conformity
-4. Numbers run through SISTEMA or equivalent once the above three are in
+Outstanding before this is a finished calculation:
 
-Until then this is a target and a chosen architecture, not a calculated figure.
+- MTTFd/PFHd for the Tapeswitch 2-wire configuration, from Tapeswitch
+Well-tried component justification for the switch and E-stop, documented
+- Contactor selected (coil voltage matched to PRSU/2 output, current/voltage margin confirmed), well-tried component justification documented
+- Pendant PL-c claim checked against its declaration of conformity
+- Numbers run through SISTEMA or equivalent 
 
 ### Phase 1: dev platform (current focus)
 
