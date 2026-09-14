@@ -2,7 +2,6 @@
 
 ## 1. E-stop and safety hardware
 
-### 24V Safety Power
 ```
 ======================= 24V SAFETY CONTROL LOOP =======================
 
@@ -51,7 +50,7 @@
 | 3 | Bumper | [Tapeswitch VBL](https://www.tapeswitch.com/bumpers.html) (SE-45D/SE-75D/custom SE-C), quote-only, no fixed web price | Input | 4-wire fail-safe loop | Selected | B10d, MTTFd, PFHd from Tapeswitch |
 | 4 | Safety logic | [Tapeswitch PRSU/2](https://www.tapeswitch.com/store/products.php?cat=Interface+Controllers), $315.00 from Tapeswitch's own store | Logic | Cat 3, PL-e, TÜV-assessed, <30ms response; 2×N.O. positive-guided safety relays, AgSnO2 contacts, 250VAC/24VDC, 6A individual/13.8A combined | Selected | None |
 | 5 | Output contactors | Albright SW180 24V ×2 (series, 48V B+ bus), [Arc Components](https://www.arc-components.com/sw180-3-albright-single-acting-solenoid-contactor-24v-intermittent.html), £74.69 each excl. VAT.  [2180-796 auxiliary micro-switch kit](https://www.arc-components.com/auxiliary-micro-switches-for-albright-contactors.html) (fits SW180/SW182), £32.09 excl. VAT | Output | 200A cont/400A peak, magnetic blowout, silver alloy contacts, TVS suppressors | WIP | B10d under traction load;  |
-| 6 | Reversing alarm/beacon | [Brigade SA-BBS-97 self-adjusting white sound alarm](https://www.suburbanseats.com/products/brigade-electronics-white-sound-smart-backup-alarm-97-decibels), £90, Add flashing LED ~£40 | Not in stop function, avoidance measure only | 24V, wire to motion state generally not just reverse | TO DO | None |
+| 6 | Reversing alarm/beacon | [Brigade SA-BBS-97 self-adjusting white sound alarm](https://www.beaconsandlightbars.co.uk/product/brigade-electronics-brigade-sa-bbs-97-77-97db-smart-bbs-tek-white-sound-reversing-alarm-pn-sa-bbs-9-17914), £95, Add [rotating LED ~£40](https://www.compass24.com/led-3600-rotating-beacon-flat-396940/black | Not in stop function, avoidance measure only | 24V, wire to motion state generally not just reverse | TO DO | None |
 
 ### Software and control status
 
