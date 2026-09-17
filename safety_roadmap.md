@@ -43,14 +43,26 @@
   Motor Controllers 
 ```
 
+# Safety Loop Components
+
+## Core
+
 | # | Component | Model / Supplier | Role in loop | Key spec | Status | Data still needed |
 |---|---|---|---|---|---|---|
 | 1 | Physical E-stops | Schneider XALK178 ×2, [Kempston Controls](https://www.kempstoncontrols.co.uk/XALK178/Schneider/sku/479749), £29.05 each excl. VAT | Input (series NC) | 2×NC contacts | WIP | None |
 | 2 | Wireless failsafe pendant | [Tyro Indus 1S transmitter](https://telemandosybaterias.com/en/p/indus-1s-868mhz-tyro-remotes-e-stop-wireless), €725, + [Gemini 1S receiver](https://telemandosybaterias.com/en/p/gemini-230vac-tyro-remotes-e-stop-wireless), €771, both excl. VAT and delivery | Input | 868MHz | WIP | PFHd vs. manufacturer's DoC (PL-c claim unverified) |
-| 3 | Bumper | [Tapeswitch VBL](https://www.tapeswitch.com/bumpers.html) (SE-45D/SE-75D/custom SE-C), quote-only, no fixed web price | Input | 4-wire fail-safe loop | Selected | B10d, MTTFd, PFHd from Tapeswitch |
-| 4 | Safety logic | [Tapeswitch PRSU/2](https://www.tapeswitch.com/store/products.php?cat=Interface+Controllers), $315.00 from Tapeswitch's own store | Logic | Cat 3, PL-e, TÜV-assessed, <30ms response; 2×N.O. positive-guided safety relays, AgSnO2 contacts, 250VAC/24VDC, 6A individual/13.8A combined | Selected | None |
-| 5 | Output contactors | Albright SW180 24V ×2 (series, 48V B+ bus), [Arc Components](https://www.arc-components.com/sw180-3-albright-single-acting-solenoid-contactor-24v-intermittent.html), £74.69 each excl. VAT.  [2180-796 auxiliary micro-switch kit](https://www.arc-components.com/auxiliary-micro-switches-for-albright-contactors.html) (fits SW180/SW182), £32.09 excl. VAT | Output | 200A cont/400A peak, magnetic blowout, silver alloy contacts, TVS suppressors | WIP | B10d under traction load;  |
-| 6 | Reversing alarm/beacon | [Brigade SA-BBS-97 self-adjusting white sound alarm](https://www.beaconsandlightbars.co.uk/product/brigade-electronics-brigade-sa-bbs-97-77-97db-smart-bbs-tek-white-sound-reversing-alarm-pn-sa-bbs-9-17914), £95, Add [rotating LED ~£40](https://www.compass24.com/led-3600-rotating-beacon-flat-396940/black) | Not in stop function, avoidance measure only | 24V, wire to motion state generally not just reverse | TO DO | None |
+| 3 | Output contactors | Albright SW180 24V ×2 (series, 48V B+ bus), [Arc Components](https://www.arc-components.com/sw180-3-albright-single-acting-solenoid-contactor-24v-intermittent.html), £74.69 each excl. VAT. [2180-796 auxiliary micro-switch kit](https://www.arc-components.com/auxiliary-micro-switches-for-albright-contactors.html) (fits SW180/SW182), £32.09 excl. VAT | Output | 200A cont/400A peak, magnetic blowout, silver alloy contacts, TVS suppressors | WIP | B10d under traction load |
+| 4 | IDEM GLM rope pull switch (note: this is "Mini Duty", not Heavy Duty — GLHL/GLHR is IDEM's Heavy Duty line) | [IDEM 143052 GLM 2NC 2NO M20](https://www.seltec.co.uk/products/idem-glm-guardian-line-mini-duty-rope-switch.html), £77.92 excl. VAT (£93.50 incl. VAT), Seltec | Input | Die-cast, up to 30–50m rope span, 2NC/2NO | TO DO | Confirm rope length needed; confirm Mini vs Heavy Duty intent; B10d/MTTFd/PFHd |
+| **Total** | | **£1,919.66 ** (excl. VAT total was £1,599.56) | | | | |
+
+## Supplemental
+
+| # | Component | Model / Supplier | Role in loop | Key spec | Status | Data still needed |
+|---|---|---|---|---|---|---|
+| 1 | Relays / safety logic | [Tapeswitch PRSU/2](https://www.tapeswitch.com/store/products.php?cat=Interface+Controllers), $315.00 from Tapeswitch's own store | Logic | Cat 3, PL-e, TÜV-assessed, <30ms response; 2×N.O. positive-guided safety relays, AgSnO2 contacts, 250VAC/24VDC, 6A individual/13.8A combined | Selected | None |
+| 2 | Bumper | [Tapeswitch VBL](https://www.tapeswitch.com/bumpers.html) (SE-45D/SE-75D/custom SE-C), quote-only, no fixed web price | Input | 4-wire fail-safe loop | Selected | B10d, MTTFd, PFHd from Tapeswitch |
+| 3 | Reversing alarm/beacon | [Brigade SA-BBS-97](https://www.beaconsandlightbars.co.uk/product/brigade-electronics-brigade-sa-bbs-97-77-97db-smart-bbs-tek-white-sound-reversing-alarm-pn-sa-bbs-9-17914), £95, + [rotating LED ~£40](https://www.compass24.com/led-3600-rotating-beacon-flat-396940/black) | Not in stop function, avoidance measure only | 24V, wire to motion state generally not just reverse | TO DO | None |
+| **Total** | | **£135.00** + **$315.00** (mixed currency; Tapeswitch VBL bumper excluded — quote-only, no fixed price) | | | | |
 
 ### Software and control status
 
