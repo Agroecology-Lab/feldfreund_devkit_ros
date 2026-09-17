@@ -53,7 +53,7 @@
 | 2 | Wireless failsafe pendant | [Tyro Indus 1S transmitter](https://telemandosybaterias.com/en/p/indus-1s-868mhz-tyro-remotes-e-stop-wireless), €725, + [Gemini 1S receiver](https://telemandosybaterias.com/en/p/gemini-230vac-tyro-remotes-e-stop-wireless), €771, both excl. VAT and delivery | Input | 868MHz | WIP | PFHd vs. manufacturer's DoC (PL-c claim unverified) |
 | 3 | Output contactors | Albright SW180 24V ×2 (series, 48V B+ bus), [Arc Components](https://www.arc-components.com/sw180-3-albright-single-acting-solenoid-contactor-24v-intermittent.html), £74.69 each excl. VAT. [2180-796 auxiliary micro-switch kit](https://www.arc-components.com/auxiliary-micro-switches-for-albright-contactors.html) (fits SW180/SW182), £32.09 excl. VAT | Output | 200A cont/400A peak, magnetic blowout, silver alloy contacts, TVS suppressors | WIP | B10d under traction load |
 | 4 | IDEM GLM wire rope tether pull switch | [IDEM 143052 GLM 2NC 2NO M20](https://www.seltec.co.uk/products/idem-glm-guardian-line-mini-duty-rope-switch.html), £77.92 excl. VAT (£93.50 incl. VAT), Seltec | Input | Die-cast, up to 30–50m rope span, 2NC/2NO | TO DO | Confirm rope length needed. B10d/MTTFd/PFHd |
-| **Total** | | **£1,919.66 ** (excl. VAT total was £1,599.56) | | | | |
+| **Total** | | **£1,919.66** (excl. VAT total was £1,599.56) | | | | |
 
 ## Supplemental
 
