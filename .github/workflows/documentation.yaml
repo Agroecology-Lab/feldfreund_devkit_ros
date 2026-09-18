@@ -1,0 +1,36 @@
+name: Deploy Documentation to Data Repo
+
+on:
+  push:
+    branches: [ caatinga-dev ]
+
+jobs:
+  build-and-push-docs:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout Source Repository
+        uses: actions/checkout@v4
+
+      - name: Install Doxygen and Graphviz
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y doxygen graphviz
+
+      - name: Generate Doxygen Docs
+        run: |
+          doxygen Doxyfile
+          touch html/.nojekyll
+
+      - name: Deploy Docs to Sowbot_Data Repo
+        uses: cpina/github-action-push-to-another-repository@main
+        env:
+          API_TOKEN_GITHUB: ${{ secrets.DOCS_DEPLOY_TOKEN }}
+        with:
+          source-directory: 'html'
+          destination-github-username: 'Agroecology-Lab'
+          destination-repository-name: 'Sowbot_Data'
+          target-branch: 'main'
+          target-directory: 'docs' # Stores docs in a /docs folder inside Sowbot_Data
+          user-email: 'action@github.com'
+          user-name: 'GitHub Action Bot'
