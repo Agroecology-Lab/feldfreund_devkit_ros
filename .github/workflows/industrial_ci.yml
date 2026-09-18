@@ -1,4 +1,4 @@
-name: Industrial CI with Codecov
+name: Industrial CI 
 
 on:
   push:
@@ -24,9 +24,4 @@ jobs:
           # Instruct industrial_ci to generate gcov test reports after running tests
           AFTER_RUN_TARGET_TEST: 'lcov --capture --directory . --output-file coverage.info'
 
-      - name: Upload coverage reports to Codecov
-        uses: codecov/codecov-action@v4
-        with:
-          token: ${{ secrets.CODECOV_TOKEN }}
-          fail_ci_if_error: false
-          verbose: true
+      
