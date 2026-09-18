@@ -1,4 +1,4 @@
-name: Deploy Documentation to Data Repo
+name: Deploy Sphinx Docs to Sowbot_Data
 
 on:
   push:
@@ -12,25 +12,30 @@ jobs:
       - name: Checkout Source Repository
         uses: actions/checkout@v4
 
-      - name: Install Doxygen and Graphviz
+      - name: Install Documentation Tools
         run: |
           sudo apt-get update
-          sudo apt-get install -y doxygen graphviz
+          sudo apt-get install -y doxygen graphviz python3-pip
+          pip3 install sphinx breathe sphinx-rtd-theme myst-parser
 
-      - name: Generate Doxygen Docs
+      - name: Generate Doxygen XML
+        run: doxygen Doxyfile
+
+      - name: Build Sphinx HTML
         run: |
-          doxygen Doxyfile
-          touch html/.nojekyll
+          # Builds Sphinx project from docs/ directory into docs/_build/html
+          sphinx-build -b html docs docs/_build/html
+          touch docs/_build/html/.nojekyll
 
       - name: Deploy Docs to Sowbot_Data Repo
         uses: cpina/github-action-push-to-another-repository@main
         env:
           API_TOKEN_GITHUB: ${{ secrets.DOCS_DEPLOY_TOKEN }}
         with:
-          source-directory: 'html'
+          source-directory: 'docs/_build/html'
           destination-github-username: 'Agroecology-Lab'
           destination-repository-name: 'Sowbot_Data'
           target-branch: 'main'
-          target-directory: 'docs' # Stores docs in a /docs folder inside Sowbot_Data
+          target-directory: 'docs'
           user-email: 'action@github.com'
           user-name: 'GitHub Action Bot'
