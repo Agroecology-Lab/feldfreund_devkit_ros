@@ -8,10 +8,18 @@ Development is led by the <a href="https://agroecologylab.org.uk" target="_blank
 Reference open hardware stack(s) under development at [Sowbot.co.uk](https://sowbot.co.uk) 
 
 [Quick start](https://github.com/Agroecology-Lab/feldfreund_devkit_ros#quick-start) 
+
 **Collaborators welcome.** See [CONTRIBUTING.md](CONTRIBUTING.md). 
 
 Contact: [sowbot.co.uk](https://sowbot.co.uk/contact/)
 
+<!-- CI & Test Status -->
+[![Run Tests](https://github.com/Agroecology-Lab/feldfreund_devkit_ros/actions/workflows/test.yml/badge.svg?branch=caatinga-dev)](https://github.com/Agroecology-Lab/feldfreund_devkit_ros/actions/workflows/test.yml?query=branch%3Acaatinga-dev)
+[![Industrial CI](https://github.com/Agroecology-Lab/feldfreund_devkit_ros/actions/workflows/industrial_ci.yml/badge.svg?branch=caatinga-dev)](https://github.com/Agroecology-Lab/feldfreund_devkit_ros/actions/workflows/industrial_ci.yml?query=branch%3Acaatinga-dev)
+[![Documentation Deployment](https://github.com/Agroecology-Lab/feldfreund_devkit_ros/actions/workflows/documentation.yml/badge.svg?branch=caatinga-dev)](https://github.com/Agroecology-Lab/feldfreund_devkit_ros/actions/workflows/documentation.yml?query=branch%3Acaatinga-dev)
+
+<!-- Code Coverage -->
+[![Codecov](https://codecov.io/gh/Agroecology-Lab/feldfreund_devkit_ros/branch/caatinga-dev/graph/badge.svg)](https://codecov.io/gh/Agroecology-Lab/feldfreund_devkit_ros/branch/caatinga-dev)
 
 **Milestone — multi-row mission following validated in Gazebo:**
 
