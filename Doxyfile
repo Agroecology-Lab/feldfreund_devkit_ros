@@ -9,7 +9,7 @@
 PROJECT_NAME           = "Feldfreund DevKit ROS (Sowbot)"
 PROJECT_NUMBER         = "caatinga-dev"
 PROJECT_BRIEF          = "Open agricultural robotics stack for precision seeding and weeding"
-OUTPUT_DIRECTORY       = .
+OUTPUT_DIRECTORY       = docs
 CREATE_SUBDIRS         = NO
 ALLOW_UNICODE_NAMES    = YES
 OUTPUT_LANGUAGE        = English
@@ -18,7 +18,7 @@ OUTPUT_LANGUAGE        = English
 # Output Formats (XML ON for Breathe, HTML OFF)
 # ------------------------------------------------------------------------------
 GENERATE_XML           = YES
-XML_OUTPUT            = xml
+XML_OUTPUT             = xml
 XML_PROGRAMLISTING     = YES
 
 GENERATE_HTML          = NO
@@ -55,7 +55,8 @@ SORT_MEMBERS_CTORS_1ST = YES
 # ------------------------------------------------------------------------------
 # Input Directories & Source Parsing
 # ------------------------------------------------------------------------------
-INPUT                  = . \
+INPUT                  = src \
+                         docs \
                          README.md
 
 RECURSIVE              = YES
@@ -65,8 +66,8 @@ EXCLUDE                = build \
                          .git \
                          .github \
                          .venv \
-                         docs \
-                         xml
+                         docs/_build \
+                         docs/xml
 
 FILE_PATTERNS          = *.c \
                          *.cc \
