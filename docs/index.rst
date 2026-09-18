@@ -8,7 +8,8 @@ Welcome to the documentation for the **Feldfreund DevKit ROS (Sowbot)** platform
    :maxdepth: 2
    :caption: Navigation & Architecture
 
-   README <README.md>
+   README <../README.md>
+   lizard-firmware-setup
 
 .. toctree::
    :maxdepth: 2
@@ -16,6 +17,15 @@ Welcome to the documentation for the **Feldfreund DevKit ROS (Sowbot)** platform
 
    cpp_api
    python_api
+
+.. toctree::
+   :maxdepth: 2
+   :caption: Research & Notes
+
+   research/Sim
+   research/Visual_roadmap
+   research/fields2coverVsSlicr
+   research/Paper_Proposal:_Terramechanics-Informed_State_Estimation_for_Tracked_Autonomous_Rovers
 
 Indices and Tables
 ==================
