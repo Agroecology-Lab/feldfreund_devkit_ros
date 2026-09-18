@@ -1,20 +1,25 @@
+=============================================
 Feldfreund DevKit ROS (Sowbot) Documentation
 =============================================
 
-.. toctree::
-   :maxdepth: 2
-   :caption: Overview
-
-   README <../README.md>
+Welcome to the documentation for the **Feldfreund DevKit ROS (Sowbot)** platform.
 
 .. toctree::
    :maxdepth: 2
-   :caption: C++ API Reference
+   :caption: Navigation & Architecture
+
+   README <README.md>
+
+.. toctree::
+   :maxdepth: 2
+   :caption: API Reference
 
    cpp_api
-
-.. toctree::
-   :maxdepth: 2
-   :caption: Python API Reference
-
    python_api
+
+Indices and Tables
+==================
+
+* :ref:`genindex`
+* :ref:`modindex`
+* :ref:`search`
