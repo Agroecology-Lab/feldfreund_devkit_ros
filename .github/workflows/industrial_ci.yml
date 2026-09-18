@@ -1,0 +1,22 @@
+name: Industrial CI
+
+on:
+  push:
+    branches: [ caatinga-dev ]
+  pull_request:
+    branches: [ caatinga-dev ]
+
+jobs:
+  industrial_ci:
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        env:
+          - { ROS_DISTRO: jazzy, ROS_REPO: main }
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: caatinga-dev
+      - name: Run industrial_ci
+        uses: ros-industrial/industrial_ci@master
+        env: ${{ matrix.env }}
