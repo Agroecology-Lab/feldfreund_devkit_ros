@@ -17,13 +17,17 @@ jobs:
           sudo apt-get update
           sudo apt-get install -y doxygen graphviz python3-pip python3-sphinx
           pip3 install --break-system-packages breathe sphinx-rtd-theme myst-parser
+          # autodoc imports these modules to pull docstrings, so their real
+          # (pure-Python) runtime deps must be installed. ROS/hardware-specific
+          # deps that can't be installed here are mocked in docs/conf.py instead.
+          pip3 install --break-system-packages numpy scipy scikit-image shapely pyquaternion deepdiff PyYAML
 
       - name: Generate Doxygen XML
         run: doxygen Doxyfile
 
       - name: Build Sphinx HTML
         run: |
-          sphinx-build -b html docs docs/_build/html
+          sphinx-build --keep-going -b html docs docs/_build/html
           touch docs/_build/html/.nojekyll
 
       - name: Deploy Docs to Sowbot_Data Repo

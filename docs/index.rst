@@ -8,7 +8,7 @@ Welcome to the documentation for the **Feldfreund DevKit ROS (Sowbot)** platform
    :maxdepth: 2
    :caption: Navigation & Architecture
 
-   README <../README.md>
+   README <README.md>
    lizard-firmware-setup
 
 .. toctree::

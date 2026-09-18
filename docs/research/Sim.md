@@ -1,3 +1,5 @@
+# Gazebo Simulation (Headless VNC)
+
 docker run -it --rm --net=host --privileged \
   -e LIBGL_ALWAYS_SOFTWARE=1 \
   -e GALLIUM_DRIVER=llvmpipe \

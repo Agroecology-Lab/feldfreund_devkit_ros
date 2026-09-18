@@ -4,10 +4,49 @@ import sys
 # ------------------------------------------------------------------------------
 # Path Setup
 # ------------------------------------------------------------------------------
-# Add the project root and src directories to sys.path so sphinx.ext.autodoc
-# can discover and import Python packages and modules inside src/
+# Each ROS 2 ament_python package here nests its importable module one level
+# below its colcon package folder (src/<pkg>/<pkg>/...), so adding "../src"
+# alone only exposes namespace packages like "devkit_driver" with no
+# submodules underneath. Add each package's own folder to sys.path instead,
+# so "import devkit_driver" resolves straight to src/devkit_driver/devkit_driver/.
 sys.path.insert(0, os.path.abspath(".."))
-sys.path.insert(0, os.path.abspath("../src"))
+_SRC_ROOT = os.path.abspath("../src")
+for _pkg in [
+    "devkit_driver",
+    "devkit_f2c_planner",
+    "devkit_mavlink_bridge",
+    "devkit_ui",
+]:
+    sys.path.insert(0, os.path.join(_SRC_ROOT, _pkg))
+
+# autodoc actually imports these modules to pull docstrings. The CI runner has
+# no ROS 2 install and no access to the hardware-specific / simulation deps
+# below, so autodoc's import will fail without mocking them out.
+autodoc_mock_imports = [
+    "rclpy",
+    "ament_index_python",
+    "launch",
+    "launch_ros",
+    "sensor_msgs",
+    "geometry_msgs",
+    "nav_msgs",
+    "std_msgs",
+    "std_srvs",
+    "nav2_msgs",
+    "nav2_simple_commander",
+    "tf2_ros",
+    "lifecycle_msgs",
+    "rosgraph_msgs",
+    "topological_navigation_msgs",
+    "ublox_ubx_msgs",
+    "pymavlink",
+    "rosys",
+    "nicegui",
+    "fields2cover",
+    "feldfreund_devkit",
+    "sowbot_sim",
+    "topological_nav_simulator",
+]
 
 # ------------------------------------------------------------------------------
 # Project Information
