@@ -1,0 +1,120 @@
+# ==============================================================================
+# Doxygen Configuration for Agroecology-Lab/feldfreund_devkit_ros
+# Output format: XML (Parsed by Breathe into Sphinx/MyST)
+# ==============================================================================
+
+# ------------------------------------------------------------------------------
+# Project Identification
+# ------------------------------------------------------------------------------
+PROJECT_NAME           = "Feldfreund DevKit ROS (Sowbot)"
+PROJECT_NUMBER         = "caatinga-dev"
+PROJECT_BRIEF          = "Open agricultural robotics stack for precision seeding and weeding"
+OUTPUT_DIRECTORY       = .
+CREATE_SUBDIRS         = NO
+ALLOW_UNICODE_NAMES    = YES
+OUTPUT_LANGUAGE        = English
+
+# ------------------------------------------------------------------------------
+# Output Formats (XML ON for Breathe, HTML OFF)
+# ------------------------------------------------------------------------------
+GENERATE_XML           = YES
+XML_OUTPUT            = xml
+XML_PROGRAMLISTING     = YES
+
+GENERATE_HTML          = NO
+GENERATE_LATEX         = NO
+GENERATE_RTF           = NO
+GENERATE_DOCBOOK       = NO
+
+# ------------------------------------------------------------------------------
+# Build & Extraction Options
+# ------------------------------------------------------------------------------
+EXTRACT_ALL            = YES
+EXTRACT_PRIVATE        = YES
+EXTRACT_PRIV_VIRTUAL   = YES
+EXTRACT_PACKAGE        = YES
+EXTRACT_STATIC         = YES
+EXTRACT_LOCAL_CLASSES  = YES
+EXTRACT_LOCAL_METHODS  = YES
+EXTRACT_ANON_NSPACES   = YES
+
+HIDE_UNDOC_MEMBERS     = NO
+HIDE_UNDOC_CLASSES     = NO
+HIDE_FRIEND_COMPOUNDS  = NO
+HIDE_IN_BODY_DOCS      = NO
+CASE_SENSE_NAMES       = YES
+HIDE_SCOPE_NAMES       = NO
+SHOW_INCLUDE_FILES     = YES
+SHOW_GROUPED_MEMB_INC  = YES
+FORCE_LOCAL_INCLUDES   = NO
+INLINE_INFO            = YES
+SORT_MEMBER_DOCS       = YES
+SORT_BRIEF_DOCS        = YES
+SORT_MEMBERS_CTORS_1ST = YES
+
+# ------------------------------------------------------------------------------
+# Input Directories & Source Parsing
+# ------------------------------------------------------------------------------
+INPUT                  = . \
+                         README.md
+
+RECURSIVE              = YES
+EXCLUDE                = build \
+                         install \
+                         log \
+                         .git \
+                         .github \
+                         .venv \
+                         docs \
+                         xml
+
+FILE_PATTERNS          = *.c \
+                         *.cc \
+                         *.cxx \
+                         *.cpp \
+                         *.c++ \
+                         *.h \
+                         *.hh \
+                         *.hpp \
+                         *.hxx \
+                         *.h++ \
+                         *.py \
+                         *.msg \
+                         *.srv \
+                         *.action \
+                         *.launch.py
+
+USE_MDFILE_AS_MAINPAGE = README.md
+
+# ------------------------------------------------------------------------------
+# Language & Extension Mappings
+# ------------------------------------------------------------------------------
+EXTENSION_MAPPING      = py=Python \
+                         launch.py=Python \
+                         msg=C++ \
+                         srv=C++ \
+                         action=C++
+
+# ------------------------------------------------------------------------------
+# Diagrams & Graphviz (Dot Integration)
+# ------------------------------------------------------------------------------
+HAVE_DOT               = YES
+DOT_NUM_THREADS        = 0
+DOT_FONTNAME           = Helvetica
+DOT_FONTSIZE           = 10
+CLASS_GRAPH            = YES
+COLLABORATION_GRAPH    = YES
+GROUP_GRAPHS           = YES
+UML_LOOK               = YES
+UML_LIMIT_NUM_FIELDS   = 10
+TEMPLATE_RELATIONS     = YES
+INCLUDE_GRAPH          = YES
+INCLUDED_BY_GRAPH      = YES
+CALL_GRAPH             = YES
+CALLER_GRAPH           = YES
+GRAPHICAL_HIERARCHY    = YES
+DIRECTORY_GRAPH        = YES
+DOT_IMAGE_FORMAT       = svg
+INTERACTIVE_SVG        = YES
+DOT_GRAPH_MAX_NODES    = 50
+MAX_DOT_GRAPH_DEPTH    = 0
