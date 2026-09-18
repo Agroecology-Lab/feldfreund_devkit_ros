@@ -19,11 +19,14 @@ jobs:
         env:
           ROS_DISTRO: jazzy
           ROS_REPO: main
-          # Enable test coverage flags during colcon build
+          # Pass GCC coverage flags during CMake compilation
           CMAKE_ARGS: "-DCMAKE_BUILD_TYPE=Debug -DCMAKE_CXX_FLAGS='--coverage'"
+          # Instruct industrial_ci to generate gcov test reports after running tests
+          AFTER_RUN_TARGET_TEST: 'lcov --capture --directory . --output-file coverage.info'
 
       - name: Upload coverage reports to Codecov
         uses: codecov/codecov-action@v4
         with:
+          token: ${{ secrets.CODECOV_TOKEN }}
           fail_ci_if_error: false
           verbose: true
