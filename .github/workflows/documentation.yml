@@ -15,15 +15,14 @@ jobs:
       - name: Install Documentation Tools
         run: |
           sudo apt-get update
-          sudo apt-get install -y doxygen graphviz python3-pip
-          pip3 install sphinx breathe sphinx-rtd-theme myst-parser
+          sudo apt-get install -y doxygen graphviz python3-pip python3-sphinx
+          pip3 install --break-system-packages breathe sphinx-rtd-theme myst-parser
 
       - name: Generate Doxygen XML
         run: doxygen Doxyfile
 
       - name: Build Sphinx HTML
         run: |
-          # Builds Sphinx project from docs/ directory into docs/_build/html
           sphinx-build -b html docs docs/_build/html
           touch docs/_build/html/.nojekyll
 
