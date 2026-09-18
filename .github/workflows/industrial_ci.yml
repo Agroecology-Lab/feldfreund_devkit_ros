@@ -1,4 +1,4 @@
-name: Industrial CI
+name: Industrial CI with Codecov
 
 on:
   push:
@@ -9,14 +9,21 @@ on:
 jobs:
   industrial_ci:
     runs-on: ubuntu-latest
-    strategy:
-      matrix:
-        env:
-          - { ROS_DISTRO: jazzy, ROS_REPO: main }
     steps:
       - uses: actions/checkout@v4
         with:
           ref: caatinga-dev
+
       - name: Run industrial_ci
         uses: ros-industrial/industrial_ci@master
-        env: ${{ matrix.env }}
+        env:
+          ROS_DISTRO: jazzy
+          ROS_REPO: main
+          # Enable test coverage flags during colcon build
+          CMAKE_ARGS: "-DCMAKE_BUILD_TYPE=Debug -DCMAKE_CXX_FLAGS='--coverage'"
+
+      - name: Upload coverage reports to Codecov
+        uses: codecov/codecov-action@v4
+        with:
+          fail_ci_if_error: false
+          verbose: true
