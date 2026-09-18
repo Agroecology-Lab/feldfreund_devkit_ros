@@ -55,7 +55,9 @@ SORT_MEMBERS_CTORS_1ST = YES
 # ------------------------------------------------------------------------------
 # Input Directories & Source Parsing
 # ------------------------------------------------------------------------------
-INPUT                  = src \
+# Include 'include' to ensure ROS 2 C++ header files (.hpp) are parsed
+INPUT                  = include \
+                         src \
                          docs \
                          README.md
 
@@ -82,8 +84,7 @@ FILE_PATTERNS          = *.c \
                          *.py \
                          *.msg \
                          *.srv \
-                         *.action \
-                         *.launch.py
+                         *.action
 
 USE_MDFILE_AS_MAINPAGE = README.md
 
@@ -91,7 +92,6 @@ USE_MDFILE_AS_MAINPAGE = README.md
 # Language & Extension Mappings
 # ------------------------------------------------------------------------------
 EXTENSION_MAPPING      = py=Python \
-                         launch.py=Python \
                          msg=C++ \
                          srv=C++ \
                          action=C++
