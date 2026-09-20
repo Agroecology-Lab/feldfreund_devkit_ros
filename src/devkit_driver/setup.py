@@ -17,6 +17,8 @@ setup(
         (os.path.join('share', package_name, 'config'), glob(os.path.join('config', '*'))),
     ],
     install_requires=['setuptools'],
+    # Declares pytest so colcon uses it: unittest exits 5 when a package has no tests.
+    tests_require=['pytest'],
     zip_safe=True,
     maintainer='sam',
     description='Agroecology Lab Devkit Package',
