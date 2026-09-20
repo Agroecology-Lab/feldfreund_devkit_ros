@@ -26,3 +26,7 @@ python3-pymavlink-pip:
   ubuntu:
     pip:
       packages: [pymavlink]
+python3-numpy:
+  ubuntu:
+    apt:
+      packages: [python3-numpy]
