@@ -17,6 +17,8 @@ setup(
         (os.path.join('share', package_name, 'config'), glob(os.path.join('config', '*'))),
     ],
     install_requires=['setuptools', 'pymavlink'],
+    # Declares pytest so colcon uses it: unittest exits 5 when a package has no tests.
+    tests_require=['pytest'],
     zip_safe=True,
     maintainer='Agroecology Lab',
     description='MAVLink bridge from Sowbot cmd_vel/localisation to an ArduPilot Rover RTU in GUIDED mode.',
