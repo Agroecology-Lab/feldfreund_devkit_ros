@@ -14,17 +14,27 @@ jobs:
         with:
           fetch-depth: 2
 
-      - name: Set up Node
-        uses: actions/setup-node@v4
+      - name: Set up Python
+        uses: actions/setup-python@v6
+        with:
+          python-version: "3.11"
+          cache: "pip"
+          cache-dependency-path: |
+            requirements.txt
+            requirements-dev.txt
 
       - name: Install dependencies
-        run: npm install
+        run: pip install -r requirements-dev.txt coverage
 
       - name: Run tests
-        run: npx jest --coverage
+        working-directory: src/devkit_ui
+        run: |
+          coverage run --source=devkit_ui -m unittest discover
+          coverage xml -o ../../coverage.xml
 
       - name: Upload results to Codecov
         uses: codecov/codecov-action@v5
         with:
           token: ${{ secrets.CODECOV_TOKEN }}
           slug: Agroecology-Lab/feldfreund_devkit_ros
+          files: coverage.xml
