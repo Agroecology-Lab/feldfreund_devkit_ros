@@ -23,7 +23,7 @@ jobs:
           # system mapping (PyPI-only deps like pyserial, nicegui), then
           # refresh the rosdep cache so newly-added ament_python entries
           # resolve correctly for jazzy.
-          BEFORE_INIT: 'echo "yaml file://${TARGET_REPO_PATH}/.github/rosdep/local.yaml" | tee /etc/ros/rosdep/sources.list.d/10-local.list && rosdep update'
+          BEFORE_INIT: 'mkdir -p /etc/ros/rosdep/sources.list.d && echo "yaml file://${TARGET_REPO_PATH}/.github/rosdep/local.yaml" | tee /etc/ros/rosdep/sources.list.d/10-local.list && rosdep update'
           # Pass GCC coverage flags during CMake compilation
           CMAKE_ARGS: "-DCMAKE_BUILD_TYPE=Debug -DCMAKE_CXX_FLAGS='--coverage'"
           # Instruct industrial_ci to generate gcov test reports after running tests
