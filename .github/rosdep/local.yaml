@@ -30,3 +30,7 @@ python3-numpy:
   ubuntu:
     apt:
       packages: [python3-numpy]
+python3-skimage:
+  ubuntu:
+    apt:
+      packages: [python3-skimage]
