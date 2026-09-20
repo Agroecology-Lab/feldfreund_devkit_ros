@@ -37,3 +37,7 @@ jobs:
           # Noble ships PEP 668 (externally-managed Python); rosdep's pip
           # installs fail without this.
           PIP_BREAK_SYSTEM_PACKAGES: '1'
+          # rosdep runs `pip3 install -U`, which fails uninstalling
+          # Debian-managed deps (no RECORD file). industrial_ci doesn't
+          # forward PIP_IGNORE_INSTALLED, so pass it via DOCKER_RUN_OPTS.
+          DOCKER_RUN_OPTS: '-e PIP_IGNORE_INSTALLED=1'
