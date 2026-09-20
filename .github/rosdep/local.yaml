@@ -6,3 +6,11 @@ nicegui:
   ubuntu:
     pip:
       packages: [nicegui]
+python3-pytest:
+  ubuntu:
+    apt:
+      packages: [python3-pytest]
+ament_python:
+  ubuntu:
+    apt:
+      packages: [python3-setuptools]
