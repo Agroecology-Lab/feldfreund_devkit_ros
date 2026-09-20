@@ -41,3 +41,5 @@ jobs:
           # Debian-managed deps (no RECORD file). industrial_ci doesn't
           # forward PIP_IGNORE_INSTALLED, so pass it via DOCKER_RUN_OPTS.
           DOCKER_RUN_OPTS: '-e PIP_IGNORE_INSTALLED=1'
+          ADDITIONAL_DEBS: 'lcov'
+          
