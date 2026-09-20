@@ -14,3 +14,15 @@ ament_python:
   ubuntu:
     apt:
       packages: [python3-setuptools]
+python3-shapely:
+  ubuntu:
+    apt:
+      packages: [python3-shapely]
+python3-scipy:
+  ubuntu:
+    apt:
+      packages: [python3-scipy]
+python3-pymavlink-pip:
+  ubuntu:
+    pip:
+      packages: [pymavlink]
