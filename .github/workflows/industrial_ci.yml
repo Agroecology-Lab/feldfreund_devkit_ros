@@ -20,11 +20,17 @@ jobs:
           ROS_DISTRO: jazzy
           ROS_REPO: main
           # Register a local rosdep rules file for keys with no default
-          # system mapping (PyPI-only deps like pyserial, nicegui), then
-          # refresh the rosdep cache so newly-added ament_python entries
-          # resolve correctly for jazzy.
+          # system mapping (PyPI-only deps like pyserial, nicegui).
+          # rosdep itself isn't installed yet at this stage, so we just
+          # write the source entry here; the later setup_rosdep step
+          # runs its own rosdep update and will pick this file up,
+          # resolving ament_python's stale-cache issue too.
           BEFORE_INIT: 'mkdir -p /etc/ros/rosdep/sources.list.d && echo "yaml file://${TARGET_REPO_PATH}/.github/rosdep/local.yaml" | tee /etc/ros/rosdep/sources.list.d/10-local.list'
           # Pass GCC coverage flags during CMake compilation
           CMAKE_ARGS: "-DCMAKE_BUILD_TYPE=Debug -DCMAKE_CXX_FLAGS='--coverage'"
           # Instruct industrial_ci to generate gcov test reports after running tests
           AFTER_RUN_TARGET_TEST: 'lcov --capture --directory . --output-file coverage.info'
+          # fields2cover has no apt/pip package - the Dockerfile builds it
+          # from source (cmake) and skips it in its own rosdep call too.
+          # CI doesn't need to build it just to run tests.
+          ROSDEP_SKIP_KEYS: 'fields2cover'
