@@ -1,6 +1,6 @@
 # F2CSaveHarness is built dynamically (see load_f2c_save_harness below), and
 # make_node supplies the attributes normally initialized by the ROS node.
-# pylint: disable=attribute-defined-outside-init,exec-used,protected-access
+# pylint: disable=attribute-defined-outside-init,exec-used,no-member,protected-access
 import ast
 import math
 import re
