@@ -29,8 +29,7 @@ jobs:
           # Pass GCC coverage flags during CMake compilation
           CMAKE_ARGS: "-DCMAKE_BUILD_TYPE=Debug -DCMAKE_CXX_FLAGS='--coverage'"
           # Instruct industrial_ci to generate gcov test reports after running tests
-          AFTER_RUN_TARGET_TEST: 'lcov --capture --directory . --output-file coverage.info'
-          # fields2cover has no apt/pip package - the Dockerfile builds it
+          AFTER_RUN_TARGET_TEST: 'lcov --capture --directory /root/target_ws/build --output-file /tmp/coverage.info --ignore-errors empty'          # fields2cover has no apt/pip package - the Dockerfile builds it
           # from source (cmake) and skips it in its own rosdep call too.
           # CI doesn't need to build it just to run tests.
           ROSDEP_SKIP_KEYS: 'fields2cover'
