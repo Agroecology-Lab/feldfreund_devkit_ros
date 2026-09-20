@@ -38,7 +38,7 @@ python3-yaml:
   ubuntu:
     apt:
       packages: [python3-yaml]
-  python3-deepdiff:
+python3-deepdiff:
   ubuntu:
     apt:
       packages: [python3-deepdiff]
