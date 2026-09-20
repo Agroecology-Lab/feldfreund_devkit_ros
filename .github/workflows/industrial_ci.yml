@@ -19,9 +19,12 @@ jobs:
         env:
           ROS_DISTRO: jazzy
           ROS_REPO: main
+          # Register a local rosdep rules file for keys with no default
+          # system mapping (PyPI-only deps like pyserial, nicegui), then
+          # refresh the rosdep cache so newly-added ament_python entries
+          # resolve correctly for jazzy.
+          BEFORE_INIT: 'echo "yaml file://${TARGET_REPO_PATH}/.github/rosdep/local.yaml" | sudo tee /etc/ros/rosdep/sources.list.d/10-local.list && rosdep update'
           # Pass GCC coverage flags during CMake compilation
           CMAKE_ARGS: "-DCMAKE_BUILD_TYPE=Debug -DCMAKE_CXX_FLAGS='--coverage'"
           # Instruct industrial_ci to generate gcov test reports after running tests
           AFTER_RUN_TARGET_TEST: 'lcov --capture --directory . --output-file coverage.info'
-
-      
