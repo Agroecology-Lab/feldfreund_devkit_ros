@@ -11,6 +11,8 @@ setup(
         ('share/' + package_name, ['package.xml']),
     ],
     install_requires=['setuptools'],
+    # Declares pytest so colcon uses it: unittest exits 5 when a package has no tests.
+    tests_require=['pytest'],
     zip_safe=True,
     maintainer='Zauberzeug GmbH',
     maintainer_email='ros@zauberzeug.com',
