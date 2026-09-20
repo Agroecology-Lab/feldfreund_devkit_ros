@@ -1,0 +1,8 @@
+pyserial:
+  ubuntu:
+    pip:
+      packages: [pyserial]
+nicegui:
+  ubuntu:
+    pip:
+      packages: [nicegui]
