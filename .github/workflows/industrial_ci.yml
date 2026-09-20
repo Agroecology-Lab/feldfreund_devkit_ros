@@ -34,3 +34,6 @@ jobs:
           # from source (cmake) and skips it in its own rosdep call too.
           # CI doesn't need to build it just to run tests.
           ROSDEP_SKIP_KEYS: 'fields2cover'
+          # Noble ships PEP 668 (externally-managed Python); rosdep's pip
+          # installs fail without this.
+          PIP_BREAK_SYSTEM_PACKAGES: '1'
