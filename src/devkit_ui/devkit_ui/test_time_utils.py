@@ -28,6 +28,7 @@ class TestTimeUtils(unittest.TestCase):
     def test_parse_ts_returns_none_for_malformed_input(self) -> None:
         self.assertIsNone(parse_ts('garbage'))
         self.assertIsNone(parse_ts('2025-13-45T99:99:99Z'))
+        self.assertIsNone(parse_ts({'timestamp': '2025-04-01T09:30:00Z'}))  # type: ignore[arg-type]
 
 
 if __name__ == '__main__':

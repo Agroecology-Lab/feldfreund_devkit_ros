@@ -21,6 +21,6 @@ def parse_ts(s: str | None) -> datetime | None:
     for fmt in (_TS_FMT, _TS_FMT_LEGACY):
         try:
             return datetime.strptime(s, fmt).replace(tzinfo=UTC)
-        except ValueError:
+        except (TypeError, ValueError):
             continue
     return None

@@ -245,6 +245,8 @@ class TestMissionStoreScheduling(unittest.TestCase):
              'last_run_at': '2026-01-01T10:00:00Z', 'last_run_success': True},
             {'id': 'RECURRING_ELAPSED', 'rows': ['R5'], 'action': 'drive', 'repeat_every_hours': 6,
              'last_run_at': '2026-01-01T05:00:00Z', 'last_run_success': True},
+            {'id': 'MALFORMED_TIMESTAMP', 'rows': ['R9'], 'action': 'drive',
+             'last_run_at': {'timestamp': '2026-01-01T05:00:00Z'}, 'last_run_success': True},
             {'id': 'ONE_SHOT_DONE', 'rows': ['R6'], 'action': 'drive',
              'last_run_at': '2026-01-01T09:00:00Z', 'last_run_success': True},
             {'id': 'INACTIVE', 'rows': ['R7'], 'action': 'drive', 'active': False},
@@ -265,6 +267,7 @@ class TestMissionStoreScheduling(unittest.TestCase):
             ('NEVER_RAN', 'R2', 'weed', {'rpm': 3}),
             ('FAILED', 'R3', 'drive', {}),
             ('RECURRING_ELAPSED', 'R5', 'drive', {}),
+            ('MALFORMED_TIMESTAMP', 'R9', 'drive', {}),
         ])
 
     def test_never_run_mission_is_due_now(self) -> None:
@@ -278,6 +281,10 @@ class TestMissionStoreScheduling(unittest.TestCase):
 
     def test_recurring_mission_past_its_interval_is_due_now(self) -> None:
         self.assertEqual(self.store.next_due_in_hours('RECURRING_ELAPSED'), DUE_NOW)
+
+    def test_malformed_timestamp_is_treated_as_never_run(self) -> None:
+        self.assertIn(('MALFORMED_TIMESTAMP', 'R9', 'drive', {}), self.store.today_queue())
+        self.assertEqual(self.store.next_due_in_hours('MALFORMED_TIMESTAMP'), DUE_NOW)
 
     def test_completed_one_shot_has_no_due_time(self) -> None:
         self.assertIsNone(self.store.next_due_in_hours('ONE_SHOT_DONE'))
