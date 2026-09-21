@@ -1,5 +1,8 @@
 name: Deploy Sphinx Docs to Sowbot_Data
 
+permissions:
+  contents: read
+
 on:
   push:
     branches: [ caatinga-dev ]
