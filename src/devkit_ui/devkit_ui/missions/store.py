@@ -277,7 +277,8 @@ class MissionStore:
           - a failed mission the operator wants to retry without waiting for
             the next scheduled executor pass.
 
-        Does not touch repeat_every_hours, rows, or action.
+        Does not modify other mission fields.
+        Returns False for an unknown ID; otherwise returns whether the backend accepted the update.
         """
         with self._lock:
             if self.find(mid) is None:
@@ -293,6 +294,8 @@ class MissionStore:
 
         Side effect: one-shot missions (repeat_every_hours is None) that
         complete successfully are auto-deactivated.
+
+        Returns False for an unknown ID; otherwise returns whether the backend accepted the update.
         """
 
         with self._lock:
@@ -381,11 +384,9 @@ class MissionStore:
     # ── internals ────────────────────────────────────────────────────────
 
     def _write_run_state(self, mid: str, **fields) -> bool:
-        """Write run-history fields straight to the backend.
+        """Persist run state, increment the version, and refresh attached node state.
 
-        update() rejects last_run_* because they are not operator-editable, and
-        it takes self._lock, which record_run()/reset() already hold. Caller
-        must hold self._lock.
+        The caller must hold self._lock.
         """
         result = self._store.update(mid, **fields)
         self._version += 1

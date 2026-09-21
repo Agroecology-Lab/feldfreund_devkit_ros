@@ -202,7 +202,7 @@ class MissionSqliteStore:
         return int(mission_id.replace('MISSION_', ''))
 
     def _deserialize_row(self, db_row: sqlite3.Row | dict) -> dict:
-        """Deserialize a mission row from what was stored in the database."""
+        """Return a mission dict with its ID, JSON fields, and boolean fields decoded."""
         row = dict(db_row)
         return {
             **row,
