@@ -158,8 +158,9 @@ class TestMissionStoreEditing(unittest.TestCase):
 class TestMissionStoreRunHistory(unittest.TestCase):
     def setUp(self) -> None:
         tmp = self.enterContext(tempfile.TemporaryDirectory())  # pylint: disable=consider-using-with
+        self.path = Path(tmp) / 'missions.db'
         self.node = SimpleNamespace()
-        self.store = MissionStore(str(Path(tmp) / 'missions.db'))
+        self.store = MissionStore(str(self.path))
         self.addCleanup(self.store.close)
         self.store.attach(self.node)
 
@@ -223,6 +224,42 @@ class TestMissionStoreRunHistory(unittest.TestCase):
         self.assertIsNone(mission['last_run_success'])
         self.assertEqual(self.store.next_due_in_hours(mission_id), DUE_NOW)
         self.assertEqual(self.node.missions_version, version + 1)
+
+    def test_recorded_run_is_restored_after_reopening_the_store(self) -> None:
+        mission_id = cast(str, self.store.add(rows=['R1'], action='drive'))
+        self.assertTrue(self.store.record_run(mission_id, True))
+        self.store.close()
+
+        reopened = MissionStore(str(self.path))
+        self.addCleanup(reopened.close)
+        mission = cast(dict, reopened.find(mission_id))
+
+        self.assertIs(mission['last_run_success'], True)
+        self.assertIsNotNone(parse_ts(mission['last_run_at']))
+        self.assertFalse(mission['active'])
+
+    def test_reset_state_is_restored_after_reopening_the_store(self) -> None:
+        mission_id = cast(str, self.store.add(
+            rows=['R1', 'R2'],
+            action='weed',
+            action_params={'rpm': 3},
+            repeat_every_hours=6,
+        ))
+        self.store.record_run(mission_id, True)
+        self.assertTrue(self.store.reset(mission_id))
+        self.store.close()
+
+        reopened = MissionStore(str(self.path))
+        self.addCleanup(reopened.close)
+        mission = cast(dict, reopened.find(mission_id))
+
+        self.assertIsNone(mission['last_run_at'])
+        self.assertIsNone(mission['last_run_success'])
+        self.assertTrue(mission['active'])
+        self.assertEqual(mission['rows'], ['R1', 'R2'])
+        self.assertEqual(mission['action'], 'weed')
+        self.assertEqual(mission['action_params'], {'rpm': 3})
+        self.assertEqual(mission['repeat_every_hours'], 6)
 
     def test_reset_for_unknown_mission_reports_not_found(self) -> None:
         self.assertFalse(self.store.reset('MISSION_42'))

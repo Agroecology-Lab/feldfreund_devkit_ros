@@ -30,6 +30,18 @@ class TestTimeUtils(unittest.TestCase):
         self.assertIsNone(parse_ts('2025-13-45T99:99:99Z'))
         self.assertIsNone(parse_ts({'timestamp': '2025-04-01T09:30:00Z'}))  # type: ignore[arg-type]
 
+    def test_parse_ts_rejects_near_miss_formats(self) -> None:
+        malformed_timestamps = (
+            '2025-04-01T09:30:00',
+            '2025-04-01T09:30:00+00:00',
+            '01-04-2025_09-30-00Z',
+            '2025-02-29T09:30:00Z',
+        )
+
+        for timestamp in malformed_timestamps:
+            with self.subTest(timestamp=timestamp):
+                self.assertIsNone(parse_ts(timestamp))
+
 
 if __name__ == '__main__':
     unittest.main()
