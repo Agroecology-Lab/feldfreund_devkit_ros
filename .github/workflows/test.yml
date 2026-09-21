@@ -18,6 +18,8 @@ jobs:
               --fail-under=10.0
           - name: ruff
             command: make ruff
+          - name: mypy
+            command: make mypy
           - name: test
             command: make test
     runs-on: ubuntu-latest
