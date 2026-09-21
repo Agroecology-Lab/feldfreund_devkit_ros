@@ -49,6 +49,7 @@ pre-commit:
 ## test		Run unit tests.
 test:
 	cd src/devkit_ui && python -m unittest discover
+	cd src/devkit_f2c_planner && python -m unittest discover
 
 ## check		Run all code checks (mypy, pre-commit, pylint).
 check: mypy pre-commit pylint test
