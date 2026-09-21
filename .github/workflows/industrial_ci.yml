@@ -4,7 +4,10 @@ on:
   push:
     branches: [ caatinga-dev ]
   pull_request:
-    branches: [ caatinga-dev ]
+    # Was `branches: [ caatinga-dev ]` — PRs targeting any other branch got
+    # zero industrial_ci coverage. Run on all PRs; caatinga-dev push stays
+    # as the merge-gate.
+    branches: [ '**' ]
 
 permissions:
   contents: read
@@ -24,11 +27,24 @@ jobs:
       # `ref: caatinga-dev` made pull_request runs test the base branch, not the PR.
       - uses: actions/checkout@v6
 
+      # ccache persists compiled object files across runs. industrial_ci
+      # rebuilds every workspace from scratch each job; with Gazebo/Nav2 in
+      # the dependency tree that's slow. This only speeds up C++ deps —
+      # the packages in this repo are pure Python, so payoff is limited
+      # today but grows if any package gains a CMake/C++ build step.
+      - uses: actions/cache@v4
+        with:
+          path: ${{ github.workspace }}/.ccache
+          key: ccache-${{ github.job }}-${{ github.sha }}
+          restore-keys: |
+            ccache-${{ github.job }}-
+
       - name: Run industrial_ci
         uses: ros-industrial/industrial_ci@master
         env:
           ROS_DISTRO: jazzy
           ROS_REPO: main
+          CCACHE_DIR: ${{ github.workspace }}/.ccache
           # Register .github/rosdep/local.yaml as a rosdep source. Creating
           # /etc/ros/rosdep/sources.list.d here makes industrial_ci skip its own
           # `rosdep init`, so rosdep's default sources (base.yaml, python.yaml) are
@@ -47,3 +63,21 @@ jobs:
           # Debian-managed deps (no RECORD file). industrial_ci doesn't
           # forward PIP_IGNORE_INSTALLED, so pass it via DOCKER_RUN_OPTS.
           DOCKER_RUN_OPTS: '-e PIP_IGNORE_INSTALLED=1'
+
+          # --- Not enabled yet: needs test code first, not just config ---
+          #
+          # colcon test already runs automatically against every built
+          # package's test/ directory - no hook needed. It currently finds
+          # nothing in devkit_driver, devkit_mavlink_bridge or
+          # devkit_f2c_planner because those packages have zero test files.
+          # Once tests exist there, they'll start running here for free.
+          #
+          # AFTER_BUILD_TARGET_WORKSPACE:
+          #   Once launch_testing tests exist: source install/setup.bash
+          #   and run them here - this is the only environment with real
+          #   Nav2/Gazebo installed to test node-to-node wiring against.
+          #
+          # AFTER_SCRIPT:
+          #   Once a scripted headless-sim scenario exists: run it here,
+          #   nightly/scheduled rather than per-PR per the pyramid's own
+          #   advice on keeping the top layer small.
