@@ -2,6 +2,7 @@ name: Run tests and upload coverage
 
 on:
   push:
+    branches: [ caatinga-dev ]
   pull_request:
   workflow_dispatch:
 
