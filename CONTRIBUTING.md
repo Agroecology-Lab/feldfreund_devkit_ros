@@ -65,6 +65,10 @@ Before diving into contributing, see the [Quick Start](https://github.com/Agroec
 - Clean up background tasks on teardown
 - Handle resource cleanup properly in async contexts
 
+## ROS2 Best Practices
+
+We work towards [https://henkirobotics.com/ros-2-best-practices/](Henki ROS2 Best Practises)
+
 ## Workflow Guidelines
 
 ### Before You Start
