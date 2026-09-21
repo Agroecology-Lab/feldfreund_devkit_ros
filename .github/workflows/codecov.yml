@@ -29,10 +29,12 @@ jobs:
         run: pip install -r requirements-dev.txt coverage
 
       - name: Run tests
-        working-directory: src/devkit_ui
         run: |
-          coverage run --source=devkit_ui -m unittest discover
-          coverage xml -o ../../coverage.xml
+          coverage run \
+            --source=src/devkit_ui/devkit_ui,src/devkit_driver/devkit_driver,src/devkit_mavlink_bridge/devkit_mavlink_bridge,src/devkit_f2c_planner/devkit_f2c_planner \
+            --omit='*/test_*.py' \
+            -m unittest discover -s src/devkit_ui -t src/devkit_ui
+          coverage xml -o coverage.xml
 
       - name: Upload results to Codecov
         uses: codecov/codecov-action@v5
