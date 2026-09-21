@@ -18,7 +18,9 @@ def parse_ts(s: str | None) -> datetime | None:
     format so existing YAML files migrate transparently on next save."""
     if not s:
         return None
-    try:
-        return datetime.strptime(s, _TS_FMT).replace(tzinfo=UTC)
-    except ValueError:
-        return datetime.strptime(s, _TS_FMT_LEGACY).replace(tzinfo=UTC)
+    for fmt in (_TS_FMT, _TS_FMT_LEGACY):
+        try:
+            return datetime.strptime(s, fmt).replace(tzinfo=UTC)
+        except ValueError:
+            continue
+    return None

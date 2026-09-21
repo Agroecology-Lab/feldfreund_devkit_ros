@@ -4,7 +4,11 @@ from collections.abc import Callable
 
 from devkit_ui.time_utils import now_utc_str
 
-_MUTABLE_COLUMNS = frozenset[str](('name', 'rows', 'action', 'action_params', 'repeat_every_hours', 'active'))
+_MUTABLE_COLUMNS = frozenset[str]((
+    'name', 'rows', 'action', 'action_params', 'repeat_every_hours', 'active',
+    # Run history: written by MissionStore.record_run()/reset(), not by operator edits.
+    'last_run_at', 'last_run_success',
+))
 
 class MissionSqliteStore:
     """Owns the mission list and its SQLite persistence."""
@@ -97,7 +101,8 @@ class MissionSqliteStore:
     def update(self, mid: str, **fields) -> bool:
         """Updates mutable fields on a mission.
 
-        Allowed fields: name, rows, action, repeat_every_hours, active
+        Allowed fields: name, rows, action, action_params, repeat_every_hours, active,
+        last_run_at, last_run_success. Other keys are ignored.
         """
 
         serialized_fields = self._serialize_row(fields)
@@ -205,4 +210,5 @@ class MissionSqliteStore:
             'rows': json.loads(row.get('rows', '[]')),
             'action_params': json.loads(row.get('action_params', '{}')),
             'active': row.get('active', 1) == 1,
+            'last_run_success': None if row.get('last_run_success') is None else bool(row['last_run_success']),
         }

@@ -275,12 +275,11 @@ class MissionStore:
         Does not touch repeat_every_hours, rows, or action.
         """
         with self._lock:
-            return self._store.update(
-                mid,
-                last_run_at=None,
-                last_run_success=None,
-                active=True,
-            )
+            if self.find(mid) is None:
+                self._set_status(f'ERROR: {mid!r} not found')
+                return False
+            self._set_status(f'{mid} re-armed — writing…')
+            return self._write_run_state(mid, last_run_at=None, last_run_success=None, active=True)
 
     def record_run(self, mid: str, success: bool) -> bool:
         """Record a run outcome. Called by the executor (and any 'Run now'
@@ -304,7 +303,8 @@ class MissionStore:
             if target.get('repeat_every_hours') is None and success:
                 patch['active'] = False
 
-            return self.update(mid, **patch)
+            self._set_status(f'{mid} run recorded — writing…')
+            return self._write_run_state(mid, **patch)
 
     # ── derived views (lock-free snapshots) ──────────────────────────────
 
@@ -374,6 +374,18 @@ class MissionStore:
         return self._store.find_by_name(name)
 
     # ── internals ────────────────────────────────────────────────────────
+
+    def _write_run_state(self, mid: str, **fields) -> bool:
+        """Write run-history fields straight to the backend.
+
+        update() rejects last_run_* because they are not operator-editable, and
+        it takes self._lock, which record_run()/reset() already hold. Caller
+        must hold self._lock.
+        """
+        result = self._store.update(mid, **fields)
+        self._version += 1
+        self._sync_node()
+        return result
 
     def _sync_node(self) -> None:
         """Mirror internal state onto the node. Always called inside the lock."""
