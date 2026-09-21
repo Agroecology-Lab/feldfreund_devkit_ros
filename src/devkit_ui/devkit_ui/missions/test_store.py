@@ -1,3 +1,4 @@
+import sqlite3
 import tempfile
 import unittest
 from datetime import UTC, datetime
@@ -40,14 +41,24 @@ class TestValidateMission(unittest.TestCase):
 
 class TestMissionStoreEditing(unittest.TestCase):
     def setUp(self) -> None:
-        tmp = self.enterContext(tempfile.TemporaryDirectory())  # pylint: disable=consider-using-with
+        self.tmp = self.enterContext(tempfile.TemporaryDirectory())  # pylint: disable=consider-using-with
         self.node = SimpleNamespace()
-        self.store = MissionStore(str(Path(tmp) / 'missions.db'))
+        self.store = MissionStore(str(Path(self.tmp) / 'missions.db'))
+        self.addCleanup(self.store.close)
         self.store.attach(self.node)
 
     def test_unsupported_file_extension_is_rejected(self) -> None:
         with self.assertRaises(ValueError):
             MissionStore('/tmp/missions.txt')
+
+    def test_close_releases_the_sqlite_connection(self) -> None:
+        self.store.close()
+
+        with self.assertRaises(sqlite3.ProgrammingError):
+            self.store.find('MISSION_1')
+
+    def test_close_is_a_no_op_for_the_yaml_backend(self) -> None:
+        MissionStore(str(Path(self.tmp) / 'missions.yaml')).close()
 
     def test_attach_initialises_node_state(self) -> None:
         self.assertEqual(self.node.missions, ())
@@ -149,6 +160,7 @@ class TestMissionStoreRunHistory(unittest.TestCase):
         tmp = self.enterContext(tempfile.TemporaryDirectory())  # pylint: disable=consider-using-with
         self.node = SimpleNamespace()
         self.store = MissionStore(str(Path(tmp) / 'missions.db'))
+        self.addCleanup(self.store.close)
         self.store.attach(self.node)
 
     def test_successful_one_shot_run_is_recorded_and_deactivates_the_mission(self) -> None:
@@ -239,6 +251,7 @@ class TestMissionStoreScheduling(unittest.TestCase):
             {'id': 'BAD_ACTION', 'rows': ['R8'], 'action': 'teleport'},
         ]}), encoding='utf-8')
         self.store = MissionStore(str(path))
+        self.addCleanup(self.store.close)
         self.store.attach(Mock())  # the YAML store logs load results through node.get_logger()
         patcher = patch('devkit_ui.missions.store.now_utc', return_value=NOW)
         patcher.start()

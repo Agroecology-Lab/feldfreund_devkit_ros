@@ -165,6 +165,11 @@ class MissionStore:
 
     # ── lifecycle ─────────────────────────────────────────────────────────
 
+    def close(self) -> None:
+        """Release backend resources (the SQLite connection). A no-op for the YAML backend."""
+        if isinstance(self._store, MissionSqliteStore):
+            self._store.close()
+
     def attach(self, node) -> None:
         """Wire into a NiceGuiNode. Kicks off a background load."""
         self._node = node
