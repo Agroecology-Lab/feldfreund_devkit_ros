@@ -165,6 +165,11 @@ class MissionStore:
 
     # ── lifecycle ─────────────────────────────────────────────────────────
 
+    def close(self) -> None:
+        """Release backend resources (the SQLite connection). A no-op for the YAML backend."""
+        if isinstance(self._store, MissionSqliteStore):
+            self._store.close()
+
     def attach(self, node) -> None:
         """Wire into a NiceGuiNode. Kicks off a background load."""
         self._node = node
@@ -272,15 +277,15 @@ class MissionStore:
           - a failed mission the operator wants to retry without waiting for
             the next scheduled executor pass.
 
-        Does not touch repeat_every_hours, rows, or action.
+        Does not modify other mission fields.
+        Returns False for an unknown ID; otherwise returns whether the backend accepted the update.
         """
         with self._lock:
-            return self._store.update(
-                mid,
-                last_run_at=None,
-                last_run_success=None,
-                active=True,
-            )
+            if self.find(mid) is None:
+                self._set_status(f'ERROR: {mid!r} not found')
+                return False
+            self._set_status(f'{mid} re-armed — writing…')
+            return self._write_run_state(mid, last_run_at=None, last_run_success=None, active=True)
 
     def record_run(self, mid: str, success: bool) -> bool:
         """Record a run outcome. Called by the executor (and any 'Run now'
@@ -289,6 +294,8 @@ class MissionStore:
 
         Side effect: one-shot missions (repeat_every_hours is None) that
         complete successfully are auto-deactivated.
+
+        Returns False for an unknown ID; otherwise returns whether the backend accepted the update.
         """
 
         with self._lock:
@@ -304,7 +311,8 @@ class MissionStore:
             if target.get('repeat_every_hours') is None and success:
                 patch['active'] = False
 
-            return self.update(mid, **patch)
+            self._set_status(f'{mid} run recorded — writing…')
+            return self._write_run_state(mid, **patch)
 
     # ── derived views (lock-free snapshots) ──────────────────────────────
 
@@ -374,6 +382,16 @@ class MissionStore:
         return self._store.find_by_name(name)
 
     # ── internals ────────────────────────────────────────────────────────
+
+    def _write_run_state(self, mid: str, **fields) -> bool:
+        """Persist run state, increment the version, and refresh attached node state.
+
+        The caller must hold self._lock.
+        """
+        result = self._store.update(mid, **fields)
+        self._version += 1
+        self._sync_node()
+        return result
 
     def _sync_node(self) -> None:
         """Mirror internal state onto the node. Always called inside the lock."""

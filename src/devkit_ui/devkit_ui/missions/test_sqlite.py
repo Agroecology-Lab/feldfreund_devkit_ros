@@ -69,6 +69,23 @@ class TestMissionSqliteStore(unittest.TestCase):
         self.assertEqual(mission['id'], 'MISSION_1')
 
 
+    def test_run_history_is_persisted_and_can_be_cleared(self) -> None:
+        mission_id = cast(str, self._store.add(rows=[1], action='drive'))
+
+        self._store.update(mission_id, last_run_at='2026-01-01T10:00:00Z', last_run_success=True)
+        mission = cast(dict, self._store.find(mission_id))
+        self.assertEqual(mission['last_run_at'], '2026-01-01T10:00:00Z')
+        self.assertIs(mission['last_run_success'], True)
+
+        self._store.update(mission_id, last_run_success=False)
+        mission = cast(dict, self._store.find(mission_id))
+        self.assertIs(mission['last_run_success'], False)
+
+        self._store.update(mission_id, last_run_at=None, last_run_success=None)
+        mission = cast(dict, self._store.find(mission_id))
+        self.assertIsNone(mission['last_run_at'])
+        self.assertIsNone(mission['last_run_success'])
+
     def test_update_allows_partial_mutable_fields(self) -> None:
         mission_id = self._store.add(
             rows=[1],

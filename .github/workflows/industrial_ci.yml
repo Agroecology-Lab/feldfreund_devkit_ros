@@ -1,4 +1,4 @@
-name: Industrial CI 
+name: Industrial CI
 
 on:
   push:
@@ -6,30 +6,37 @@ on:
   pull_request:
     branches: [ caatinga-dev ]
 
+permissions:
+  contents: read
+
+# A newer push to a pull request supersedes its running job.
+# Runs on caatinga-dev itself are never cancelled.
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
 jobs:
   industrial_ci:
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
     steps:
-      - uses: actions/checkout@v4
-        with:
-          ref: caatinga-dev
+      # No `ref:` - the default is the commit that triggered the run. Pinning
+      # `ref: caatinga-dev` made pull_request runs test the base branch, not the PR.
+      - uses: actions/checkout@v6
 
       - name: Run industrial_ci
         uses: ros-industrial/industrial_ci@master
         env:
           ROS_DISTRO: jazzy
           ROS_REPO: main
-          # Register a local rosdep rules file for keys with no default
-          # system mapping (PyPI-only deps like pyserial, nicegui).
-          # rosdep itself isn't installed yet at this stage, so we just
-          # write the source entry here; the later setup_rosdep step
-          # runs its own rosdep update and will pick this file up,
-          # resolving ament_python's stale-cache issue too.
+          # Register .github/rosdep/local.yaml as a rosdep source. Creating
+          # /etc/ros/rosdep/sources.list.d here makes industrial_ci skip its own
+          # `rosdep init`, so rosdep's default sources (base.yaml, python.yaml) are
+          # never registered: every key that is not a ROS package must be defined
+          # in local.yaml (PyPI-only deps like pyserial and nicegui, but also plain
+          # apt ones like python3-numpy and python3-deepdiff).
           BEFORE_INIT: 'mkdir -p /etc/ros/rosdep/sources.list.d && echo "yaml file://${TARGET_REPO_PATH}/.github/rosdep/local.yaml" | tee /etc/ros/rosdep/sources.list.d/10-local.list'
-          # Pass GCC coverage flags during CMake compilation
-          CMAKE_ARGS: "-DCMAKE_BUILD_TYPE=Debug -DCMAKE_CXX_FLAGS='--coverage'"
-          # Instruct industrial_ci to generate gcov test reports after running tests
-          AFTER_RUN_TARGET_TEST: 'lcov --capture --directory /root/target_ws/build --output-file /tmp/coverage.info --ignore-errors empty'          # fields2cover has no apt/pip package - the Dockerfile builds it
+          # fields2cover has no apt/pip package - the Dockerfile builds it
           # from source (cmake) and skips it in its own rosdep call too.
           # CI doesn't need to build it just to run tests.
           ROSDEP_SKIP_KEYS: 'fields2cover'
@@ -40,5 +47,3 @@ jobs:
           # Debian-managed deps (no RECORD file). industrial_ci doesn't
           # forward PIP_IGNORE_INSTALLED, so pass it via DOCKER_RUN_OPTS.
           DOCKER_RUN_OPTS: '-e PIP_IGNORE_INSTALLED=1'
-          ADDITIONAL_DEBS: 'lcov'
-          
