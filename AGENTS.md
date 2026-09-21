@@ -4,7 +4,8 @@
 > **About**: The project, setup and usage is described in [README.md](README.md)\
 > **Standards**: All coding standards are in [CONTRIBUTING.md](CONTRIBUTING.md) – follow those rules\
 > **NiceGUI Documentation**: A condensed JSON version of NiceGUI's documentation is available at https://nicegui.io/static/sitewide_index.json
-> **Ros2 Best Practices** should be followed at all times [https://github.com/henki-robotics/henki_ros2_best_practices](https://github.com/henki-robotics/henki_ros2_best_practices) clone this repo to your sandbox.
+> **ROS2 Style Guidelines** should be followed at all times [https://docs.ros.org/en/lyrical/The-ROS2-Project/Contributing/Code-Style-Language-Versions.html#python](https://docs.ros.org/en/lyrical/The-ROS2-Project/Contributing/Code-Style-Language-Versions.html#python)
+> **ROS2 Best Practices** should be followed at all times [https://github.com/henki-robotics/henki_ros2_best_practices](https://github.com/henki-robotics/henki_ros2_best_practices) clone this repo to your sandbox.
 
 
 ## Skills Directory
