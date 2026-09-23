@@ -247,8 +247,12 @@ class DevkitManager:
         extra_flags lets a mode add its own volumes/env vars (e.g. limbic-only
         sim mounts) before the image name.
         """
+        # -it requires both stdin and stdout to be a real TTY; fall back to -i
+        # so non-interactive invocations (cron, CI, piped) don't hard-fail.
+        interactive_flags = ['-it'] if sys.stdin.isatty() and sys.stdout.isatty() else ['-i']
+
         cmd = [
-            'docker', 'run', '-it', '--rm', '--name', self.container_name,
+            'docker', 'run', *interactive_flags, '--rm', '--name', self.container_name,
             '-p', '80:80',
             '-p', '8080:8080',
             '-p', '8765:8765',
