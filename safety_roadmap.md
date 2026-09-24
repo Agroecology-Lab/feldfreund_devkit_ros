@@ -12,7 +12,7 @@
 
 The formal safety function is the hardwired 24V E-stop loop (§2, Core components) and the 48V traction interlock it drives. Everything else in this document (ROS 2 nodes, `sentor`, ESP32/STM32H7 firmware, perception, reversing alarm) is supervisory or defence-in-depth, **not** part of the rated safety function, and does not enter the PLc/PLd calculation in §6.
 
-This split holds regardless of firmware changes (ESP32 to STM32H7, Lizard to ArduPilot, RTOS choice). Moving the controller firmware does not move the safety boundary. Any future change that would make software part of the certified stop path requires re-opening this section and re-running the calculation in §6, not a note added elsewhere.
+This split holds regardless of firmware changes (ESP32 to STM32H7, Lizard to ArduPilot CoginiPilot, RTOS choice). Moving the controller firmware does not move the safety boundary. Any future change that would make software part of the certified stop path requires re-opening this section and re-running the calculation in §6, not a note added elsewhere.
 
 ---
 
@@ -147,13 +147,13 @@ Per §0: `sentor` and the software E-stop topics are diagnostic/supervisory. The
 
 | Item | Status | Notes |
 |---|---|---|
-| ESP32 + Lizard DSL | DONE, current | hard real-time motor PID and bumper cutoff |
-| STM32H7 + ArduPilot Rover migration | TO DO | EKF3, failsafes, geofencing, SITL testing, community scrutiny. Reference: [ArduPilot Zephyr HAL: Flying on a BeagleV-Fire](https://www.beagleboard.org/projects/ardupilot-on-zephyr-flying-on-the-beaglev-fire), [Zephyr Safety Overview](https://docs.zephyrproject.org/latest/safety/safety_overview.html) |
+| ESP32 + Lizard DSL | DONE, current | hard real-time, but ESP-IDF quality |
+| STM32H7 + ArduPilot Rover migration | NO | superseded by Cerebri path below |
+| Cerebri on Zephyr & [FRDM-A-S32K358](https://www.nxp.com/design/design-center/development-boards-and-designs/FRDM-A-S32K358) | WIP | [Agroecology-Lab/cerebri](https://github.com/Agroecology-Lab/cerebri),  |
 
 Per §0: this layer is out of scope for the PLc calculation both before and after migration. The migration's value is defence-in-depth (EKF-based failsafes, geofencing) and long-run firmware certifiability. It does not change, and does not need to change, the §6 rating.
 
-Zephyr's own safety programme (IEC 61508 SIL 3 SEooC, concept approval granted via route 3s, ISO 26262 alignment in progress) is the basis for the IEC 61508 reference above. Track its certification status directly rather than treating this as open-ended.
-
+Zephyr's own safety programme (IEC 61508 SIL 3 SEooC, concept approval granted via route 3s, ISO 26262 alignment in progress) is the basis for the IEC 61508 reference above. 
 ---
 
 ## 6. Regulatory compliance
@@ -183,20 +183,19 @@ The EU Machinery Regulation 2023/1230 replaces the Directive from 20 January 202
 
 ### Functional safety calculation (draft)
 
-**Target:** ISO 13849-1 Performance Level c (PLc) / Performance Level d (PLd)
+**Target:** ISO 13849-1 Performance Level d (PLd) 
 **Risk graph parameters:** S2 (severe/irreversible injury, see H1), F2 (frequent/continuous exposure), P1 (avoidance possible via white-sound alarm and flashing beacon). Yields PLc. If P1 drops to P2 (ambient noise or blind spots), target escalates to PLd.
 
-**In-scope components:** §2 Core and Supplemental tables (physical E-stops, wireless pendant, IDEM GLM tether switch, output contactors, PRSU/2 logic, bumper), per §0. The Inxpect radar sensors and C203A control unit (§2 Supplemental 4 and 5) are excluded unless O24 brings them in.
+**In-scope components:** §2 Core and Supplemental tables (physical E-stops, wireless pendant, IDEM GLM tether switch, output contactors, PRSU/2 logic, bumper), per §0. The Inxpect PLd rated radar sensors and C203A control unit (§2 Supplemental 4 and 5) are excluded unless O24 brings them in.
 
 **Architecture:**
 - Category 3, dual-channel redundant structure across inputs, logic, and output power interlocks.
 - Diagnostic coverage (DCavg): stated range 60 to 90% (Low), pending SW180 aux-microswitch EDM-loop verification. Not yet a fixed number, needs pinning down before the SISTEMA run, see §8.
 - Common cause failure (CCF): Annex F scoring applies (≥65 points required); addressed via channel isolation, overvoltage protection, physical wiring separation. Score not yet computed, see §8.
-- Architectural ceiling: PLd (or PLe depending on final DC/MTTFd), satisfying the PLc baseline.
 
 **Combination rule:** total PFHd and PL ceiling are set by the worst-performing element in the series chain (E-Stops → Gemini 1S → IDEM GLM tether → VBL Bumper/PRSU/2 → dual SW180s). No component may rate below the overall target.
 
-**Cybersecurity note (OPEN, updated this revision):** the wireless pendant is an RF input to a safety function, sharing an unlicensed ISM band with other devices (H3). The tiered reaction-time/retry scheme found in the datasheet review is a plausible mitigation for dropped or collided packets but is not confirmed as such by Cattron, and critically, the receiver's behaviour when all retries fail (fail-state on total signal loss) is undocumented. This is now the single blocking question for both H3 and the wireless pendant's PL-c input to the SISTEMA calc, see O20.
+**Cybersecurity note:** the wireless pendant is an RF input to a safety function, sharing an unlicensed ISM band with other devices (H3). The tiered reaction-time/retry scheme found in the datasheet review is a plausible mitigation for dropped or collided packets but is not confirmed as such by Cattron, and critically, the receiver's behaviour when all retries fail (fail-state on total signal loss) is undocumented. This is now the single blocking question for both H3 and the wireless pendant's PL-d input to the SISTEMA calc, see O20.
 
 ---
 
