@@ -1,7 +1,7 @@
-# Sowbot Safety Roadmap, v0.6.1
+# Sowbot Safety Roadmap, v0.6.2
 
 **Document control**
-- Previous version: v0.6
+- Previous version: v0.6.1
 - Status: living document, Phase 1 (dev platform)
 - Scope: whole-vehicle emergency motor-stop function, ISO 13849-1. Does not cover implement, PTO, or manipulator safety, see §7.
 - Owner: TBD (assign)
@@ -26,7 +26,7 @@ Supports the S2/F2/P1 risk graph parameters in §6. Not exhaustive, add rows as 
 | H2 | Rollaway after stop | Stop on slope, no parking brake | Not yet assessed (CONFIRM operating slope range) | Worm gear drive (assumed 40:1) self-locks tracks when unpowered | OPEN, self-locking ratio assumed, not yet confirmed against gearbox datasheet; no positive parking brake in BOM as backup |
 | H3 | Wireless pendant jamming/spoofing | 868MHz interference or malicious signal | Low to Medium, unassessed | Tiered reaction-time/retry scheme (see §2 datasheet review notes) is a plausible packet-loss mitigation, not confirmed as such by Cattron | OPEN, no RF integrity requirement stated; **fail-state on total signal loss still undocumented (see O20)** |
 | H4 | Undetected E-stop hardware degradation | Contactor welding, relay failure over time | Continuous | PRSU/2 EDM loop via SW180 aux microswitches | Covered by DCavg in §6, pending final CCF/SISTEMA figures |
-| H5 | False negative on human detection | Thermal sensor not yet fitted; visual perception excluded from safety calc | Continuous once deployed near people | None yet (see §4) | OPEN, thermal detection still TO DO |
+| H5 | False negative on human detection | Radar detection not yet fitted or validated; visual perception excluded from safety calc | Continuous once deployed near people | Inxpect S101A radar (front and rear) with C203A control unit selected (see §2 Supplemental, §4); supervisory only per §0 until O24 is decided | OPEN, radar not yet built or tested; suitability for a moving platform unconfirmed (see O23) |
 
 ---
 
@@ -89,7 +89,9 @@ Supports the S2/F2/P1 risk graph parameters in §6. Not exhaustive, add rows as 
 | 1 | Relays / safety logic | [Tapeswitch PRSU/2](https://www.tapeswitch.com/store/products.php?cat=Interface+Controllers), $315.00 from Tapeswitch's own store | Logic | Cat 3, PL-e, TÜV-assessed, <30ms response; 2×N.O. positive-guided safety relays, AgSnO2 contacts, 250VAC/24VDC, 6A individual/13.8A combined | Selected. **No public datasheet found — Tapeswitch's published PSSR-2 is a different, lower-rated product (Cat 3 / PL-d / SIL 2, 13ms response), not PL-e. Do not substitute PSSR-2 documentation for PRSU/2 anywhere in the technical file.** |
 | 2 | Bumper | [Tapeswitch VBL](https://www.tapeswitch.com/bumpers.html) (SE-45D/SE-75D/custom SE-C), quote-only, no fixed web price | Input | 4-wire fail-safe loop | Selected. No public datasheet exists. |
 | 3 | Reversing alarm/beacon | [Brigade SA-BBS-97](https://www.beaconsandlightbars.co.uk/product/brigade-electronics-brigade-sa-bbs-97-77-97db-smart-bbs-tek-white-sound-reversing-alarm-pn-sa-bbs-9-17914), £95, + [rotating LED ~£40](https://www.compass24.com/led-3600-rotating-beacon-flat-396940/black) | Not in stop function, avoidance measure only | 24V, wire to motion state generally, not just reverse | TO DO |
-| **Total** | | **£135.00** + **$315.00** (mixed currency; Tapeswitch VBL bumper excluded, quote-only, no fixed price) | | | |
+| 4 | Human-detection radar sensors (front and rear) | Inxpect S101A ×2 (Fortop code IT100006, Inxpect 90202011), [Fortop UK](https://shop.fortop.co.uk/en/en/inxpect-it100006-s101a-ul-radar-sensor-90202011.html), £510.00 each (£1,020.00 for two; VAT status not stated on the page), delivery approx. 4 weeks | Input (human detection). Supervisory per §0, not in the §6 calculation unless O24 changes that | 24 GHz FMCW radar, SIL 2 / PL d (Inxpect); 0 to 4 m range, min. set distance 1 m; FOV 110°×30° (wide) or 50°×15° (narrow); max target speed 1.6 m/s; IP67; −30 to +60 °C; 12 V dc through control unit, 1.5 W; M12 connectors, CAN | Selected. Replaces the thermal detection plan. Suitability for a moving vehicle unconfirmed (O23). |
+| 5 | Radar control unit | Inxpect C203A ×1 (Fortop code IT100024, Inxpect 90304011), [Fortop UK](https://shop.fortop.co.uk/en/en/c203a-ul-control-unit-200-series-it100024-90304011.html), £570.00 (VAT status not stated), 1 in stock | Logic (radar) | Connects up to 6 sensors; digital inputs and safety outputs; USB configuration via Inxpect Safety Application | Selected. S101A and C203A pairing not stated on Inxpect's product pages (O23). |
+| **Total** | | **£1,725.00** (£135.00 alarm/beacon + £1,590.00 Inxpect radar, Fortop prices, VAT status unstated) + **$315.00** (mixed currency; Tapeswitch VBL bumper excluded, quote-only, no fixed price) | | | |
 
 Component-level data gaps (B10d, MTTFd, PFHd, rope length, etc.) are tracked once, in the register at §8, not repeated here.
 
@@ -136,8 +138,8 @@ Per §0: `sentor` and the software E-stop topics are diagnostic/supervisory. The
 
 | Item | Status | Notes |
 |---|---|---|
-| Thermal (MLX90640/MLX90614) human detection | TO DO | not in repo or BOM, see H5 |
-| Livestock false-positive tolerance | AGREED | fine for thermal to stop on livestock, safe default |
+| Radar human detection (Inxpect S101A ×2 front/rear + C203A) | TO DO | selected, not yet built or tested; replaces the earlier thermal plan (MLX90640/MLX90614); see §2 Supplemental and H5; supervisory per §0 until O24 |
+| Livestock false-positive tolerance | AGREED | fine for the detector to stop on livestock, safe default (agreed under the thermal plan, carried over to radar) |
 
 ---
 
@@ -167,7 +169,7 @@ No compliance claimed. Reference standards only until formal assessment or audit
 | ISO 13849 / PL | Machinery safety, control systems | PLc target for E-stop relay, bumper circuit |
 | ISO 3691-4 | AGV obstacle detection | Clearance rules, braking distance, detection envelope sizing |
 | IEC 61508 | Functional safety, E/E/PE systems | Reference for controller firmware architecture (§5) |
-| ISO 21448 (SOTIF) | Safety of the intended functionality | Vision/thermal degradation: mud, dust, glare (see H5) |
+| ISO 21448 (SOTIF) | Safety of the intended functionality | Vision/radar degradation: mud, dust, glare, crop clutter (see H5) |
 
 ### Product classification (new)
 
@@ -184,7 +186,7 @@ The EU Machinery Regulation 2023/1230 replaces the Directive from 20 January 202
 **Target:** ISO 13849-1 Performance Level c (PLc) / Performance Level d (PLd)
 **Risk graph parameters:** S2 (severe/irreversible injury, see H1), F2 (frequent/continuous exposure), P1 (avoidance possible via white-sound alarm and flashing beacon). Yields PLc. If P1 drops to P2 (ambient noise or blind spots), target escalates to PLd.
 
-**In-scope components:** §2 Core and Supplemental tables (physical E-stops, wireless pendant, IDEM GLM tether switch, output contactors, PRSU/2 logic, bumper), per §0.
+**In-scope components:** §2 Core and Supplemental tables (physical E-stops, wireless pendant, IDEM GLM tether switch, output contactors, PRSU/2 logic, bumper), per §0. The Inxpect radar sensors and C203A control unit (§2 Supplemental 4 and 5) are excluded unless O24 brings them in.
 
 **Architecture:**
 - Category 3, dual-channel redundant structure across inputs, logic, and output power interlocks.
@@ -226,12 +228,14 @@ Single tracked list. Ordered roughly by build sequence, re-order as priorities s
 | O14 | Define fail-state for steering on E-stop trigger (currently undocumented) | §2 fail-state definition, H2 | OPEN |
 | O15 | Assess rollaway risk on slope (H2): confirm 40:1 worm gear ratio and self-locking against gearbox datasheet; confirm operating slope range; decide if a positive parking brake is still needed as backup | §1 H2 | OPEN |
 | O16 | Assess RF jamming/spoofing risk for wireless pendant (H3) | §6 cybersecurity note | OPEN |
-| O17 | Thermal human-detection hardware selection and BOM entry (H5) | §4, §1 H5 | TO DO |
+| O17 | Human-detection hardware: Inxpect S101A ×2 (front/rear) + C203A selected and added to §2 Supplemental (components 4 and 5), replacing the earlier thermal plan (MLX90640/MLX90614); order, install and validate (H5) | §4, §1 H5 | TO DO |
 | O18 | Track Zephyr IEC 61508 SEooC certification status directly rather than as an open-ended reference | §5 | Ongoing |
 | O19 | IDEM GLM wire rope tether: confirm rope length needed; obtain B10d/MTTFd/PFHd | §6 SISTEMA run, §2 Core component 4 | TO DO |
 | O20 | **(new)** Obtain written confirmation from Cattron of the Gemini 1S's fail-state on total signal loss (fails to commanded stop vs. holds last state) | H3, O3, §6 SISTEMA run | OPEN — blocking |
 | O21 | **(new)** Clarify with Cattron which reaction-time figure governs system response: Indus 1S's 3-tier (0.5/1.0/1.5s) vs Gemini 1S's 4-tier (0.5/1.0/1.5/2.0s) spec | §1 H1, §6 SISTEMA run | OPEN |
 | O22 | **(new)** Prepare Declaration of Incorporation and assembly instructions (Annex VI) for partly-completed-machinery shipment, per §6 Product classification | Any unit shipment | TO DO |
+| O23 | **(new)** Confirm with Inxpect / Fortop: (a) S101A is approved for mounting on a moving vehicle and detects a stationary person ahead of a moving platform (Inxpect's S101A page describes access detection and restart prevention for industrial machinery); (b) S101A pairs with C203A (Fortop lists the same 100S/200S documents on both, Inxpect's page does not say); (c) sensor-to-output response time against H1 (SICK lists 100 ms or less for its Inxpect-derived safeRS); (d) outdoor use (Fortop says indoor and outdoor, SICK lists its safeRS as indoor only); (e) C203A supply voltage against the 24V safety power | §1 H5, §2 Supplemental 4 and 5 | OPEN |
+| O24 | **(new)** Decide whether the radar output stays supervisory (ROS layer only, per §0) or is wired into the PRSU/2 stop loop. If the latter, re-open §0 and re-run §6: Inxpect lists the S101A as PL d, Category 2, against the Category 3 architecture in §6, and whole-chain PFHd and CCF would need re-computing | §0, §6 | OPEN |
 
 ---
 
@@ -256,7 +260,7 @@ Audience: startups integrating Sowbot's drive/safety core.
 | Item | Status |
 |---|---|
 | PLc calculation for E-stop and bumper circuit | Draft in progress, gate for this phase |
-| SOTIF assessment for vision/thermal degradation cases | TO DO |
+| SOTIF assessment for vision/radar degradation cases | TO DO |
 | IEC 61508 architecture review | TO DO |
 | Third-party certification | NOT REQUIRED YET; formal internal assessment is |
 
@@ -275,6 +279,7 @@ Audience: commercial growers, farm management enterprises.
 
 ## Revision history
 
+- **v0.6.2**: added Inxpect S101A ×2 (front and rear) and one C203A control unit, both from Fortop UK, to §2 Supplemental as components 4 and 5 (£510.00 each and £570.00) and updated the Supplemental total; replaced the thermal detection plan (MLX90640/MLX90614) with the radar in H5, §4, the §6 SOTIF row, §9 Phase 2 and O17; excluded the radar from the §6 in-scope list pending O24; added O23 (application and compatibility checks with Inxpect/Fortop) and O24 (whether the radar output stays supervisory or enters the stop loop, which would re-open §0 and §6).
 - **v0.6.1**: added wireless pendant datasheet review notes to §2 (reaction-time tier mismatch between Indus 1S and Gemini 1S, internal battery-life inconsistency in the Indus 1S sheet, IP66-vs-IP65 discrepancy between website and datasheet); flagged that Tapeswitch's public PSSR-2 product must not be conflated with PRSU/2 (§2 Supplemental, O2); updated H3 and the §6 cybersecurity note with the fail-state-on-signal-loss gap; added new open items O20 (Gemini 1S fail-state confirmation, blocking), O21 (reaction-time reconciliation), O22 (Declaration of Incorporation / assembly instructions); added §6 Product classification subsection covering UK Supply of Machinery (Safety) Regulations 2008, EU Machinery Directive 2006/42/EC, and the 20 January 2027 transition to EU Machinery Regulation (EU) 2023/1230.
 - **v0.6**: updated H2 and O15 with the drivetrain finding that the worm gear self-locks the tracks when unpowered, assumed ratio 40:1 pending confirmation against the actual gearbox datasheet. H2 stays OPEN until that's confirmed and a decision is made on whether a positive parking brake is still needed as backup.
 - **v0.5**: restored the v0.3 Core/Supplemental table split in §2, including the IDEM GLM wire rope tether switch (Core, component 4) that v0.4 dropped when it merged the two tables into one; added the tether switch back as O19 in the open items register. Kept v0.4's §0 safety scoping statement, §1 hazard table, §7 non-traction scope flag, §8 consolidated register, fail-state gap, rollaway risk (H2), and RF jamming/spoofing risk (H3).
