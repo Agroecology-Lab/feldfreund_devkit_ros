@@ -220,11 +220,11 @@ RUN mkdir -p /root/models && \
 # floating branch head) so a rebuild can't silently pick up upstream changes.
 ARG FOREST3D_COMMIT=692ce1da79725f8101616a3adac8c79a493e9c12
 RUN for i in 1 2 3 4 5; do \
-      mkdir -p src/forest3d && cd src/forest3d && git init -q && \
-      GIT_TERMINAL_PROMPT=0 git fetch --depth 1 \
-        https://github.com/unitsSpaceLab/Forest3D.git "${FOREST3D_COMMIT}" && \
-      git checkout -q FETCH_HEAD && cd /workspace && break || \
-      (cd /workspace && rm -rf src/forest3d && \
+      (mkdir -p src/forest3d && cd src/forest3d && git init -q && \
+       GIT_TERMINAL_PROMPT=0 git fetch --depth 1 \
+         https://github.com/unitsSpaceLab/Forest3D.git "${FOREST3D_COMMIT}" && \
+       git checkout -q FETCH_HEAD) && break || \
+      (rm -rf src/forest3d && \
        echo "Forest3D attempt $i failed, retrying in 15s..." && sleep 15); \
     done && \
     pip install --break-system-packages --no-cache-dir \
@@ -267,8 +267,9 @@ ARG EXTERNAL_CACHEBUST=2
 # Each repo pinned to an exact commit (resolved from the branch each was
 # previously floating on) so a rebuild can't silently pick up upstream
 # changes — same fetch+checkout pattern already used for Lizard in Stage 4.
-# Bump the relevant *_COMMIT arg (via `manage.py build +pull`) to intentionally
-# move a pin forward.
+# `manage.py build +pull` only refreshes the external cache; it does not advance
+# pinned commits. To move a pin forward, change the relevant *_COMMIT default or
+# supply its value with a build argument.
 ARG UBLOX_DGNSS_COMMIT=17fd3c996132ab9377fe7a1e407118713c126581
 ARG VISION_OPENCV_COMMIT=f5b738d9694f0cee5904440d03912fc249943f8a
 ARG TOPOLOGICAL_NAVIGATION_COMMIT=484ac7e34656d0345f142ae429e8b8c3b8c25620
