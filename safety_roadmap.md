@@ -1,7 +1,7 @@
-# Sowbot Safety Roadmap, v0.6.2
+# Sowbot Safety Roadmap, v0.6.3
 
 **Document control**
-- Previous version: v0.6.1
+- Previous version: v0.6.2
 - Status: living document, Phase 1 (dev platform)
 - Scope: whole-vehicle emergency motor-stop function, ISO 13849-1. Does not cover implement, PTO, or manipulator safety, see §7.
 - Owner: TBD (assign)
@@ -95,7 +95,7 @@ Supports the S2/F2/P1 risk graph parameters in §6. Not exhaustive, add rows as 
 
 Component-level data gaps (B10d, MTTFd, PFHd, rope length, etc.) are tracked once, in the register at §8, not repeated here.
 
-### Wireless pendant — datasheet review notes (new)
+### Wireless pendant — datasheet review notes
 
 Both Indus 1S and Gemini 1S manufacturer datasheets (Tyro Remotes) have been reviewed in full. Findings:
 
@@ -129,8 +129,11 @@ Hardware build status is tracked in the tables above and in §8, not repeated he
 | `sentor` hardware smoke test | TO DO | validated in sim only so far |
 | Battery voltage cutoff threshold | TO DO | marked `# TODO: CONFIRM` in `sowbot_monitor.yaml`, no value set |
 | `ros2_medkit` black-box logging | TO DO | not in repo or dependency list yet |
+| Aggregation layer + `/safety/level` | TO DO | see architecture note below |
 
 Per §0: `sentor` and the software E-stop topics are diagnostic/supervisory. They are not part of the rated safety function.
+
+**Architecture note (new):** `sentor`'s two heartbeats are a flat AND across ~12 monitors, with no ordered "how bad is it" signal and no de-escalation rule beyond the E-stop re-arm (O13). Fix: keep `sentor` as the raw topic/rate watcher, feed it into `diagnostic_aggregator` (mature, worst-child-wins tree aggregation) rather than `sentor`'s own `RobotStateMachine`/`sentor_guard` integration path — that path was added, reverted, and removed from sentor's own upstream (Dec 2025), so it's not stable enough to depend on. A small bridge node turns the aggregated status into one ordered `/safety/level` (`NOMINAL`→`DEGRADED`→`SAFE_STOP`) for the mission executor and Nav2 lifecycle to threshold on, instead of each wiring to raw E-stop/bumper/liveliness topics. Independent of this: the real-time `cmd_vel` gate (`nav2_collision_monitor`) stays under §5 and doesn't depend on this decision.
 
 ---
 
@@ -149,11 +152,12 @@ Per §0: `sentor` and the software E-stop topics are diagnostic/supervisory. The
 |---|---|---|
 | ESP32 + Lizard DSL | DONE, current | hard real-time, but ESP-IDF quality |
 | STM32H7 + ArduPilot Rover migration | NO | superseded by Cerebri path below |
-| Cerebri on Zephyr & [FRDM-A-S32K358](https://www.nxp.com/design/design-center/development-boards-and-designs/FRDM-A-S32K358) dual 32-bit Arm® Cortex®-M7 cores operating in lockstep to support ASIL D functional safety| WIP | [Agroecology-Lab/cerebri](https://github.com/Agroecology-Lab/cerebri),  |
+| Cerebri on Zephyr & [FRDM-A-S32K358](https://www.nxp.com/design/design-center/development-boards-and-designs/FRDM-A-S32K358) dual 32-bit Arm® Cortex®-M7 cores operating in lockstep to support ASIL D functional safety | WIP | [Agroecology-Lab/cerebri](https://github.com/Agroecology-Lab/cerebri) |
 
 Per §0: this layer is out of scope for the PLc calculation both before and after migration. The migration's value is defence-in-depth (EKF-based failsafes, geofencing) and long-run firmware certifiability. It does not change, and does not need to change, the §6 rating.
 
-Zephyr's own safety programme (IEC 61508 SIL 3 SEooC, concept approval granted via route 3s, ISO 26262 alignment in progress) is the basis for the IEC 61508 reference above. 
+Zephyr's own safety programme (IEC 61508 SIL 3 SEooC, concept approval granted via route 3s, ISO 26262 alignment in progress) is the basis for the IEC 61508 reference above.
+
 ---
 
 ## 6. Regulatory compliance
@@ -171,7 +175,7 @@ No compliance claimed. Reference standards only until formal assessment or audit
 | IEC 61508 | Functional safety, E/E/PE systems | Reference for controller firmware architecture (§5) |
 | ISO 21448 (SOTIF) | Safety of the intended functionality | Vision/radar degradation: mud, dust, glare, crop clutter (see H5) |
 
-### Product classification 
+### Product classification
 
 The devkit as currently shipped is **"partly completed machinery"** under both regimes tracked:
 - **UK**: Supply of Machinery (Safety) Regulations 2008 (SI 2008/1597)
@@ -183,7 +187,7 @@ The EU Machinery Regulation 2023/1230 replaces the Directive from 20 January 202
 
 ### Functional safety calculation (draft)
 
-**Target:** ISO 13849-1 Performance Level d (PLd) 
+**Target:** ISO 13849-1 Performance Level d (PLd)
 **Risk graph parameters:** S2 (severe/irreversible injury, see H1), F2 (frequent/continuous exposure), P1 (avoidance possible via white-sound alarm and flashing beacon). Yields PLc. If P1 drops to P2 (ambient noise or blind spots), target escalates to PLd.
 
 **In-scope components:** §2 Core and Supplemental tables (physical E-stops, wireless pendant, IDEM GLM tether switch, output contactors, PRSU/2 logic, bumper), per §0. The Inxpect PLd rated radar sensors and C203A control unit (§2 Supplemental 4 and 5) are excluded unless O24 brings them in.
@@ -230,11 +234,14 @@ Single tracked list. Ordered roughly by build sequence, re-order as priorities s
 | O17 | Human-detection hardware: Inxpect S101A ×2 (front/rear) + C203A selected and added to §2 Supplemental (components 4 and 5), replacing the earlier thermal plan (MLX90640/MLX90614); order, install and validate (H5) | §4, §1 H5 | TO DO |
 | O18 | Track Zephyr IEC 61508 SEooC certification status directly rather than as an open-ended reference | §5 | Ongoing |
 | O19 | IDEM GLM wire rope tether: confirm rope length needed; obtain B10d/MTTFd/PFHd | §6 SISTEMA run, §2 Core component 4 | TO DO |
-| O20 | **(new)** Obtain written confirmation from Cattron of the Gemini 1S's fail-state on total signal loss (fails to commanded stop vs. holds last state) | H3, O3, §6 SISTEMA run | OPEN — blocking |
-| O21 | **(new)** Clarify with Cattron which reaction-time figure governs system response: Indus 1S's 3-tier (0.5/1.0/1.5s) vs Gemini 1S's 4-tier (0.5/1.0/1.5/2.0s) spec | §1 H1, §6 SISTEMA run | OPEN |
-| O22 | **(new)** Prepare Declaration of Incorporation and assembly instructions (Annex VI) for partly-completed-machinery shipment, per §6 Product classification | Any unit shipment | TO DO |
-| O23 | **(new)** Confirm with Inxpect / Fortop: (a) S101A is approved for mounting on a moving vehicle and detects a stationary person ahead of a moving platform (Inxpect's S101A page describes access detection and restart prevention for industrial machinery); (b) S101A pairs with C203A (Fortop lists the same 100S/200S documents on both, Inxpect's page does not say); (c) sensor-to-output response time against H1 (SICK lists 100 ms or less for its Inxpect-derived safeRS); (d) outdoor use (Fortop says indoor and outdoor, SICK lists its safeRS as indoor only); (e) C203A supply voltage against the 24V safety power | §1 H5, §2 Supplemental 4 and 5 | OPEN |
-| O24 | **(new)** Decide whether the radar output stays supervisory (ROS layer only, per §0) or is wired into the PRSU/2 stop loop. If the latter, re-open §0 and re-run §6: Inxpect lists the S101A as PL d, Category 2, against the Category 3 architecture in §6, and whole-chain PFHd and CCF would need re-computing | §0, §6 | OPEN |
+| O20 | Obtain written confirmation from Cattron of the Gemini 1S's fail-state on total signal loss (fails to commanded stop vs. holds last state) | H3, O3, §6 SISTEMA run | OPEN — blocking |
+| O21 | Clarify with Cattron which reaction-time figure governs system response: Indus 1S's 3-tier (0.5/1.0/1.5s) vs Gemini 1S's 4-tier (0.5/1.0/1.5/2.0s) spec | §1 H1, §6 SISTEMA run | OPEN |
+| O22 | Prepare Declaration of Incorporation and assembly instructions (Annex VI) for partly-completed-machinery shipment, per §6 Product classification | Any unit shipment | TO DO |
+| O23 | Confirm with Inxpect / Fortop: (a) S101A is approved for mounting on a moving vehicle and detects a stationary person ahead of a moving platform; (b) S101A pairs with C203A; (c) sensor-to-output response time against H1; (d) outdoor use; (e) C203A supply voltage against the 24V safety power | §1 H5, §2 Supplemental 4 and 5 | OPEN |
+| O24 | Decide whether the radar output stays supervisory (ROS layer only, per §0) or is wired into the PRSU/2 stop loop. If the latter, re-open §0 and re-run §6 | §0, §6 | OPEN |
+| O25 | **(new)** Adopt `diagnostic_aggregator` between `sentor`'s per-topic output and a single ordered `/safety/level`, replacing the flat `/safety/heartbeat` + `/warning/heartbeat` pair | §3 | TO DO |
+| O26 | **(new)** Define per-monitor de-escalation policy (auto-clear vs. requires manual re-arm), extending O13's E-stop-specific rule to every monitor feeding `/safety/level` | §3, O13 | TO DO |
+| O27 | **(new)** Wire mission executor and Nav2 lifecycle to threshold on `/safety/level` rather than each subscribing to raw E-stop/bumper/node-liveliness topics individually | §3 | TO DO |
 
 ---
 
@@ -278,6 +285,7 @@ Audience: commercial growers, farm management enterprises.
 
 ## Revision history
 
+- **v0.7**: added §3 supervisory architecture note — adopting `diagnostic_aggregator` for level aggregation over the `RobotStateMachine`/`sentor_guard` path (found unstable in sentor's own upstream history, Dec 2025); added O25–O27 for the aggregation layer, per-level de-escalation policy, and wiring the mission executor/Nav2 to a new `/safety/level` topic.
 - **v0.6.2**: added Inxpect S101A ×2 (front and rear) and one C203A control unit, both from Fortop UK, to §2 Supplemental as components 4 and 5 (£510.00 each and £570.00) and updated the Supplemental total; replaced the thermal detection plan (MLX90640/MLX90614) with the radar in H5, §4, the §6 SOTIF row, §9 Phase 2 and O17; excluded the radar from the §6 in-scope list pending O24; added O23 (application and compatibility checks with Inxpect/Fortop) and O24 (whether the radar output stays supervisory or enters the stop loop, which would re-open §0 and §6).
 - **v0.6.1**: added wireless pendant datasheet review notes to §2 (reaction-time tier mismatch between Indus 1S and Gemini 1S, internal battery-life inconsistency in the Indus 1S sheet, IP66-vs-IP65 discrepancy between website and datasheet); flagged that Tapeswitch's public PSSR-2 product must not be conflated with PRSU/2 (§2 Supplemental, O2); updated H3 and the §6 cybersecurity note with the fail-state-on-signal-loss gap; added new open items O20 (Gemini 1S fail-state confirmation, blocking), O21 (reaction-time reconciliation), O22 (Declaration of Incorporation / assembly instructions); added §6 Product classification subsection covering UK Supply of Machinery (Safety) Regulations 2008, EU Machinery Directive 2006/42/EC, and the 20 January 2027 transition to EU Machinery Regulation (EU) 2023/1230.
 - **v0.6**: updated H2 and O15 with the drivetrain finding that the worm gear self-locks the tracks when unpowered, assumed ratio 40:1 pending confirmation against the actual gearbox datasheet. H2 stays OPEN until that's confirmed and a decision is made on whether a positive parking brake is still needed as backup.
