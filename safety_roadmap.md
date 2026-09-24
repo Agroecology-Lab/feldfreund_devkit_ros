@@ -149,7 +149,7 @@ Per §0: `sentor` and the software E-stop topics are diagnostic/supervisory. The
 |---|---|---|
 | ESP32 + Lizard DSL | DONE, current | hard real-time, but ESP-IDF quality |
 | STM32H7 + ArduPilot Rover migration | NO | superseded by Cerebri path below |
-| Cerebri on Zephyr & [FRDM-A-S32K358](https://www.nxp.com/design/design-center/development-boards-and-designs/FRDM-A-S32K358) | WIP | [Agroecology-Lab/cerebri](https://github.com/Agroecology-Lab/cerebri),  |
+| Cerebri on Zephyr & [FRDM-A-S32K358](https://www.nxp.com/design/design-center/development-boards-and-designs/FRDM-A-S32K358) dual 32-bit Arm® Cortex®-M7 cores operating in lockstep to support ASIL D functional safety| WIP | [Agroecology-Lab/cerebri](https://github.com/Agroecology-Lab/cerebri),  |
 
 Per §0: this layer is out of scope for the PLc calculation both before and after migration. The migration's value is defence-in-depth (EKF-based failsafes, geofencing) and long-run firmware certifiability. It does not change, and does not need to change, the §6 rating.
 
@@ -171,7 +171,7 @@ No compliance claimed. Reference standards only until formal assessment or audit
 | IEC 61508 | Functional safety, E/E/PE systems | Reference for controller firmware architecture (§5) |
 | ISO 21448 (SOTIF) | Safety of the intended functionality | Vision/radar degradation: mud, dust, glare, crop clutter (see H5) |
 
-### Product classification (new)
+### Product classification 
 
 The devkit as currently shipped is **"partly completed machinery"** under both regimes tracked:
 - **UK**: Supply of Machinery (Safety) Regulations 2008 (SI 2008/1597)
