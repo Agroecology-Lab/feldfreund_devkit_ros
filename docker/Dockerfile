@@ -112,6 +112,7 @@ RUN for i in 1 2 3 4 5; do \
         ros-jazzy-interactive-markers \
         ros-jazzy-control-msgs \
         ros-jazzy-controller-manager-msgs \
+        ros-jazzy-diagnostic-aggregator \
         ros-jazzy-rviz2 \
         python3-sympy \
         python3-fonttools \
@@ -215,10 +216,16 @@ RUN mkdir -p /root/models && \
       https://github.com/Megvii-BaseDetection/YOLOX/releases/download/0.1.1rc0/yolox_nano.pth
 
 # 5.4 Forest3D — realistic field generation
+# Pinned to an exact commit (was `-b feature/terrain-types-refactor`, a
+# floating branch head) so a rebuild can't silently pick up upstream changes.
+ARG FOREST3D_COMMIT=692ce1da79725f8101616a3adac8c79a493e9c12
 RUN for i in 1 2 3 4 5; do \
-      GIT_TERMINAL_PROMPT=0 git clone --depth 1 -b feature/terrain-types-refactor \
-        https://github.com/unitsSpaceLab/Forest3D.git src/forest3d && break || \
-      (echo "Forest3D attempt $i failed, retrying in 15s..." && sleep 15); \
+      (mkdir -p src/forest3d && cd src/forest3d && git init -q && \
+       GIT_TERMINAL_PROMPT=0 git fetch --depth 1 \
+         https://github.com/unitsSpaceLab/Forest3D.git "${FOREST3D_COMMIT}" && \
+       git checkout -q FETCH_HEAD) && break || \
+      (rm -rf src/forest3d && \
+       echo "Forest3D attempt $i failed, retrying in 15s..." && sleep 15); \
     done && \
     pip install --break-system-packages --no-cache-dir \
       src/forest3d && \
@@ -257,24 +264,44 @@ WORKDIR /workspace
 # to force a fresh pull of just these repos, without a full --no-cache build.
 ARG EXTERNAL_CACHEBUST=2
 
+# Each repo pinned to an exact commit (resolved from the branch each was
+# previously floating on) so a rebuild can't silently pick up upstream
+# changes — same fetch+checkout pattern already used for Lizard in Stage 4.
+# `manage.py build +pull` only refreshes the external cache; it does not advance
+# pinned commits. To move a pin forward, change the relevant *_COMMIT default or
+# supply its value with a build argument.
+ARG UBLOX_DGNSS_COMMIT=17fd3c996132ab9377fe7a1e407118713c126581
+ARG VISION_OPENCV_COMMIT=f5b738d9694f0cee5904440d03912fc249943f8a
+ARG TOPOLOGICAL_NAVIGATION_COMMIT=484ac7e34656d0345f142ae429e8b8c3b8c25620
+ARG CAATINGAROBOTICS_COMMIT=f917c7f97050ee6c895c0cebcb725953bc988fae
+ARG FUSIONCORE_COMMIT=aa16bc3e3c1abbd71014d38f73a04dc6fa36cfb4
+ARG VIRTUAL_MAIZE_FIELD_COMMIT=e525d70c3c73fcdfae9c77bb8e4ca03bf3377ac3
+ARG SENTOR_COMMIT=93487502fb9b2645c75f79b9b9613c7e2650fd06
+ARG ROS2GRAPH_EXPLORER_COMMIT=9a046bd851bbc02ef5efd38e6d38012f16ef9d5f
+ARG ROS2GRAPHER_COMMIT=2d12258a6afc671e213b2ff7eb0e9a47ac151470
+
 # All repos clone in parallel; each retries 5x. Any failed clone fails the
 # build (a missing repo breaks rosdep/colcon downstream anyway).
-RUN clone() { \
+RUN pinclone() { \
+      url="$1"; sha="$2"; dest="$3"; \
       for i in 1 2 3 4 5; do \
-        GIT_TERMINAL_PROMPT=0 git clone --depth 1 "$@" && return 0; \
-        echo "clone $* attempt $i failed, retrying in 15s..."; sleep 15; \
-      done; echo "FATAL: clone failed: $*"; return 1; \
+        mkdir -p "$dest" && ( cd "$dest" && git init -q && \
+          GIT_TERMINAL_PROMPT=0 git fetch --depth 1 "$url" "$sha" && \
+          git checkout -q FETCH_HEAD ) && return 0; \
+        rm -rf "$dest"; \
+        echo "pinclone $url@$sha attempt $i failed, retrying in 15s..."; sleep 15; \
+      done; echo "FATAL: pinclone failed: $url@$sha -> $dest"; return 1; \
     }; \
     pids=""; \
-    clone -b main      https://github.com/Agroecology-Lab/ublox_dgnss src/ublox_dgnss & pids="$pids $!"; \
-    clone -b 4.1.0     https://github.com/ros-perception/vision_opencv.git src/vision_opencv & pids="$pids $!"; \
-    clone -b aoc_refactor https://github.com/LCAS/topological_navigation src/topological_navigation & pids="$pids $!"; \
-    clone -b main      https://github.com/samuk/caatingarobotics src/caatingarobotics & pids="$pids $!"; \
-    clone              https://github.com/manankharwar/fusioncore src/fusioncore & pids="$pids $!"; \
-    clone -b ros2-gz   https://github.com/FieldRobotEvent/virtual_maize_field src/virtual_maize_field & pids="$pids $!"; \
-    clone -b master    https://github.com/LCAS/sentor src/sentor & pids="$pids $!"; \
-    clone -b main      https://github.com/nilseuropa/ros2graph_explorer src/ros2graph_explorer & pids="$pids $!"; \
-    clone -b main      https://github.com/Supull/ros2grapher.git src/ros2grapher & pids="$pids $!"; \
+    pinclone https://github.com/Agroecology-Lab/ublox_dgnss           "$UBLOX_DGNSS_COMMIT"           src/ublox_dgnss           & pids="$pids $!"; \
+    pinclone https://github.com/ros-perception/vision_opencv.git      "$VISION_OPENCV_COMMIT"         src/vision_opencv         & pids="$pids $!"; \
+    pinclone https://github.com/LCAS/topological_navigation           "$TOPOLOGICAL_NAVIGATION_COMMIT" src/topological_navigation & pids="$pids $!"; \
+    pinclone https://github.com/samuk/caatingarobotics                "$CAATINGAROBOTICS_COMMIT"      src/caatingarobotics      & pids="$pids $!"; \
+    pinclone https://github.com/manankharwar/fusioncore                "$FUSIONCORE_COMMIT"            src/fusioncore            & pids="$pids $!"; \
+    pinclone https://github.com/FieldRobotEvent/virtual_maize_field    "$VIRTUAL_MAIZE_FIELD_COMMIT"   src/virtual_maize_field   & pids="$pids $!"; \
+    pinclone https://github.com/LCAS/sentor                            "$SENTOR_COMMIT"                src/sentor                & pids="$pids $!"; \
+    pinclone https://github.com/nilseuropa/ros2graph_explorer          "$ROS2GRAPH_EXPLORER_COMMIT"    src/ros2graph_explorer    & pids="$pids $!"; \
+    pinclone https://github.com/Supull/ros2grapher.git                 "$ROS2GRAPHER_COMMIT"           src/ros2grapher           & pids="$pids $!"; \
     rc=0; for p in $pids; do wait "$p" || rc=1; done; \
     test "$rc" = 0 && test -f src/vision_opencv/cv_bridge/package.xml
 
