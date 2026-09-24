@@ -1654,6 +1654,8 @@ class NiceGuiNode(Node):
     # ── existing helpers below ───────────────────────────────────────────────
 
     def _patch_node_role(self, node_name: str, role: str) -> None:
+        if not self._topo_doc:
+            return
         map_name = self._topo_doc.name
         map_file = f'/workspace/maps/{map_name}'
         def _write():
@@ -1744,7 +1746,7 @@ class NiceGuiNode(Node):
         def on_node_clicked(e) -> None:
             """Selects the clicked topology node when it exists in the current map."""
             n = (e.args or {}).get('node')
-            if n and self._topo_doc.has_node(n):
+            if n and self._topo_doc and self._topo_doc.has_node(n):
                 self._run_vm.topo.selected_node = n
         ui.on('topo_node_clicked', on_node_clicked)
 
@@ -1764,6 +1766,10 @@ class NiceGuiNode(Node):
             else:
                 self._run_vm.joystick.pose_lbl = 'no odom'
 
+            topo_doc = self._topo_doc
+            if topo_doc is None:
+                return
+
             current_node = self._run_vm.topo.current_node
 
             rp = self._robot_pose()
@@ -1774,7 +1780,7 @@ class NiceGuiNode(Node):
                 'cur': current_node,
                 'stat': self._run_vm.topo.nav_status,
                 'nav': self._run_vm.topo.navigating,
-                'nodes': set(self._topo_doc.nodes),
+                'nodes': set(topo_doc.nodes),
                 'robot': rp_key
             }
             nonlocal _prev
@@ -1784,11 +1790,11 @@ class NiceGuiNode(Node):
             _prev.update(snap)
 
             if changed & {'robot', 'nodes'}:
-                self._run_vm.node_map.robot_svg = build_robot_svg(self._topo_doc.nodes, rp)
+                self._run_vm.node_map.robot_svg = build_robot_svg(topo_doc.nodes, rp)
 
             if changed & {'sel', 'cur', 'nodes'}:
                 self._run_vm.node_map.map_svg = build_svg(
-                    self._topo_doc,
+                    topo_doc,
                     self._run_vm.topo.selected_node,
                     current_node,
                 )
@@ -1796,7 +1802,7 @@ class NiceGuiNode(Node):
 
             if changed & {'sel', 'nodes'}:
                 navigation_sidebar.render_nodes(
-                    self._topo_doc.nodes,
+                    topo_doc.nodes,
                     self._run_vm.topo.selected_node,
                 )
 
@@ -2104,16 +2110,19 @@ class NiceGuiNode(Node):
 
         async def do_repair():
             """Open a dialog to repair row connectivity and optionally connect the repaired chain to a base node."""
+            topo_doc = self._topo_doc
+            if topo_doc is None:
+                return
             cur = self._run_vm.topo.current_node
             selected = self._run_vm.topo.selected_node
             default_base = ''
-            if cur not in ('—', 'none', 'None', '', None) and self._topo_doc.has_node(cur):
+            if cur not in ('—', 'none', 'None', '', None) and topo_doc.has_node(cur):
                 default_base = cur
-            elif selected and self._topo_doc.has_node(selected):
+            elif selected and topo_doc.has_node(selected):
                 default_base = selected
 
             row_count = sum(
-                1 for nd in self._topo_doc.nodes
+                1 for nd in topo_doc.nodes
                 if nd.meta.get('row_id') is not None
                 and nd.meta.get('row_role') == 'entry'
             )
@@ -2147,7 +2156,7 @@ class NiceGuiNode(Node):
                 return
 
             base = (base_input.value or '').strip()
-            if base and not self._topo_doc.has_node(base):
+            if base and not topo_doc.has_node(base):
                 self.f2c_save_status = f'ERROR: base node {base!r} not in map'
                 return
             self.repair_row_connectivity(connect_to=base or None)
@@ -2293,12 +2302,15 @@ class NiceGuiNode(Node):
             def _refresh_available():
                 """Refresh available rows after the topology snapshot stabilizes."""
                 nonlocal _avail_prev
-                snap = set(self._topo_doc.nodes)
+                topo_doc = self._topo_doc
+                if topo_doc is None:
+                    return
+                snap = set(topo_doc.nodes)
                 prev, _avail_prev[0] = _avail_prev[0], snap
                 if snap != prev:
                     return
                 rows: dict[int, str] = {}
-                for nd in self._topo_doc.nodes:
+                for nd in topo_doc.nodes:
                     meta = nd.meta
                     rid  = meta.get('row_id')
                     if rid is not None and meta.get('row_role', '') == 'entry':
@@ -2357,9 +2369,11 @@ class NiceGuiNode(Node):
                         # This is a protected method, we should probably find a better way of bubbling up the error.
                         self._mission_store._set_status('ERROR: queue is empty')  # pylint: disable=protected-access
                         return
+                    topo_doc = self._topo_doc
+                    topo_nodes = topo_doc.nodes if topo_doc is not None else []
                     rows_for_store = [
                         next(
-                            (nd.name for nd in self._topo_doc.nodes
+                            (nd.name for nd in topo_nodes
                              if nd.meta.get('row_id') == rid
                              and nd.meta.get('row_role') == 'entry'),
                             f'ROW_{rid}_IN',
@@ -2478,6 +2492,8 @@ class NiceGuiNode(Node):
                 else:
                     pub = self._get_tool_publisher(topic, is_float=True)
                     msg = Float64()
+                    if not isinstance(value, (int, float, str)):
+                        raise TypeError(f'unsupported tool value type: {type(value)!r}')
                     msg.data = float(value)
                 pub.publish(msg)
             except Exception as exc:
@@ -2502,6 +2518,10 @@ class NiceGuiNode(Node):
             return
         if not _ACTION_OK:
             status_lbl.set_text('ERROR: action client unavailable')
+            status_lbl.style('color:#cf222e')
+            return
+        if not self._topo_doc:
+            status_lbl.set_text('ERROR: no topology map loaded')
             status_lbl.style('color:#cf222e')
             return
 
@@ -3194,6 +3214,10 @@ class NiceGuiNode(Node):
                             capture_output=True, text=True, timeout=120,
                             check=False
                         )
+                        if r is None:
+                            _gazebo_lbl.set_text('rebuild cancelled')
+                            _gazebo_lbl.style('color:#cf222e')
+                            return
                         if r.returncode != 0:
                             err = (r.stderr or r.stdout or 'unknown error').strip()
                             _gazebo_lbl.set_text(f'rebuild failed: {err[-200:]}')
@@ -3658,6 +3682,10 @@ class NiceGuiNode(Node):
                         return
                     except Exception as exc:
                         _soil_lbl.set_text(f'import failed: {exc}')
+                        _soil_lbl.style('color:#cf222e')
+                        return
+                    if names is None:
+                        _soil_lbl.set_text('import cancelled')
                         _soil_lbl.style('color:#cf222e')
                         return
                     summary = ', '.join(f'{_classify_map(n)}={n}' for n in names)
