@@ -1,5 +1,11 @@
-
 # Sowbot (ROS 2 stack)
+<!-- CI & Test Status -->
+[![Run Tests](https://github.com/Agroecology-Lab/feldfreund_devkit_ros/actions/workflows/test.yml/badge.svg?branch=caatinga-dev)](https://github.com/Agroecology-Lab/feldfreund_devkit_ros/actions/workflows/test.yml?query=branch%3Acaatinga-dev)
+[![Industrial CI](https://github.com/Agroecology-Lab/feldfreund_devkit_ros/actions/workflows/industrial_ci.yml/badge.svg?branch=caatinga-dev)](https://github.com/Agroecology-Lab/feldfreund_devkit_ros/actions/workflows/industrial_ci.yml?query=branch%3Acaatinga-dev)
+[![Documentation Deployment](https://github.com/Agroecology-Lab/feldfreund_devkit_ros/actions/workflows/documentation.yml/badge.svg?branch=caatinga-dev)](https://github.com/Agroecology-Lab/feldfreund_devkit_ros/actions/workflows/documentation.yml?query=branch%3Acaatinga-dev)
+
+<!-- Code Coverage -->
+[![Codecov](https://codecov.io/gh/Agroecology-Lab/feldfreund_devkit_ros/branch/caatinga-dev/graph/badge.svg)](https://codecov.io/gh/Agroecology-Lab/feldfreund_devkit_ros/branch/caatinga-dev)
 
 An open-source, containerised ROS2 Jazzy stack for autonomous agricultural robotics. This repository provides the drivers and orchestration for the Sowbot platform, featuring RTK-GNSS localisation and ESP32-based hardware control.
 
@@ -13,17 +19,9 @@ Reference open hardware stack(s) under development at [Sowbot.co.uk](https://sow
 
 Contact: [sowbot.co.uk](https://sowbot.co.uk/contact/)
 
-<!-- CI & Test Status -->
-[![Run Tests](https://github.com/Agroecology-Lab/feldfreund_devkit_ros/actions/workflows/test.yml/badge.svg?branch=caatinga-dev)](https://github.com/Agroecology-Lab/feldfreund_devkit_ros/actions/workflows/test.yml?query=branch%3Acaatinga-dev)
-[![Industrial CI](https://github.com/Agroecology-Lab/feldfreund_devkit_ros/actions/workflows/industrial_ci.yml/badge.svg?branch=caatinga-dev)](https://github.com/Agroecology-Lab/feldfreund_devkit_ros/actions/workflows/industrial_ci.yml?query=branch%3Acaatinga-dev)
-[![Documentation Deployment](https://github.com/Agroecology-Lab/feldfreund_devkit_ros/actions/workflows/documentation.yml/badge.svg?branch=caatinga-dev)](https://github.com/Agroecology-Lab/feldfreund_devkit_ros/actions/workflows/documentation.yml?query=branch%3Acaatinga-dev)
-
-<!-- Code Coverage -->
-[![Codecov](https://codecov.io/gh/Agroecology-Lab/feldfreund_devkit_ros/branch/caatinga-dev/graph/badge.svg)](https://codecov.io/gh/Agroecology-Lab/feldfreund_devkit_ros/branch/caatinga-dev)
 
 **Milestone — multi-row mission following validated in Gazebo:**
-
-[![Multi-row mission following in Gazebo](https://img.youtube.com/vi/A0CVNcp19vU/0.jpg)](https://www.youtube.com/watch?v=A0CVNcp19vU)
+[![Multi-row mission following in Gazebo](https://img.youtube.com/vi/A0CVNcp19vU/0.jpg)](https://www.youtube.com/watch?v=A0CVNcp19vU) (click image to play video)
 
 ## Sowbot Roadmap
 
