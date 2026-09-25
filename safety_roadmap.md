@@ -142,12 +142,11 @@ Hardware build status is tracked in the tables above and in §8, not repeated he
 | `sentor_node.py` wired into `devkit.launch.py` | DONE | |
 | `sentor` hardware smoke test | TO DO | validated in sim only so far |
 | Battery voltage cutoff threshold | TO DO | marked `# TODO: CONFIRM` in `sowbot_monitor.yaml`, no value set |
-| `ros2_medkit` black-box logging | TO DO | not in repo or dependency list yet |
+| `ros2_medkit` black-box logging | TO DO | added 25-9-26 |
 | Aggregation layer + `/safety/level` | TO DO | see architecture note below |
 
 Per §0: `sentor` and the software E-stop topics are diagnostic/supervisory. They are not part of the rated safety function.
 
-**Architecture note (new):** `sentor`'s two heartbeats are a flat AND across ~12 monitors, with no ordered "how bad is it" signal and no de-escalation rule beyond the E-stop re-arm (O13). Fix: keep `sentor` as the raw topic/rate watcher, feed it into `diagnostic_aggregator` (mature, worst-child-wins tree aggregation) rather than `sentor`'s own `RobotStateMachine`/`sentor_guard` integration path — that path was added, reverted, and removed from sentor's own upstream (Dec 2025), so it's not stable enough to depend on. A small bridge node turns the aggregated status into one ordered `/safety/level` (`NOMINAL`→`DEGRADED`→`SAFE_STOP`) for the mission executor and Nav2 lifecycle to threshold on, instead of each wiring to raw E-stop/bumper/liveliness topics. Independent of this: the real-time `cmd_vel` gate (`nav2_collision_monitor`) stays under §5 and doesn't depend on this decision.
 
 ---
 
