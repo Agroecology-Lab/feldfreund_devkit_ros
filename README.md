@@ -9,11 +9,11 @@
 
 An open-source, containerised ROS2 Jazzy stack for autonomous agricultural robotics. This repository provides the drivers and orchestration for the Sowbot platform, featuring RTK-GNSS localisation and ESP32-based hardware control.
 
+[Quick start](https://github.com/Agroecology-Lab/feldfreund_devkit_ros#quick-start) 
+
 Development is led by the <a href="https://agroecologylab.org.uk" target="_blank">Agroecology Lab</a> building on the core developed by <a href="https://zauberzeug.com/" target="_blank">Zauberzeug</a>.
 
 Reference open hardware stack(s) under development at [Sowbot.co.uk](https://sowbot.co.uk) 
-
-[Quick start](https://github.com/Agroecology-Lab/feldfreund_devkit_ros#quick-start) 
 
 **Collaborators welcome.** See [CONTRIBUTING.md](CONTRIBUTING.md). 
 
@@ -21,7 +21,8 @@ Contact: [sowbot.co.uk](https://sowbot.co.uk/contact/)
 
 
 **Milestone — multi-row mission following validated in Gazebo:**
-[![Multi-row mission following in Gazebo](https://img.youtube.com/vi/A0CVNcp19vU/0.jpg)](https://www.youtube.com/watch?v=A0CVNcp19vU) (click image to play video)
+[![Multi-row mission following in Gazebo](https://img.youtube.com/vi/A0CVNcp19vU/0.jpg)](https://www.youtube.com/watch?v=A0CVNcp19vU) 
+(click image to play video)
 
 ## Sowbot Roadmap
 
