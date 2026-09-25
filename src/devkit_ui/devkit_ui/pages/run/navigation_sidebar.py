@@ -12,7 +12,7 @@ class NavigationSidebar(ui.card):
                  topo_state: RunViewModel.Topo,
                  on_go: Callable[[], None],
                  on_cancel: Callable[[], None],
-                 on_delete: Callable[[], None | Awaitable[None]],
+                 on_delete: Callable[[], Awaitable[None] | None],
                  on_select: Callable[[str], None]):
         """
                  Initialize the navigation sidebar and bind its controls to the run state.
@@ -22,7 +22,7 @@ class NavigationSidebar(ui.card):
                      topo_state (RunViewModel.Topo): Run state containing node selection and navigation statuses.
                      on_go (Callable[[], None]): Callback invoked to start navigation.
                      on_cancel (Callable[[], None]): Callback invoked to cancel navigation.
-                     on_delete (Callable[[], None | Awaitable[None]]): Callback invoked to delete the selected node.
+                     on_delete (Callable[[], Awaitable[None] | None]): Callback invoked to delete the selected node.
                      on_select (Callable[[str], None]): Callback invoked with the name of the selected node.
                  """
         super().__init__()
