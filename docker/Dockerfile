@@ -88,6 +88,12 @@ RUN apt-get update && \
 #     we build from source with BUILD_PYTHON=ON in Stage 3.5 instead.
 #     NOTE: ros-jazzy-cv-bridge intentionally NOT installed here —
 #     it is built from source in Stage 10 against NumPy 2.
+#     NOTE: ros2_medkit (msgs/fault-manager/diagnostic-bridge/log-bridge/
+#     gateway) is rosdistro-released for Jazzy, so it's apt-installed here
+#     rather than pin-cloned like sentor below. diagnostic-aggregator is
+#     kept installed alongside it, not replaced by it — ros2_medkit_diagnostic_bridge
+#     only sees STALE faults when pointed at the aggregator's /diagnostics_agg
+#     output, not raw /diagnostics, so the two are complementary.
 RUN for i in 1 2 3 4 5; do \
       apt-get update && \
       apt-get install -y --fix-missing --no-install-recommends \
@@ -113,6 +119,11 @@ RUN for i in 1 2 3 4 5; do \
         ros-jazzy-control-msgs \
         ros-jazzy-controller-manager-msgs \
         ros-jazzy-diagnostic-aggregator \
+        ros-jazzy-ros2-medkit-msgs \
+        ros-jazzy-ros2-medkit-fault-manager \
+        ros-jazzy-ros2-medkit-diagnostic-bridge \
+        ros-jazzy-ros2-medkit-log-bridge \
+        ros-jazzy-ros2-medkit-gateway \
         ros-jazzy-rviz2 \
         python3-sympy \
         python3-fonttools \
