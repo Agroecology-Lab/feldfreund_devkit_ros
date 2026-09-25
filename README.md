@@ -11,17 +11,18 @@ An open-source, containerised ROS2 Jazzy stack for autonomous agricultural robot
 
 [Quick start](https://github.com/Agroecology-Lab/feldfreund_devkit_ros#quick-start) 
 
-Development is led by the <a href="https://agroecologylab.org.uk" target="_blank">Agroecology Lab</a> building on the core developed by <a href="https://zauberzeug.com/" target="_blank">Zauberzeug</a>.
+[Docs](https://agroecology-lab.github.io/Sowbot_Data/python_api.html)
 
-Reference open hardware stack(s) under development at [Sowbot.co.uk](https://sowbot.co.uk) 
+Reference open hardware stack(s) under development at [Sowbot.co.uk](https://sowbot.co.uk) Contact: [sowbot.co.uk/contact](https://sowbot.co.uk/contact/)
+
+Development is led by the <a href="https://agroecologylab.org.uk" target="_blank">Agroecology Lab</a> building on the core developed by <a href="https://zauberzeug.com/" target="_blank">Zauberzeug</a>.
 
 **Collaborators welcome.** See [CONTRIBUTING.md](CONTRIBUTING.md). 
 
-Contact: [sowbot.co.uk](https://sowbot.co.uk/contact/)
-
-
 **Milestone — multi-row mission following validated in Gazebo:**
+
 [![Multi-row mission following in Gazebo](https://img.youtube.com/vi/A0CVNcp19vU/0.jpg)](https://www.youtube.com/watch?v=A0CVNcp19vU) 
+
 (click image to play video)
 
 ## Sowbot Roadmap
