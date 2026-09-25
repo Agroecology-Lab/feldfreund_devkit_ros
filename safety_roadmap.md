@@ -34,7 +34,6 @@ Supports the S2/F2/P1 risk graph parameters in §6. Not exhaustive, add rows as 
 
 ```
 ======================= 24V SAFETY CONTROL LOOP =======================
-
 +24V Safety Power
        │
 ┌──────┴──────────────────────────────────────┐
@@ -44,6 +43,22 @@ Supports the S2/F2/P1 risk graph parameters in §6. Not exhaustive, add rows as 
 ┌──────┴──────────────────────────────────────┐
 │  Gemini 1S Receiver                         │  (Tyro Wireless E-Stop Contacts)
 └──────┬──────────────────────────────────────┘
+       │
+       │ (24v E-Stop Safe Power Feed)
+       │
+┌──────┴──────────────────────────────────────┐
+│  Inxpect C203A Control Unit                 │  (Safety Controller - SIL 2 / PL d)
+└──────┬──────────────────────────────────────┘
+       │   ▲                      ▲
+       │   │                      │
+       │   │ (4-Wire Direct)      │ (M12 CAN Bus)
+       │   │                      │
+       │ ┌─┴──────────────────┐ ┌─┴──────────────────┐
+       │ │ ASO Sentir Bumpers │ │ Inxpect S101A      │
+       │ │ (x2)               │ │ Radars (x2)        │
+       │ └────────────────────┘ └────────────────────┘
+       │
+       │ 
        │
        ├──────────────────────┐
        │                      │
