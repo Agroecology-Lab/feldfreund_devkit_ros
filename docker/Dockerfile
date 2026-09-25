@@ -192,13 +192,13 @@ RUN --mount=type=cache,target=/root/.cache/pip \
       -r /tmp/requirements.txt
 
 # 5.1b Force numpy + scikit-image
-# CAUTION: "numpy<3.0.0" has no upper bound below 2.3, which conflicts with
-# the opencv-python-headless>=2,<2.3 pin above — pip may resolve numpy 2.3+
-# here and silently violate that constraint. Placed before Stage 10 so
-# cv_bridge is at least built from source against whatever numpy lands here,
-# but if you need the <2.3 guarantee, pin "numpy>=2,<2.3" instead.
+# Pinned to numpy>=2,<2.3 to match the opencv-python-headless>=2,<2.3
+# requirement pinned in 5.1 above. The previous "numpy<3.0.0" pin had no
+# lower bound below 2.3, so pip could resolve numpy 2.3+ here and silently
+# violate that constraint. Placed before Stage 10 so cv_bridge is built
+# from source against this exact numpy version.
 RUN pip install --break-system-packages --force-reinstall --ignore-installed \
-      --no-cache-dir "numpy<3.0.0" scikit-image
+      --no-cache-dir "numpy>=2,<2.3" scikit-image
 
 # 5.2 CPU-only PyTorch + YOLOX
 RUN --mount=type=cache,target=/root/.cache/pip \
