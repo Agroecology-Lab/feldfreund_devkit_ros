@@ -38,17 +38,17 @@ Supports the S2/F2/P1 risk graph parameters in §6. Not exhaustive, add rows as 
 +24V Safety Power
        │
 ┌──────┴──────────────────────────────────────┐
-│  Physical E-Stop Buttons                    │  (Schneider XALK178, 2x NC Contacts)
+│  Physical E-Stop Buttons                    │  (Schneider XALK178, 2x NC Contacts - PLd)
 └──────┬──────────────────────────────────────┘
        │
 ┌──────┴──────────────────────────────────────┐
-│  Gemini 1S Receiver                         │  (Tyro Wireless E-Stop Contacts)
+│  Gemini 1S Receiver                         │  (Tyro Wireless E-Stop button - PLc)
 └──────┬──────────────────────────────────────┘
        │
        │ (24v E-Stop Safe Power Feed)
        │
 ┌──────┴──────────────────────────────────────┐
-│  Inxpect C203A Control Unit                 │  (Safety Controller - SIL 2 / PL d)
+│  Inxpect C203A Control Unit                 │  (Safety Controller - SIL 2 / PLd)
 └──────┬──────────────────────────────────────┘
        │   ▲                      ▲
        │   │                      │
@@ -56,7 +56,7 @@ Supports the S2/F2/P1 risk graph parameters in §6. Not exhaustive, add rows as 
        │   │                      │
        │ ┌─┴──────────────────┐ ┌─┴──────────────────┐
        │ │ ASO Sentir Bumpers │ │ Inxpect S101A      │
-       │ │ (x2)               │ │ Radars (x2)        │
+       │ │ (x2) PLd           │ │ Radars (x2) PLd    │
        │ └────────────────────┘ └────────────────────┘
        │
        │ 
@@ -64,7 +64,7 @@ Supports the S2/F2/P1 risk graph parameters in §6. Not exhaustive, add rows as 
        ├──────────────────────┐
        │                      │
 ┌──────┴───────────┐   ┌──────┴───────────┐
-│ SW180 #1 Coil    │   │ SW180 #2 Coil    │  (24V DC Actuation Coils)
+│ SW180 #1 Coil    │   │ SW180 #2 Coil    │  (24V DC Actuation Coils - PLd)
 │ [TVS Suppressor] │   │ [TVS Suppressor] │
 └──────┬───────────┘   └──────┬───────────┘
        │                      │
@@ -92,11 +92,10 @@ Supports the S2/F2/P1 risk graph parameters in §6. Not exhaustive, add rows as 
 | # | Component | Model / Supplier | Role in loop | Key spec | Status |
 |---|---|---|---|---|---|
 | 1 | Physical E-stops | Schneider XALK178 ×2, [Kempston Controls](https://www.kempstoncontrols.co.uk/XALK178/Schneider/sku/479749), £29.05 each excl. VAT | Input (series NC) | 2×NC contacts | WIP |
-| 2 | Wireless failsafe pendant | [Tyro Indus 1S transmitter](https://telemandosybaterias.com/en/p/indus-1s-868mhz-tyro-remotes-e-stop-wireless), €725, + [Gemini 1S receiver](https://telemandosybaterias.com/en/p/gemini-230vac-tyro-remotes-e-stop-wireless), €771, both excl. VAT and delivery | Input | 868MHz, PL-c (EN-ISO 13849-1), EC type-examination certified (datasheets reviewed, see notes below) | WIP |
+| 2 | Wireless failsafe pendant | [Tyro Indus 1S transmitter](https://telemandosybaterias.com/en/p/indus-1s-868mhz-tyro-remotes-e-stop-wireless), €725, + [Gemini 1S receiver](https://telemandosybaterias.com/en/p/gemini-230vac-tyro-remotes-e-stop-wireless), €771, both excl. VAT and delivery | Input | 868MHz, PL-c (EN-ISO 13849-1), EC type-examination certified (datasheets reviewed, see notes below) | Remove if supplemental fitted |
 | 3 | Output contactors | Albright SW180 24V ×2 (series, 48V B+ bus), [Arc Components](https://www.arc-components.com/sw180-3-albright-single-acting-solenoid-contactor-24v-intermittent.html), £74.69 each excl. VAT. [2180-796 auxiliary micro-switch kit](https://www.arc-components.com/auxiliary-micro-switches-for-albright-contactors.html) (fits SW180/SW182), £32.09 excl. VAT | Output | 200A cont/400A peak, magnetic blowout, silver alloy contacts, TVS suppressors | WIP |
-| 4 | IDEM GLM wire rope tether pull switch | [IDEM 143052 GLM 2NC 2NO M20](https://www.seltec.co.uk/products/idem-glm-guardian-line-mini-duty-rope-switch.html), 
+| 4 | IDEM GLM wire rope tether pull switch | [IDEM 143052 GLM 2NC 2NO M20](https://www.seltec.co.uk/products/details/19877.html) £77.92 excl. VAT (£93.50 incl. VAT), Seltec | Input | Die-cast, up to 30 to 50m rope span, 2NC/2NO | For demonstrations |
 | 3 | Reversing alarm/beacon | [Brigade SA-BBS-97](https://www.beaconsandlightbars.co.uk/product/brigade-electronics-brigade-sa-bbs-97-77-97db-smart-bbs-tek-white-sound-reversing-alarm-pn-sa-bbs-9-17914), £95, + [rotating LED ~£40](https://www.compass24.com/led-3600-rotating-beacon-flat-396940/black) | Not in stop function, avoidance measure only | 24V, wire to motion state generally, not just reverse | Can be removed if supplemental fitted |
-£77.92 excl. VAT (£93.50 incl. VAT), Seltec | Input | Die-cast, up to 30 to 50m rope span, 2NC/2NO | TO DO |
 | **Total** | | **£1,919.66** (excl. VAT total was £1,599.56) | | | |
 
 ### Supplemental - PLd - No visual/audio alert needed
