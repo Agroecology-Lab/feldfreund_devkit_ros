@@ -32,8 +32,9 @@ Supports the S2/F2/P1 risk graph parameters in §6. Not exhaustive, add rows as 
 
 ## 2. E-stop and safety hardware
 
+### 24V SAFETY CONTROL LOOP
+
 ```
-======================= 24V SAFETY CONTROL LOOP =======================
 +24V Safety Power
        │
 ┌──────┴──────────────────────────────────────┐
@@ -68,8 +69,10 @@ Supports the S2/F2/P1 risk graph parameters in §6. Not exhaustive, add rows as 
 └──────┬───────────┘   └──────┬───────────┘
        │                      │
 ───────┴──────────────────────┴──────────────────────────────── GND (24V)
+```
 
-======================= 48V TRACTION POWER BUS =======================
+### 48V TRACTION POWER BUS 
+```
 
 +48V Battery (B+)
        │
@@ -84,22 +87,23 @@ Supports the S2/F2/P1 risk graph parameters in §6. Not exhaustive, add rows as 
   Motor Controllers
 ```
 
-### Core
+### Core - Pl c
 
 | # | Component | Model / Supplier | Role in loop | Key spec | Status |
 |---|---|---|---|---|---|
 | 1 | Physical E-stops | Schneider XALK178 ×2, [Kempston Controls](https://www.kempstoncontrols.co.uk/XALK178/Schneider/sku/479749), £29.05 each excl. VAT | Input (series NC) | 2×NC contacts | WIP |
 | 2 | Wireless failsafe pendant | [Tyro Indus 1S transmitter](https://telemandosybaterias.com/en/p/indus-1s-868mhz-tyro-remotes-e-stop-wireless), €725, + [Gemini 1S receiver](https://telemandosybaterias.com/en/p/gemini-230vac-tyro-remotes-e-stop-wireless), €771, both excl. VAT and delivery | Input | 868MHz, PL-c (EN-ISO 13849-1), EC type-examination certified (datasheets reviewed, see notes below) | WIP |
 | 3 | Output contactors | Albright SW180 24V ×2 (series, 48V B+ bus), [Arc Components](https://www.arc-components.com/sw180-3-albright-single-acting-solenoid-contactor-24v-intermittent.html), £74.69 each excl. VAT. [2180-796 auxiliary micro-switch kit](https://www.arc-components.com/auxiliary-micro-switches-for-albright-contactors.html) (fits SW180/SW182), £32.09 excl. VAT | Output | 200A cont/400A peak, magnetic blowout, silver alloy contacts, TVS suppressors | WIP |
-| 4 | IDEM GLM wire rope tether pull switch | [IDEM 143052 GLM 2NC 2NO M20](https://www.seltec.co.uk/products/idem-glm-guardian-line-mini-duty-rope-switch.html), £77.92 excl. VAT (£93.50 incl. VAT), Seltec | Input | Die-cast, up to 30 to 50m rope span, 2NC/2NO | TO DO |
+| 4 | IDEM GLM wire rope tether pull switch | [IDEM 143052 GLM 2NC 2NO M20](https://www.seltec.co.uk/products/idem-glm-guardian-line-mini-duty-rope-switch.html), 
+| 3 | Reversing alarm/beacon | [Brigade SA-BBS-97](https://www.beaconsandlightbars.co.uk/product/brigade-electronics-brigade-sa-bbs-97-77-97db-smart-bbs-tek-white-sound-reversing-alarm-pn-sa-bbs-9-17914), £95, + [rotating LED ~£40](https://www.compass24.com/led-3600-rotating-beacon-flat-396940/black) | Not in stop function, avoidance measure only | 24V, wire to motion state generally, not just reverse | TO DO |
+£77.92 excl. VAT (£93.50 incl. VAT), Seltec | Input | Die-cast, up to 30 to 50m rope span, 2NC/2NO | TO DO |
 | **Total** | | **£1,919.66** (excl. VAT total was £1,599.56) | | | |
 
-### Supplemental
+### Supplemental - PL d 
 
 | # | Component | Model / Supplier | Role in loop | Key spec | Status |
 |---|---|---|---|---|---|
 | 2 | Bumper | [ASO Sentir](https://www.automation24.co.uk/safety-bumper-aso-sentir-1701-114-60-100-l4-0?orderCode=135)|4BY|2000| Input | 4-wire fail-safe loop | Selected. Wired into Inxpect C203A below [2006/42/EG](https://asosafety.com/en/produkt/sentir-bumper-100-120-l-o-2/), EN ISO 13856-3:2013, 2011/65/EU. |
-| 3 | Reversing alarm/beacon | [Brigade SA-BBS-97](https://www.beaconsandlightbars.co.uk/product/brigade-electronics-brigade-sa-bbs-97-77-97db-smart-bbs-tek-white-sound-reversing-alarm-pn-sa-bbs-9-17914), £95, + [rotating LED ~£40](https://www.compass24.com/led-3600-rotating-beacon-flat-396940/black) | Not in stop function, avoidance measure only | 24V, wire to motion state generally, not just reverse | TO DO |
 | 4 | Human-detection radar sensors (front and rear) | Inxpect S101A ×2 (Fortop code IT100006, Inxpect 90202011), [Fortop UK](https://shop.fortop.co.uk/en/en/inxpect-it100006-s101a-ul-radar-sensor-90202011.html), £510.00 each (£1,020.00 for two; VAT status not stated on the page), delivery approx. 4 weeks | Input (human detection). Supervisory per §0, not in the §6 calculation unless O24 changes that | 24 GHz FMCW radar, SIL 2 / PL d (Inxpect); 0 to 4 m range, min. set distance 1 m; FOV 110°×30° (wide) or 50°×15° (narrow); max target speed 1.6 m/s; IP67; −30 to +60 °C; 12 V dc through control unit, 1.5 W; M12 connectors, CAN | Selected. Replaces the thermal detection plan. Suitability for a moving vehicle unconfirmed (O23). |
 | 5 | Radar control unit | Inxpect C203A ×1 (Fortop code IT100024, Inxpect 90304011), [Fortop UK](https://shop.fortop.co.uk/en/en/c203a-ul-control-unit-200-series-it100024-90304011.html), £570.00 (VAT status not stated), 1 in stock | Logic (radar) | Connects up to 6 sensors; digital inputs and safety outputs; USB configuration via Inxpect Safety Application | Selected. PLd check (O23). |
 | **Total** | | **£1,725.00** (£135.00 alarm/beacon + £1,590.00 Inxpect radar, Fortop prices, VAT status unstated) + **$315.00** (mixed currency;, quote-only, no fixed price) | | | |
