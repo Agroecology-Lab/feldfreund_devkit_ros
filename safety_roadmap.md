@@ -87,7 +87,7 @@ Supports the S2/F2/P1 risk graph parameters in §6. Not exhaustive, add rows as 
   Motor Controllers
 ```
 
-### Core - Pl c
+### Core - Plc - With flashing light and noise
 
 | # | Component | Model / Supplier | Role in loop | Key spec | Status |
 |---|---|---|---|---|---|
@@ -95,11 +95,11 @@ Supports the S2/F2/P1 risk graph parameters in §6. Not exhaustive, add rows as 
 | 2 | Wireless failsafe pendant | [Tyro Indus 1S transmitter](https://telemandosybaterias.com/en/p/indus-1s-868mhz-tyro-remotes-e-stop-wireless), €725, + [Gemini 1S receiver](https://telemandosybaterias.com/en/p/gemini-230vac-tyro-remotes-e-stop-wireless), €771, both excl. VAT and delivery | Input | 868MHz, PL-c (EN-ISO 13849-1), EC type-examination certified (datasheets reviewed, see notes below) | WIP |
 | 3 | Output contactors | Albright SW180 24V ×2 (series, 48V B+ bus), [Arc Components](https://www.arc-components.com/sw180-3-albright-single-acting-solenoid-contactor-24v-intermittent.html), £74.69 each excl. VAT. [2180-796 auxiliary micro-switch kit](https://www.arc-components.com/auxiliary-micro-switches-for-albright-contactors.html) (fits SW180/SW182), £32.09 excl. VAT | Output | 200A cont/400A peak, magnetic blowout, silver alloy contacts, TVS suppressors | WIP |
 | 4 | IDEM GLM wire rope tether pull switch | [IDEM 143052 GLM 2NC 2NO M20](https://www.seltec.co.uk/products/idem-glm-guardian-line-mini-duty-rope-switch.html), 
-| 3 | Reversing alarm/beacon | [Brigade SA-BBS-97](https://www.beaconsandlightbars.co.uk/product/brigade-electronics-brigade-sa-bbs-97-77-97db-smart-bbs-tek-white-sound-reversing-alarm-pn-sa-bbs-9-17914), £95, + [rotating LED ~£40](https://www.compass24.com/led-3600-rotating-beacon-flat-396940/black) | Not in stop function, avoidance measure only | 24V, wire to motion state generally, not just reverse | TO DO |
+| 3 | Reversing alarm/beacon | [Brigade SA-BBS-97](https://www.beaconsandlightbars.co.uk/product/brigade-electronics-brigade-sa-bbs-97-77-97db-smart-bbs-tek-white-sound-reversing-alarm-pn-sa-bbs-9-17914), £95, + [rotating LED ~£40](https://www.compass24.com/led-3600-rotating-beacon-flat-396940/black) | Not in stop function, avoidance measure only | 24V, wire to motion state generally, not just reverse | Can be removed if supplemental fitted |
 £77.92 excl. VAT (£93.50 incl. VAT), Seltec | Input | Die-cast, up to 30 to 50m rope span, 2NC/2NO | TO DO |
 | **Total** | | **£1,919.66** (excl. VAT total was £1,599.56) | | | |
 
-### Supplemental - PL d 
+### Supplemental - PLd - No visual/audio alert needed
 
 | # | Component | Model / Supplier | Role in loop | Key spec | Status |
 |---|---|---|---|---|---|
