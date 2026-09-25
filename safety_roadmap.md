@@ -22,7 +22,7 @@ Supports the S2/F2/P1 risk graph parameters in §6. Not exhaustive, add rows as 
 
 | ID | Hazard | Cause | Exposure | Current mitigation | Residual risk |
 |---|---|---|---|---|---|
-| H1 | Crush/impact from moving vehicle | Software fault, sensor failure, operator error | Continuous during field operation (F2) | Physical bumper (VBL) + E-stop loop | Response time <30ms (PRSU/2 spec); detection envelope not yet sized against ISO 3691-4 |
+| H1 | Crush/impact from moving vehicle | Software fault, sensor failure, operator error | Continuous during field operation (F2) | Physical bumper + E-stop loop | Response time <30ms; detection envelope not yet sized against ISO 3691-4 |
 | H2 | Rollaway after stop | Stop on slope, no parking brake | Not yet assessed (CONFIRM operating slope range) | Worm gear drive (assumed 40:1) self-locks tracks when unpowered | OPEN, self-locking ratio assumed, not yet confirmed against gearbox datasheet; no positive parking brake in BOM as backup |
 | H3 | Wireless pendant jamming/spoofing | 868MHz interference or malicious signal | Low to Medium, unassessed | Tiered reaction-time/retry scheme (see §2 datasheet review notes) is a plausible packet-loss mitigation, not confirmed as such by Cattron | OPEN, no RF integrity requirement stated; **fail-state on total signal loss still undocumented (see O20)** |
 | H4 | Undetected E-stop hardware degradation | Contactor welding, relay failure over time | Continuous | PRSU/2 EDM loop via SW180 aux microswitches | Covered by DCavg in §6, pending final CCF/SISTEMA figures |
