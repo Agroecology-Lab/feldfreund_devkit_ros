@@ -3013,6 +3013,11 @@ class NiceGuiNode(Node):
                 _medkit_proc: list = [None]
                 _medkit_lbl = ui.label('').classes('text-xs font-mono').style('color:#57606a')
                 def _start_medkit():
+                    """Launch Medkit on all IPv4 interfaces unless this tab's process is running.
+
+                    Display process creation errors in the status label. A successful
+                    start reports the launch PID without checking gateway readiness.
+                    """
                     if _medkit_proc[0] is not None and _medkit_proc[0].poll() is None:
                         _medkit_lbl.set_text('already running')
                         return
@@ -3028,6 +3033,11 @@ class NiceGuiNode(Node):
                         _medkit_lbl.set_text(f'ERROR: {exc}')
                         _medkit_lbl.style('color:#cf222e')
                 def _stop_medkit():
+                    """Request termination of this tab's Medkit launch process without waiting.
+
+                    Clear the tracked process and show stopped, even if none was tracked.
+                    Termination errors propagate before clearing the process or updating the label.
+                    """
                     if _medkit_proc[0] is not None:
                         _medkit_proc[0].terminate()
                         _medkit_proc[0] = None
