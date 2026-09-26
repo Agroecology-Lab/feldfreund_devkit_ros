@@ -3009,6 +3009,54 @@ class NiceGuiNode(Node):
                 )
                 ui.separator().classes('w-full my-1')
 
+                # ── Medkit Gateway ───────────────────────────────────────
+                _medkit_proc: list = [None]
+                _medkit_lbl = ui.label('').classes('text-xs font-mono').style('color:#57606a')
+                def _start_medkit():
+                    if _medkit_proc[0] is not None and _medkit_proc[0].poll() is None:
+                        _medkit_lbl.set_text('already running')
+                        return
+                    try:
+                        _medkit_proc[0] = subprocess.Popen(
+                            ['ros2', 'launch', 'ros2_medkit_gateway', 'bringup.launch.py',
+                             'server_host:=0.0.0.0'],
+                            stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
+                        )
+                        _medkit_lbl.set_text(f'started (pid {_medkit_proc[0].pid})')
+                        _medkit_lbl.style('color:#1a7f37')
+                    except Exception as exc:
+                        _medkit_lbl.set_text(f'ERROR: {exc}')
+                        _medkit_lbl.style('color:#cf222e')
+                def _stop_medkit():
+                    if _medkit_proc[0] is not None:
+                        _medkit_proc[0].terminate()
+                        _medkit_proc[0] = None
+                    _medkit_lbl.set_text('stopped')
+                    _medkit_lbl.style('color:#57606a')
+                ui.button('Start Medkit Gateway', on_click=_start_medkit).props(
+                    'outline no-caps').classes('px-4')
+                ui.button('Stop Medkit Gateway', on_click=_stop_medkit).props(
+                    'outline no-caps').classes('px-4')
+                ui.html(
+                    '<a href="http://localhost:8080/" target="_blank" '
+                    'style="font-size:13px;color:var(--blue);text-decoration:none;'
+                    'padding:6px 12px;border:1px solid var(--blue);border-radius:4px;'
+                    'font-family:\'Courier New\',monospace;">'
+                    '↗ Gateway (localhost:8080)</a>'
+                )
+                ui.html(
+                    '<div style="font-size:11px;color:var(--txt-muted);'
+                    'font-family:\'Courier New\',monospace;line-height:1.5;">'
+                    'SOVD web UI runs on the host, not in this container. On host:<br>'
+                    '<code>docker run -p 3000:80 ghcr.io/selfpatch/sovd_web_ui:latest</code><br>'
+                    'Then open <a href="http://localhost:3000/" target="_blank" '
+                    'style="color:var(--blue);text-decoration:none;">localhost:3000</a> '
+                    'and set its gateway URL to <code>http://localhost:8080</code>.'
+                    '</div>'
+                )
+
+                ui.separator().classes('w-full my-1')
+
                 # ── Gazebo Sim ───────────────────────────────────────────
                 _gazebo_proc: list = [None]
                 _spawn_proc: list = [None]
