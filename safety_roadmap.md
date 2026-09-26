@@ -10,14 +10,11 @@
 
 ## 0. Safety scoping
 
-The formal safety function is the hardwired 24V E-stop loop (§2, Core components), the human-detection radar (Inxpect S101A ×4 + C203A), and the ASO Sentir bumpers, together with the 48V traction interlock they drive. **O24 is resolved as of this revision: radar is wired into the stop loop, not supervisory.**
+The formal safety function is the hardwired 24V E-stop loop (§2, Core components), the human-detection radar (Inxpect S101A ×4 + C203A), and the ASO Sentir bumpers, together with the 48V traction interlock they drive. 
 
-Everything else in this document (ROS 2 nodes, `sentor`, ESP32/STM32H7 firmware, non-radar perception, reversing alarm/beacon) is supervisory or defence-in-depth, **not** part of the rated safety function, and does not enter the PLc/PLd calculation in §6. Two components are downgraded out of the formal loop entirely as of this revision:
+Everything else in this document (ROS 2 nodes, `sentor`, ESP32/STM32H7 firmware, non-radar perception, reversing alarm/beacon) is supervisory or defence-in-depth, **not** part of the rated safety function, and does not enter the PLc/PLd calculation in §6. .
 
-- **Wireless failsafe pendant (Tyro Indus 1S / Gemini 1S): NOT IMPLEMENTED.** Superfluous given physical E-stops, radar, and bumpers already provide independent, PLd-rated stop inputs. See footnote in §2.
-- **IDEM GLM wire rope tether: moved to Supplemental.** Only relevant when operating without radar (e.g. demos in an unconfigured space); not part of the baseline Core loop.
-
-This split holds regardless of firmware changes (ESP32 to STM32H7, Lizard to ArduPilot CoginiPilot, RTOS choice). Moving the controller firmware does not move the safety boundary. 
+This split holds regardless of microcontroller or firmware changes (ESP32 > S32K358, Lizard > CoginiPilot, ESP-IDF > Zephyr). Moving the controller firmware does not move the safety boundary. 
 
 ---
 
@@ -29,15 +26,8 @@ Supports the S2/F2/P1 risk graph parameters in §6. Not exhaustive, add rows as 
 |---|---|---|---|---|---|
 | H1 | Crush/impact from moving vehicle | Software fault, sensor failure, operator error | Continuous during field operation (F2) | Physical bumper + E-stop loop + radar (Core, per §0) | E-stop loop response <30ms; radar detection response <100ms (catalogue figure, not S101A-specific, see O23c); combined detection-to-stop latency ~100-130ms, not yet sized against ISO 3691-4 |
 | H2 | Rollaway after stop | Stop on slope, no parking brake | Not yet assessed (CONFIRM operating slope range) | Worm gear drive (assumed 40:1) self-locks tracks when unpowered | OPEN, self-locking ratio assumed, not yet confirmed against gearbox datasheet; no positive parking brake in BOM as backup |
-| H3 | Wireless pendant jamming/spoofing | N/A | N/A | N/A | **CLOSED, not applicable.** Wireless pendant not implemented as of v0.6.4; no RF input remains in the safety function |
-| H4 | Undetected E-stop hardware degradation | Contactor welding, relay failure over time | Continuous | PRSU/2 EDM loop via SW180 aux microswitches | Covered by DCavg in §6, pending final CCF/SISTEMA figures |
-| H5 | False negative on human detection | Radar coverage gaps; sensor failure | Continuous once deployed near people | Inxpect S101A ×4 + C203A control unit, now Core, in-scope per §0 (resolves O24) | OPEN, mounting geometry for 4-sensor layout not yet defined (see O28); moving-vehicle suitability still unconfirmed by Inxpect (O23a); min. set distance (1m) still close to worst-case detection-envelope sizing from H1 |
-
----
-
-## 2. E-stop and safety hardware
-
-### 24V SAFETY CONTROL LOOP
+| H3 | Undetected E-stop hardware degradation | Contactor welding, relay failure over time | Continuous | PRSU/2 EDM loop via SW180 aux microswitches | Covered by DCavg in §6, pending final CCF/SISTEMA figures |
+| H4 | False negative on human detection | Radar coverage gaps; sensor failure | Continuous once deployed near people | Inxpect S101A ×3 + C203A control unit, now Core, in-scope per §0 (resolves O24) | OPEN, mounting geometry for 4-sensor layout not yet defined (see O28); moving-vehicle suitability still unconfirmed by Inxpect (O23a); min. set distance (1m) still close to worst-case detection-envelope sizing from H1 |
 
 ---
 
@@ -52,11 +42,6 @@ Supports the S2/F2/P1 risk graph parameters in §6. Not exhaustive, add rows as 
 │  Physical E-Stop Buttons                    │  (Schneider XALK178, 2x NC Contacts - PLd)
 └──────┬──────────────────────────────────────┘
        │
-┌──────┴──────────────────────────────────────┐
-│  Gemini 1S Receiver                         │  (Tyro Wireless E-Stop button - PLc)
-└──────┬──────────────────────────────────────┘
-       │
-       │ (24v E-Stop Safe Power Feed)
        │
 ┌──────┴──────────────────────────────────────┐
 │  Inxpect C203A Control Unit                 │  (Safety Controller - SIL 2 / PLd)
@@ -102,37 +87,21 @@ Supports the S2/F2/P1 risk graph parameters in §6. Not exhaustive, add rows as 
 
 | # | Component | Model / Supplier | Role in loop | Key spec | Status |
 |---|---|---|---|---|---|
-| 1 | Physical E-stops | Schneider XALK178 ×2, [Kempston Controls](https://www.kempstoncontrols.co.uk/XALK178/Schneider/sku/479749), £29.05 each excl. VAT | Input (series NC) | 2×NC contacts | WIP |
+| 1 | Physical E-stops | Schneider XALK178 ×2, [Kempston Controls](https://www.kempstoncontrols.co.uk/XALK178/Schneider/sku/479749), £29.05 each excl. VAT | Input (series NC) | 2×NC contacts | Upgrade to IP68 |
 | 2 | Bumper | [ASO Sentir](https://www.automation24.co.uk/safety-bumper-aso-sentir-1701-114-60-100-l4-0?orderCode=135), 4-wire, price TBD (see O29, garbled in prior Supplemental pricing, possibly the $315 quote-only figure) | Input | 4-wire fail-safe loop | Selected. Wired into Inxpect C203A. [2006/42/EG](https://asosafety.com/en/produkt/sentir-bumper-100-120-l-o-2/), EN ISO 13856-3:2013, 2011/65/EU |
-| 3 | Human-detection radar sensors ×4 | Inxpect S101A ×4 (Fortop code IT100006, Inxpect 90202011), [Fortop UK](https://shop.fortop.co.uk/en/en/inxpect-it100006-s101a-ul-radar-sensor-90202011.html), £510.00 each = £2,040.00 (VAT status not stated), delivery approx. 4 weeks | Input (human detection) | 24 GHz FMCW radar, SIL 2 / PL d; 0 to 4 m range, min. set distance 1 m; FOV 110°×30° (wide) or 50°×15° (narrow); max target speed 1.6 m/s; IP67; −30 to +60 °C; CAN | Selected, now Core. Count raised 2→4 (v0.6.4). Mounting geometry not yet fixed, see O28. Moving-vehicle suitability unconfirmed, see O23a |
-| 4 | Radar control unit | Inxpect C203A ×1 (Fortop code IT100024, Inxpect 90304011), [Fortop UK](https://shop.fortop.co.uk/en/en/c203a-ul-control-unit-200-series-it100024-90304011.html), £570.00 (VAT status not stated) | Logic (radar) | Connects up to 6 sensors (4 in use); digital inputs and safety outputs | Selected, now Core. Pairing with S101A confirmed (O23b closed). Supply voltage vs. 24V safety power still unconfirmed, see O23e |
+| 3 | Human-detection radar sensors ×3 | Inxpect S101A ×4 (Fortop code IT100006, Inxpect 90202011), [Fortop UK](https://shop.fortop.co.uk/en/en/inxpect-it100006-s101a-ul-radar-sensor-90202011.html), £510.00 each = £1,530.00 (VAT status not stated), delivery approx. 4 weeks | Input (human detection) | 24 GHz FMCW radar, SIL 2 / PL d; 0 to 4 m range, min. set distance 1 m; FOV 110°×30° (wide) max target speed 1.6 m/s; IP67; −30 to +60 °C; CAN |  Mounting geometry not yet fixed, see O28. |
+| 4 | Radar control unit | Inxpect C203A ×1 (Fortop code IT100024, Inxpect 90304011), [Fortop UK](https://shop.fortop.co.uk/en/en/c203a-ul-control-unit-200-series-it100024-90304011.html), £570.00 (VAT status not stated) | Logic (radar) | Connects up to 6 sensors (4 in use); digital inputs and safety outputs | Selected. Pairing with S101A. Supply voltage vs. 24V safety power still unconfirmed, see O23e |
 | 5 | Output contactors | Albright SW180 24V ×2 (series, 48V B+ bus), [Arc Components](https://www.arc-components.com/sw180-3-albright-single-acting-solenoid-contactor-24v-intermittent.html), £74.69 each = £149.38 excl. VAT + [aux micro-switch kit](https://www.arc-components.com/auxiliary-micro-switches-for-albright-contactors.html) £32.09 = £181.47 | Output | 200A cont/400A peak, magnetic blowout, silver alloy contacts, TVS suppressors | WIP |
-| **Total** | | **£2,849.57** known (excl. bumper price, excl. VAT, mixed VAT-status sourcing, see O29) | | | |
+| **Total** | | **£2,339.57** known (excl VAT) | | | |
 
 ### Supplemental - optional, not part of baseline PLd calc
 
 | # | Component | Model / Supplier | Role | Note | Status |
 |---|---|---|---|---|---|
 | 1 | IDEM GLM wire rope tether pull switch | [IDEM 143052 GLM 2NC 2NO M20](https://www.seltec.co.uk/products/details/19877.html) £77.92 excl. VAT (£93.50 incl. VAT), Seltec | Input, when connected | Die-cast, up to 30 to 50m rope span, 2NC/2NO. **Only needed if operating demos without radar fitted/configured for the space**, not in the baseline Core series chain | For demonstrations |
-| 2 | Reversing alarm/beacon | [Brigade SA-BBS-97](https://www.beaconsandlightbars.co.uk/product/brigade-electronics-brigade-sa-bbs-97-77-97db-smart-bbs-tek-white-sound-reversing-alarm-pn-sa-bbs-9-17914), £95, + [rotating LED ~£40](https://www.compass24.com/led-3600-rotating-beacon-flat-396940/black), £135.00 total | Not in stop function, avoidance measure only | 24V, wire to motion state. **Can be used to justify the P1 risk-graph parameter and reduce the target to PLc for configurations not running full Core (radar+bumper)**, not needed when Core is fitted | Can be removed if full Core fitted |
+| 2 | Motion alarm/beacon | [Brigade SA-BBS-97](https://www.beaconsandlightbars.co.uk/product/brigade-electronics-brigade-sa-bbs-97-77-97db-smart-bbs-tek-white-sound-reversing-alarm-pn-sa-bbs-9-17914), £95, + [rotating LED ~£40](https://www.compass24.com/led-3600-rotating-beacon-flat-396940/black), £135.00 total | Not in stop function, avoidance measure only | 24V, wire to motion state. **Can be used to justify the P1 risk-graph parameter and reduce the target to PLc for configurations not running full Core (radar+bumper)**, not needed when Core is fitted | Can be removed if full Core fitted |
 | **Total** | | **£212.92** (excl. VAT, mixed) | | | |
 
-### Wireless pendant — NOT IMPLEMENTED
-
-Tyro Indus 1S transmitter + Gemini 1S receiver, PL-c rated, previously Core component 2. **Removed from the design as of v0.6.4.** Superfluous given physical E-stops, radar, and bumpers already provide independent, PLd-rated stop inputs; the wireless unit was also the sole PLc-rated element dragging the combination-rule ceiling down from the rest of the PLd-rated chain (§6). Removing it also closes H3 (RF jamming/spoofing) and the associated open items (O3, O9, O20, O21), since no RF input remains in the safety function. Datasheet review notes below are retained for record only, no longer actioned.
-
-Component-level data gaps (B10d, MTTFd, PFHd, rope length, etc.) are tracked once, in the register at §8, not repeated here.
-
-### Wireless pendant — datasheet review notes (historical, component removed)
-
-Both Indus 1S and Gemini 1S manufacturer datasheets (Tyro Remotes) have been reviewed in full. Findings:
-
-- **Reaction time mismatch between transmitter and receiver documentation.** Indus 1S datasheet lists reaction time as 0.5 / 1.0 / 1.5 seconds (three tiers). Gemini 1S datasheet lists 0.5 / 1.0 / 1.5 / **2.0** seconds (four tiers). Not yet clear which figure governs system-level response time, or whether the fourth tier is a receiver-side timeout with no transmitter equivalent, or the retry/repeat mechanism that mitigates dropped packets on the shared 868MHz ISM band referenced in H3. Needs clarification from Cattron (see O21).
-- **Internal inconsistency in the Indus 1S datasheet itself**: the front-page bullet states "Battery life uninterrupted use: 40 hours," while the technical specifications table on the same document states "Battery life: Approx. 50 hours." Not safety-critical, but worth flagging to Cattron as a documentation quality issue; treat the lower figure (40hr) as the conservative assumption until clarified.
-- **IP rating discrepancy**: Cattron's website product page lists the Gemini 1S as IP66; the manufacturer datasheet lists it as **IP65**. Datasheet takes precedence, use IP65 in any enclosure/environmental rating decisions.
-- Gemini 1S max current load: 4A per relay output. Confirm this is wired into PRSU/2 logic inputs only, not expected to switch contactor coil current directly (PRSU/2 output stage is rated 6A individual / 13.8A combined, see §2 Supplemental component 1).
-- Confirmed: EC type-examination certification is referenced in the Indus 1S datasheet text. The certificate/DoC itself is a separate document, not yet obtained, and neither datasheet publishes PFHd or B10d figures.
-- **Not documented in either datasheet, and not found anywhere public: the Gemini 1S's fail-state on total signal loss** (fails to commanded stop vs. holds last state). This is the single fact the H3/O3 risk assessment and the SISTEMA input both depend on. See O20.
 
 ### Software and control status
 
@@ -156,7 +125,7 @@ Hardware build status is tracked in the tables above and in §8, not repeated he
 | `sentor_node.py` wired into `devkit.launch.py` | DONE | |
 | `sentor` hardware smoke test | TO DO | validated in sim only so far |
 | Battery voltage cutoff threshold | TO DO | marked `# TODO: CONFIRM` in `sowbot_monitor.yaml`, no value set |
-| `ros2_medkit` black-box logging | TO DO | added 25-9-26 |
+| `ros2_medkit` black-box logging | Done | added 25-9-26 |
 | Aggregation layer + `/safety/level` | TO DO | see architecture note below |
 
 Per §0: `sentor` and the software E-stop topics are diagnostic/supervisory. They are not part of the rated safety function.
@@ -167,7 +136,7 @@ Per §0: `sentor` and the software E-stop topics are diagnostic/supervisory. The
 
 | Item | Status | Notes |
 |---|---|---|
-| Radar human detection (Inxpect S101A ×4 + C203A) | Core, in-scope per §0 (v0.6.4) | count raised 2→4; mounting geometry not yet fixed (O28); build/install/validate still TO DO; see §2 Core and H5 |
+| Radar human detection (Inxpect S101A ×4 + C203A) | Core, in-scope per §0 (v0.6.4) | mounting geometry not yet fixed (O28); build/install/validate still TO DO; see §2 Core and H5 |
 | Livestock false-positive tolerance | AGREED | fine for the detector to stop on livestock, safe default (agreed under the thermal plan, carried over to radar) |
 
 ---
@@ -177,7 +146,6 @@ Per §0: `sentor` and the software E-stop topics are diagnostic/supervisory. The
 | Item | Status | Notes |
 |---|---|---|
 | ESP32 + Lizard DSL | DONE, current | hard real-time, but ESP-IDF quality |
-| STM32H7 + ArduPilot Rover migration | NO | superseded by Cerebri path below |
 | Cerebri on Zephyr & [FRDM-A-S32K358](https://www.nxp.com/design/design-center/development-boards-and-designs/FRDM-A-S32K358) dual 32-bit Arm® Cortex®-M7 cores operating in lockstep to support ASIL D functional safety | WIP | [Agroecology-Lab/cerebri](https://github.com/Agroecology-Lab/cerebri) |
 
 Per §0: this layer is out of scope for the PLc calculation both before and after migration. The migration's value is defence-in-depth (EKF-based failsafes, geofencing) and long-run firmware certifiability. It does not change, and does not need to change, the §6 rating.
@@ -216,16 +184,15 @@ The EU Machinery Regulation 2023/1230 replaces the Directive from 20 January 202
 **Target:** ISO 13849-1 Performance Level d (PLd), achieved directly via Core detection/interruption (E-stops, radar, bumper), not via the P1 avoidance route.
 **Risk graph parameters:** S2 (severe/irreversible injury, see H1), F2 (frequent/continuous exposure), P1 (avoidance possible via white-sound alarm and flashing beacon, Supplemental only) or P2 (no avoidance signal, Core-only configuration). Core, as now built entirely from PLd-rated components, targets PLd regardless of P1/P2, making the avoidance argument unnecessary for Core. **The Supplemental light/buzzer package remains available specifically to justify a reduced PLc target (via P1) for configurations that don't run full Core**, e.g. early Phase 1 units without radar fitted.
 
-**In-scope components:** §2 Core table (physical E-stops, bumper, radar ×4 + C203A, output contactors), per §0 (updated v0.6.4, resolves O24). The IDEM GLM tether enters the series chain only when connected for demo-mode operation without radar; not part of the baseline calculation.
+**In-scope components:** §2 Core table (physical E-stops, bumper, radar ×3 + C203A, output contactors), per §0. The IDEM GLM tether enters the series chain only when connected for demo-mode operation without radar; not part of the baseline calculation.
 
 **Architecture:**
 - Category 3, dual-channel redundant structure across inputs, logic, and output power interlocks.
 - Diagnostic coverage (DCavg): stated range 60 to 90% (Low), pending SW180 aux-microswitch EDM-loop verification. Not yet a fixed number, needs pinning down before the SISTEMA run, see §8.
 - Common cause failure (CCF): Annex F scoring applies (≥65 points required); addressed via channel isolation, overvoltage protection, physical wiring separation. Score not yet computed, see §8. **CCF scoring must now also account for radar and bumper sharing the C203A logic unit, not previously assessed.**
 
-**Combination rule:** total PFHd and PL ceiling are set by the worst-performing element in the series chain (E-Stops → C203A [bumper + radar inputs] → dual SW180s). No component may rate below the overall target. **The wireless pendant, previously the PLc bottleneck in this chain, is removed (v0.6.4); all remaining Core components are independently PLd-rated, though the combined system PLd still depends on the SISTEMA run (O6) and is not yet confirmed.**
+**Combination rule:** total PFHd and PL ceiling are set by the worst-performing element in the series chain (E-Stops → C203A [bumper + radar inputs] → dual SW180s). No component may rate below the overall target. Core components are independently PLd-rated, though the combined system PLd still depends on the SISTEMA run (O6) and is not yet confirmed.
 
-**Cybersecurity note:** with the wireless pendant removed, the safety function no longer has an RF input; H3 is closed as not applicable (v0.6.4). The radar's CAN bus link to the C203A is wired, not RF, removing the attack surface that drove H3, O16, O20, O21.
 
 ---
 
@@ -289,11 +256,11 @@ Audience: university labs, ag-tech researchers, software startups.
 No certification work needed at this phase. Reference the standards, do not claim them.
 
 ### Phase 2: OEM modular subsystems
-Audience: startups integrating Sowbot's drive/safety core.
+Audience: Academics/startups integrating Sowbot's drive/safety core.
 
 | Item | Status |
 |---|---|
-| PLd calculation for E-stop, radar, and bumper circuit | Draft in progress, gate for this phase |
+| PLd calculation for E-stop, radar, and bumper circuit | Draft in progress |
 | SOTIF assessment for vision/radar degradation cases | TO DO |
 | IEC 61508 architecture review | TO DO |
 | Third-party certification | NOT REQUIRED YET; formal internal assessment is |
