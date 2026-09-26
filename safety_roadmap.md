@@ -102,22 +102,9 @@ Supports the S2/F2/P1 risk graph parameters in §6. Not exhaustive, add rows as 
 | 2 | Motion alarm/beacon | [Brigade SA-BBS-97](https://www.beaconsandlightbars.co.uk/product/brigade-electronics-brigade-sa-bbs-97-77-97db-smart-bbs-tek-white-sound-reversing-alarm-pn-sa-bbs-9-17914), £95, + [rotating LED ~£40](https://www.compass24.com/led-3600-rotating-beacon-flat-396940/black), £135.00 total | Not in stop function, avoidance measure only | 24V, wire to motion state. **Can be used to justify the P1 risk-graph parameter and reduce the target to PLc for configurations not running full Core (radar+bumper)**, not needed when Core is fitted | Can be removed if full Core fitted |
 | **Total** | | **£212.92** (excl. VAT, mixed) | | | |
 
-
-### Software and control status
-
-| Item | Status | Notes |
-|---|---|---|
-| `/estop/soft` (software) | DONE | driver-level, `devkit_driver`, supplemental to the formal safety system |
-| `/estop/front`, `/estop/back` (hardware state topics) | DONE | driver-level |
-| Bumper topics (`front_top`, `front_bottom`, `back`) | DONE | not used in formal safety system |
-| First-run terminal acceptance of E-stop/safety warning and disclaimer | DONE | prompted by `manage.py` during `.env` setup |
-| Resume confirmation after a stop | WIP | after safety circuit triggers, requires manual re-arm |
-
-Hardware build status is tracked in the tables above and in §8, not repeated here.
-
 ---
 
-## 3. Monitoring
+## 3. Monitoring & Supervisory
 
 | Item | Status | Notes |
 |---|---|---|
@@ -148,11 +135,9 @@ Per §0: `sentor` and the software E-stop topics are diagnostic/supervisory. The
 | ESP32 + Lizard DSL | DONE, current | hard real-time, but ESP-IDF quality |
 | Cerebri on Zephyr & [FRDM-A-S32K358](https://www.nxp.com/design/design-center/development-boards-and-designs/FRDM-A-S32K358) dual 32-bit Arm® Cortex®-M7 cores operating in lockstep to support ASIL D functional safety | WIP | [Agroecology-Lab/cerebri](https://github.com/Agroecology-Lab/cerebri) |
 
-Per §0: this layer is out of scope for the PLc calculation both before and after migration. The migration's value is defence-in-depth (EKF-based failsafes, geofencing) and long-run firmware certifiability. It does not change, and does not need to change, the §6 rating.
+Per §0: this layer is out of scope for the PLd calculation both before and after migration. The migration's value is defence-in-depth (EKF-based failsafes, geofencing) and long-run firmware certifiability. It does not change, and does not need to change, the §6 rating.
 
-Zephyr's own safety programme (IEC 61508 SIL 3 SEooC, concept approval granted via route 3s, ISO 26262 alignment in progress) is the basis for the IEC 61508 reference above.
-
----
+Zephyr's own safety programme (IEC 61508 SIL 3 SEooC, concept approval granted via route 3s, ISO 26262 alignment in progress) -
 
 ## 6. Regulatory compliance
 
