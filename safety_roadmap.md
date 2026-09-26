@@ -177,16 +177,16 @@ Zephyr's own safety programme (IEC 61508 SIL 3 SEooC, concept approval granted v
 
 No compliance claimed. Reference standards only until formal assessment or audit is done.
 
-**Target: PLc, ISO 13849-1, for the whole-vehicle stop function.**
-
-| Standard | Domain | Relevance |
-|---|---|---|
-| ISO 18497 | Highly automated ag machinery | Hazard zones, operational modes for autonomous field work |
-| ISO 25119 / AgPL | Tractor and ag electronics functional safety | AgPL target for motor-stop interlocks |
-| ISO 13849 / PL | Machinery safety, control systems | PLc target for E-stop relay, bumper circuit |
-| ISO 3691-4 | AGV obstacle detection | Clearance rules, braking distance, detection envelope sizing |
-| IEC 61508 | Functional safety, E/E/PE systems | Reference for controller firmware architecture (§5) |
-| ISO 21448 (SOTIF) | Safety of the intended functionality | Vision/radar degradation: mud, dust, glare, crop clutter (see H5) |
+| Standard | Domain | Relevance | Legal status | Extent of compliance required |
+|---|---|---|---|---|
+| ISO 18497 | Highly automated ag machinery | Hazard zones, operational modes for autonomous field work | Voluntary (harmonised standard route to EHSR conformity) | Primary standard for this product class. Required in substance before Phase 3 Declaration of Conformity; informal reference only at Phase 1 |
+| ISO 25119 / AgPL | Tractor and ag electronics functional safety | AgPL target for motor-stop interlocks | Voluntary, written for tractors/conventional ag electronics, not robots | Design reference only. Not a certification target for this product |
+| ISO 13849 / PL | Machinery safety, control systems | PLc target for E-stop relay, bumper circuit | Voluntary (harmonised standard route to EHSR conformity) | Load-bearing for the §6 calculation regardless of phase. Full SISTEMA run (CCF ≥65, DCavg, PFHd) required before any Declaration of Conformity; not required for Declaration of Incorporation |
+| ISO 3691-4 | AGV obstacle detection | Clearance rules, braking distance, detection envelope sizing | Voluntary, written for AGVs/industrial trucks, not field robots | Methodology reference only (e.g. S = KT+C sizing). Not the governing standard for this product class |
+| IEC 61508 | Functional safety, E/E/PE systems | Reference for controller firmware architecture (§5) | Voluntary | Design reference for Zephyr/cerebri SEooC route (O18). Not independently audited at Phase 1 |
+| ISO 21448 (SOTIF) | Safety of the intended functionality | Vision/radar degradation: mud, dust, glare, crop clutter (see H5) | Voluntary | Design reference only. No formal SOTIF process required at Phase 1 |
+| UK SMSR 2008 / EU Machinery Directive 2006/42/EC | Machinery placing-on-market | Product classification, partly completed machinery status | Statutory | Mandatory now. Requires Annex VI assembly instructions + Declaration of Incorporation before any unit ships (O22, not yet done). No CE/UKCA marking or third-party certification required at this classification |
+| EU Machinery Regulation (EU) 2023/1230 | Machinery placing-on-market | Successor to 2006/42/EC; software as safety component, source code/control logic in technical documentation | Statutory, in force 20 Jan 2027 | Mandatory for any EU/NI sale from 20 Jan 2027. NI adopts directly from Oct 2026. GB continues CE recognition and is aligning SMSR 2008 technically |
 
 ### Product classification
 
