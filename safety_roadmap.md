@@ -21,6 +21,7 @@
   - [Phase 2: OEM modular subsystems](#phase-2-oem-modular-subsystems)
   - [Phase 3: commercial sale to farmers](#phase-3-commercial-sale-to-farmers)
 - [Revision history](#revision-history)
+  
 **Document control**
 - Previous version: v0.6.4
 - Status: living document, Phase 1 (dev platform)
