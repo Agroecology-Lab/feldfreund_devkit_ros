@@ -1,5 +1,26 @@
 # Sowbot Safety Roadmap, v0.6.5
+## Contents
 
+- [0. Safety scoping](#0-safety-scoping)
+- [1. Hazard identification](#1-hazard-identification)
+- [2. E-stop and safety hardware](#2-e-stop-and-safety-hardware)
+  - [24V SAFETY CONTROL LOOP](#24v-safety-control-loop)
+  - [48V TRACTION POWER BUS](#48v-traction-power-bus)
+  - [Core - PLd](#core---pld)
+  - [Supplemental - optional, not part of baseline PLd calc](#supplemental---optional-not-part-of-baseline-pld-calc)
+- [3. Monitoring & Supervisory](#3-monitoring--supervisory)
+- [4. Perception](#4-perception)
+- [5. Controller path](#5-controller-path)
+- [6. Regulatory compliance](#6-regulatory-compliance)
+  - [Product classification](#product-classification)
+  - [Functional safety calculation (draft)](#functional-safety-calculation-draft)
+- [7. Non-traction actuators (OPEN, scope flag)](#7-non-traction-actuators-open-scope-flag)
+- [8. Open items register](#8-open-items-register)
+- [9. Phased rollout](#9-phased-rollout)
+  - [Phase 1: dev platform (current focus)](#phase-1-dev-platform-current-focus)
+  - [Phase 2: OEM modular subsystems](#phase-2-oem-modular-subsystems)
+  - [Phase 3: commercial sale to farmers](#phase-3-commercial-sale-to-farmers)
+- [Revision history](#revision-history)
 **Document control**
 - Previous version: v0.6.4
 - Status: living document, Phase 1 (dev platform)
