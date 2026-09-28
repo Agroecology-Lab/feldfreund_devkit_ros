@@ -131,24 +131,27 @@ monitors:
 
   # ── AUTONOMY-CRITICAL ─────────────────────────────────────────────────
 
-  - name: "/devkit/camera/image_raw"
-    message_type: "sensor_msgs/msg/Image"
-    rate: 6                       # nominal ~8 Hz; 6 leaves headroom (ticket said warn <8)
-    N: 5
-    signal_when:
-      condition: "published"
-      timeout: 2.0
-      safety_critical: false
-      autonomy_critical: true
-    signal_lambdas:
-      - expression: "lambda x: x.width == 0 or x.height == 0"
-        timeout: 2.0
-        safety_critical: false
-        autonomy_critical: true
-        tags: ["camera_resolution"]
-    execute: []
-    timeout: 2.0
-    default_notifications: false
+  # DISABLED: image_raw monitor. sentor deserialises every 1280x720 frame in Python
+  # (2-3 subscriptions per topic) just to measure Hz. Node liveness still covered by
+  # node_monitors: usb_cam and /aoc/heartbeat/neo_vision.
+  # - name: "/devkit/camera/image_raw"
+  #   message_type: "sensor_msgs/msg/Image"
+  #   rate: 6                       # nominal ~8 Hz; 6 leaves headroom (ticket said warn <8)
+  #   N: 5
+  #   signal_when:
+  #     condition: "published"
+  #     timeout: 2.0
+  #     safety_critical: false
+  #     autonomy_critical: true
+  #   signal_lambdas:
+  #     - expression: "lambda x: x.width == 0 or x.height == 0"
+  #       timeout: 2.0
+  #       safety_critical: false
+  #       autonomy_critical: true
+  #       tags: ["camera_resolution"]
+  #   execute: []
+  #   timeout: 2.0
+  #   default_notifications: false
 
   - name: "/odom"
     message_type: "nav_msgs/msg/Odometry"
