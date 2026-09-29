@@ -107,7 +107,6 @@ Supports the S2/F2/P1 risk graph parameters in §6. Not exhaustive, add rows as 
 ```
 
 ### Core - PLd
-### Core - PLd
 
 | # | Component | Model / Supplier | Role in loop | Key spec | Status |
 |---|---|---|---|---|---|
@@ -116,8 +115,8 @@ Supports the S2/F2/P1 risk graph parameters in §6. Not exhaustive, add rows as 
 | 3 | Human-detection radar sensors ×3 | Inxpect S101A ×3 (Fortop code IT100006, Inxpect 90202011), [Fortop UK](https://shop.fortop.co.uk/en/en/inxpect-it100006-s101a-ul-radar-sensor-90202011.html), £510.00 each = £1,530.00 (ex VAT) | Input (human detection) | 24 GHz FMCW radar, SIL 2 / PL d; 0 to 4 m range, min. set distance 1 m; FOV 110°×30° (wide) max target speed 1.6 m/s; IP67; −30 to +60 °C; CAN | Manufacturer instruction manual (Inxpect SAF-IM-100S_7_00111_en_v1.6) confirms mobile/vehicle-mounted use, with a dedicated "mobile applications" validation procedure (§8.4.2) and installation guidance for sensors mounted on moving/vibrating parts. Mounting geometry for the 3-sensor layout not yet fixed, see O21. |
 | 4 | Radar/ bumper control unit | Inxpect C203A ×1 (Fortop code IT100024, Inxpect 90304011), [Fortop UK](https://shop.fortop.co.uk/en/en/c203a-ul-control-unit-200-series-it100024-90304011.html), £570.00 (ex VAT) | Logic (radar) | Connects up to 6 sensors (3 in use); digital inputs and safety outputs | Selected. Pairing with S101A. 24V |
 | 5 | Output contactors | Albright SW180 24V ×2 (series, 48V B+ bus), [Arc Components](https://www.arc-components.com/sw180-3-albright-single-acting-solenoid-contactor-24v-intermittent.html), £74.69 each = £149.38 (ex VAT) + [aux micro-switch kit](https://www.arc-components.com/auxiliary-micro-switches-for-albright-contactors.html) £32 each = £64 (ex VAT) | Output | 200A cont/400A peak, magnetic blowout, silver alloy contacts, TVS suppressors | WIP |
-|*Total excl. 3× radar sensors*  | | | | | *£1,419.38 known (ex VAT)* |
-| **Total** | | **£2,949.38** known (ex VAT) (£589.88 VAT) | | | |
+|*Total excl. 3× radar sensors*  | | | | | *£1,419.38 known (+£283 VAT)* |
+| **Total** | | **£2,949.38**  (+£589.88 VAT) | | | |
 
 ### Supplemental - optional, not part of baseline PLd calc
 
