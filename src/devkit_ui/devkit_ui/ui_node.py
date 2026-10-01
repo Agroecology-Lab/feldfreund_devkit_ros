@@ -314,11 +314,16 @@ def _kill_group(proc, grace: float = 5.0) -> None:
     try:
         pgid = os.getpgid(proc.pid)
         os.killpg(pgid, signal.SIGTERM)
-        proc.wait(timeout=grace)
-    except subprocess.TimeoutExpired:
-        os.killpg(pgid, signal.SIGKILL)
-        proc.wait(timeout=2)
+        try:
+            proc.wait(timeout=grace)
+            return
+        except subprocess.TimeoutExpired:
+            os.killpg(pgid, signal.SIGKILL)
     except ProcessLookupError:
+        pass
+    try:
+        proc.wait(timeout=2)
+    except subprocess.TimeoutExpired:
         pass
 
 

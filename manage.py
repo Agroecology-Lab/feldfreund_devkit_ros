@@ -250,13 +250,15 @@ class DevkitManager:
         # -it requires both stdin and stdout to be a real TTY; fall back to -i
         # so non-interactive invocations (cron, CI, piped) don't hard-fail.
         interactive_flags = ['-it'] if sys.stdin.isatty() and sys.stdout.isatty() else ['-i']
+        driver_ui_port = self._get_env_config().get('DEVKIT_DRIVER_UI_PORT', '8090')
 
         cmd = [
             'docker', 'run', *interactive_flags, '--rm', '--name', self.container_name,
             '-p', '80:80',
             '-p', '8080:8080',
             '-p', '8081:8081',
-            '-p', '6081:6081',
+            '-p', '127.0.0.1:6081:6081',
+            '-p', f'{driver_ui_port}:{driver_ui_port}',
             '-p', '8765:8765',
             '-p', '6080:6080',
             '-p', '8734:8734',
