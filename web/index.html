@@ -32,13 +32,17 @@ map.addControl(new L.Control.Draw({edit:{featureGroup:drawn},draw:{polygon:{allo
 map.on(L.Draw.Event.CREATED,e=>{const hasField=drawn.getLayers().length>0;e.layer.setStyle({color:hasField?'#d33':'#fc0'});drawn.addLayer(e.layer);});
 let py,geo=null;
 (async()=>{try{
- py=await loadPyodide();await py.loadPackage('shapely');
+ py=await loadPyodide();
+ await py.loadPackage(['numpy','shapely'],{
+   messageCallback:m=>msg(m),
+   errorCallback:e=>{console.error(e);msg('Package error: '+e)}});
+ py.runPython('import shapely');   // throws here if the load failed, instead of "Ready"
  py.FS.mkdirTree('/lib/devkit_f2c_planner');
  py.FS.writeFile('/lib/devkit_f2c_planner/__init__.py','');
  py.FS.writeFile('/lib/devkit_f2c_planner/f2c_planner.py',await (await fetch('f2c_planner.py')).text());
  py.runPython("import sys;sys.path.insert(0,'/lib')");
  $('go').disabled=false;msg('Ready. Draw a field polygon.');
-}catch(e){msg('Failed to load: '+e)}})();
+}catch(e){msg('Failed to load: '+e);console.error(e)}})();
 const ring=l=>(l.getLatLngs()[0]).map(p=>[p.lat,p.lng]);
 $('go').onclick=()=>{
  const ls=drawn.getLayers();if(!ls.length)return msg('Draw a field first.');
@@ -59,8 +63,7 @@ json.dumps({'rows':rows,'tags':P.tag_rows(rows,r['field'],r['a'])})`));
    properties:{version:1,generator:'feldfreund-web-planner',origin:req.field[0],tool_width:req.w,angle:req.a,headland:req.h,snake:req.s},
    features:[poly('field',req.field),...req.obs.map(o=>poly('obstacle',o)),
     ...rows.map((r,i)=>({type:'Feature',properties:{role:'row',row:tags[i][0],frag:tags[i][1]},geometry:{type:'LineString',coordinates:ll(r)}}))]};
-  const res2=rows;
-  res2.forEach(r=>L.polyline(r,{color:'#0af',weight:2}).addTo(out));
+  rows.forEach(r=>L.polyline(r,{color:'#0af',weight:2}).addTo(out));
   const len=rows.reduce((t,r)=>t+r.slice(1).reduce((s,q,i)=>s+map.distance(r[i],q),0),0);
   msg(`${rows.length} rows, ${(len/1000).toFixed(2)} km of swath`);$('dl').disabled=!rows.length;
  }catch(e){msg('Planner error: '+e)}};
