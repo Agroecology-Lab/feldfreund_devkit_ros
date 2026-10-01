@@ -450,6 +450,12 @@ The example UI provides a robot control interface built with NiceGUI, featuring 
 
 The interface is accessible through a web browser at `http://<ROBOT-IP>:80` when the robot is running.
 
+The System tab's Medkit Gateway button binds the gateway to `127.0.0.1` for host-local use.
+Stop sends SIGINT, waits for shutdown, and escalates to termination and kill only on timeout.
+Gateway and SOVD links use the host serving the page, on ports 8080 and 3000 respectively.
+Remote gateway access requires a separately configured deployment with authentication, TLS, and restricted network access; the button does not enable remote binding.
+For a TLS deployment, use its configured HTTPS endpoint in the browser and SOVD settings.
+
 <div align="center">
   <img src="assets/DevKitUI.png" alt="Example UI Screenshot" width="500"/>
   <div style="font-size: 0.95em; color: #555; margin-top: 0.5em;">

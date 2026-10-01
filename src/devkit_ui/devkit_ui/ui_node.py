@@ -18,6 +18,7 @@ import traceback
 import zipfile
 from collections.abc import Callable
 from datetime import UTC, datetime
+from html import escape
 from importlib import resources
 from itertools import pairwise
 from pathlib import Path
@@ -3007,6 +3008,93 @@ class NiceGuiNode(Node):
                     'font-family:\'Courier New\',monospace;">'
                     '↗ RViz (noVNC)</a>'
                 )
+                ui.separator().classes('w-full my-1')
+
+                # ── Medkit Gateway ───────────────────────────────────────
+                _medkit_proc: list = [None]
+                _medkit_stopping = False
+                _medkit_lbl = ui.label('').classes('text-xs font-mono').style('color:#57606a')
+                def _start_medkit():
+                    """Launch Medkit on loopback unless this tab's process is running.
+
+                    Display process creation errors in the status label. A successful
+                    start reports the launch PID without checking gateway readiness.
+                    """
+                    if _medkit_stopping:
+                        return
+                    if _medkit_proc[0] is not None and _medkit_proc[0].poll() is None:
+                        _medkit_lbl.set_text('already running')
+                        return
+                    try:
+                        _medkit_proc[0] = subprocess.Popen(
+                            ['ros2', 'launch', 'ros2_medkit_gateway', 'bringup.launch.py',
+                             'server_host:=127.0.0.1'],
+                            stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
+                        )
+                        _medkit_lbl.set_text(f'started (pid {_medkit_proc[0].pid})')
+                        _medkit_lbl.style('color:#1a7f37')
+                    except Exception as exc:
+                        _medkit_lbl.set_text(f'ERROR: {exc}')
+                        _medkit_lbl.style('color:#cf222e')
+                async def _stop_medkit():
+                    """Reap the launch process before releasing its handle, off the UI loop."""
+                    nonlocal _medkit_stopping
+                    if _medkit_stopping:
+                        return
+                    _medkit_stopping = True
+                    try:
+                        if _medkit_proc[0] is not None:
+                            _medkit_lbl.set_text('stopping')
+                            await ng_run.io_bound(_shutdown_medkit, _medkit_proc[0])
+                            _medkit_proc[0] = None
+                        _medkit_lbl.set_text('stopped')
+                        _medkit_lbl.style('color:#57606a')
+                    except (OSError, subprocess.TimeoutExpired) as exc:
+                        _medkit_lbl.set_text(f'ERROR: {exc}')
+                        _medkit_lbl.style('color:#cf222e')
+                    finally:
+                        _medkit_stopping = False
+
+                def _shutdown_medkit(proc):
+                    """Allow ROS launch to stop its children before escalating on timeout."""
+                    proc.send_signal(signal.SIGINT)
+                    try:
+                        proc.wait(timeout=15)
+                    except subprocess.TimeoutExpired:
+                        proc.terminate()
+                        try:
+                            proc.wait(timeout=5)
+                        except subprocess.TimeoutExpired:
+                            proc.kill()
+                            proc.wait(timeout=5)
+                ui.button('Start Medkit Gateway', on_click=_start_medkit).props(
+                    'outline no-caps').classes('px-4')
+                ui.button('Stop Medkit Gateway', on_click=_stop_medkit).props(
+                    'outline no-caps').classes('px-4')
+                _medkit_host = ui.context.client.request.url.hostname
+                if ':' in _medkit_host:
+                    _medkit_host = f'[{_medkit_host}]'
+                _medkit_host = escape(_medkit_host, quote=True)
+                ui.html(
+                    f'<a href="http://{_medkit_host}:8080/" target="_blank" '
+                    'style="font-size:13px;color:var(--blue);text-decoration:none;'
+                    'padding:6px 12px;border:1px solid var(--blue);border-radius:4px;'
+                    'font-family:\'Courier New\',monospace;">'
+                    f'↗ Gateway ({_medkit_host}:8080)</a>'
+                )
+                ui.html(
+                    '<div style="font-size:11px;color:var(--txt-muted);'
+                    'font-family:\'Courier New\',monospace;line-height:1.5;">'
+                    'SOVD web UI runs on the host, not in this container. On host:<br>'
+                    '<code>docker run -p 3000:80 ghcr.io/selfpatch/sovd_web_ui:latest</code><br>'
+                    f'Then open <a href="http://{_medkit_host}:3000/" target="_blank" '
+                    f'style="color:var(--blue);text-decoration:none;">{_medkit_host}:3000</a> '
+                    f'and set its gateway URL to <code>http://{_medkit_host}:8080</code>.<br>'
+                    'The gateway starts on loopback for host-local use. Remote access requires '
+                    'authentication, TLS, and restricted network access.'
+                    '</div>'
+                )
+
                 ui.separator().classes('w-full my-1')
 
                 # ── Gazebo Sim ───────────────────────────────────────────
