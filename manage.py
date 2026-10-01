@@ -255,6 +255,8 @@ class DevkitManager:
             'docker', 'run', *interactive_flags, '--rm', '--name', self.container_name,
             '-p', '80:80',
             '-p', '8080:8080',
+            '-p', '8081:8081',
+            '-p', '6081:6081',
             '-p', '8765:8765',
             '-p', '6080:6080',
             '-p', '8734:8734',

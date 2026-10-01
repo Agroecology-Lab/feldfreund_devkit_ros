@@ -151,6 +151,7 @@ app.on_startup(on_startup)
 ui_run.APP_IMPORT_STRING = f'{__name__}:app'
 
 ui.run(
+    port=int(os.environ.get('DEVKIT_DRIVER_UI_PORT', '8090')),
     uvicorn_reload_dirs=str(Path(__file__).parent.resolve()),
     title='Agroecology Lab Sowbot UI',
     favicon='assets/favicon.ico',

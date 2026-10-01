@@ -45,6 +45,9 @@ def generate_launch_description():
                               description='Launch usb_cam here; set false for an external camera source'),
         DeclareLaunchArgument('detector', default_value='scanwin',
                               description="Row-detection backend: 'scanwin' (default) or 'tsm'"),
+        DeclareLaunchArgument('web_video_port', default_value='8081',
+                              description='HTTP port for web_video_server. 8081, not the '
+                                          'upstream 8080, which the Medkit gateway uses.'),
         IncludeLaunchDescription(
             PythonLaunchDescriptionSource(
                 os.path.join(sowbot_pkg, 'launch', 'crop_row_nav.launch.py')
@@ -54,6 +57,7 @@ def generate_launch_description():
                 'video_device': LaunchConfiguration('video_device'),
                 'use_camera': LaunchConfiguration('use_camera'),
                 'detector': LaunchConfiguration('detector'),
+                'web_video_port': LaunchConfiguration('web_video_port'),
             }.items(),
         ),
     ])

@@ -283,6 +283,105 @@ def load_css() -> str:
 
 _APP_CSS = load_css()
 
+# ── Tools card: process registry shared by every browser session ────────
+# Handles live here, not in the page closure, so reloading or opening a
+# second tab cannot orphan a running tool or spawn a duplicate.
+_TOOLS: dict = {}
+_GRAPHER_DIR = '/tmp/ros2grapher'
+
+
+def _shared(name: str, factory: Callable):
+    return _TOOLS.setdefault(name, factory())
+
+
+def _alive(proc) -> bool:
+    return proc is not None and proc.poll() is None
+
+
+def _spawn_logged(cmd: list, log: str, **kwargs):
+    """Start cmd in its own session with output going to a log file."""
+    with open(log, 'w', encoding='utf-8') as fh:
+        return subprocess.Popen(cmd, stdout=fh, stderr=subprocess.STDOUT,
+                                start_new_session=True, **kwargs)
+
+
+def _kill_group(proc, grace: float = 5.0) -> None:
+    """SIGTERM then SIGKILL a process group. Blocking: call off the UI loop."""
+    if proc is None or proc.poll() is not None:
+        return
+    try:
+        pgid = os.getpgid(proc.pid)
+        os.killpg(pgid, signal.SIGTERM)
+        proc.wait(timeout=grace)
+    except subprocess.TimeoutExpired:
+        os.killpg(pgid, signal.SIGKILL)
+        proc.wait(timeout=2)
+    except ProcessLookupError:
+        pass
+
+
+def _stop_all(procs: list) -> None:
+    for proc in procs:
+        _kill_group(proc, grace=3.0)
+    procs.clear()
+
+
+def _ensure_xvfb(display: str, daemons: list) -> None:
+    """Start Xvfb unless a live one owns the display; clear stale locks."""
+    num = display.lstrip(':')
+    lock = f'/tmp/.X{num}-lock'
+    if os.path.exists(lock):
+        if subprocess.run(['pgrep', '-f', f'[X]vfb {display}'],
+                          capture_output=True, check=False).returncode == 0:
+            return
+        for path in (lock, f'/tmp/.X11-unix/X{num}'):
+            try:
+                os.remove(path)
+            except OSError:
+                pass
+    daemons.append(_spawn_logged(
+        ['Xvfb', display, '-screen', '0', '1920x1080x24', '-nolisten', 'tcp'],
+        f'/tmp/xvfb{num}.log'))
+    time.sleep(0.5)
+
+
+def _start_vnc_stack(display: str, vnc_port: int, web_port: int, daemons: list) -> None:
+    """Xvfb + x11vnc (loopback only) + noVNC websockify. Blocking."""
+    _stop_all(daemons)
+    _ensure_xvfb(display, daemons)
+    daemons.append(_spawn_logged(
+        ['x11vnc', '-display', display, '-nopw', '-forever', '-shared', '-quiet',
+         '-localhost', '-rfbport', str(vnc_port)], f'/tmp/x11vnc-{vnc_port}.log'))
+    daemons.append(_spawn_logged(
+        ['websockify', '--web', '/usr/share/novnc', str(web_port), f'localhost:{vnc_port}'],
+        f'/tmp/websockify-{web_port}.log'))
+    time.sleep(0.5)
+
+
+def _restore_label(lbl, proc) -> None:
+    if _alive(proc):
+        lbl.set_text(f'running (pid {proc.pid})')
+        lbl.style('color:#1a7f37')
+
+
+def _report_if_exited(proc, lbl, log: str) -> None:
+    """Two seconds after start, say so if the process already died."""
+    def check() -> None:
+        if proc.poll() is not None:
+            lbl.set_text(f'exited ({proc.returncode}) - see {log}')
+            lbl.style('color:#cf222e')
+    ui.timer(2.0, check, once=True)
+
+
+def _shutdown_tools() -> None:
+    for entry in _TOOLS.values():
+        for proc in (entry if isinstance(entry, list) else [entry]):
+            if isinstance(proc, subprocess.Popen):
+                _kill_group(proc, grace=3.0)
+
+
+app.on_shutdown(_shutdown_tools)
+
 # ── map parser ────────────────────────────────────────────────────────────────
 
 def _demo_doc() -> TopoDoc:
@@ -2891,28 +2990,42 @@ class NiceGuiNode(Node):
         with ui.card().classes('w-full mt-3'):
             ui.label('Tools').classes('font-semibold mb-2')
             with ui.row().classes('items-center gap-3 flex-wrap'):
+                _host = ui.context.client.request.url.hostname or 'localhost'
+                if ':' in _host:
+                    _host = f'[{_host}]'
+                _host = escape(_host, quote=True)
 
                 # ── Graph Explorer ───────────────────────────────────────
-                _explorer_proc: list = [None]
+                _explorer_proc: list = _shared('explorer', lambda: [None])
                 _explorer_lbl = ui.label('').classes('text-xs font-mono').style('color:#57606a')
+                _restore_label(_explorer_lbl, _explorer_proc[0])
                 def _start_explorer():
-                    if _explorer_proc[0] is not None and _explorer_proc[0].poll() is None:
+                    if _alive(_explorer_proc[0]):
                         _explorer_lbl.set_text('already running')
                         return
                     try:
-                        _explorer_proc[0] = subprocess.Popen(
+                        _explorer_proc[0] = _spawn_logged(
                             ['ros2', 'run', 'ros2graph_explorer', 'ros2graph_explorer'],
-                            stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
-                        )
-                        _explorer_lbl.set_text(f'started (pid {_explorer_proc[0].pid})')
+                            '/tmp/ros2graph_explorer.log')
+                        _explorer_lbl.set_text(
+                            f'started (pid {_explorer_proc[0].pid}) - log: /tmp/ros2graph_explorer.log')
                         _explorer_lbl.style('color:#1a7f37')
+                        _report_if_exited(_explorer_proc[0], _explorer_lbl,
+                                          '/tmp/ros2graph_explorer.log')
                     except Exception as exc:
                         _explorer_lbl.set_text(f'ERROR: {exc}')
                         _explorer_lbl.style('color:#cf222e')
+                async def _stop_explorer():
+                    await ng_run.io_bound(_kill_group, _explorer_proc[0])
+                    _explorer_proc[0] = None
+                    _explorer_lbl.set_text('stopped')
+                    _explorer_lbl.style('color:#57606a')
                 ui.button('Start Graph Explorer', on_click=_start_explorer).props(
                     'outline no-caps').classes('px-4')
+                ui.button('Stop', on_click=_stop_explorer).props(
+                    'outline no-caps').classes('px-4')
                 ui.html(
-                    '<a href="http://localhost:8734/" target="_blank" '
+                    f'<a href="http://{_host}:8734/" target="_blank" '
                     'style="font-size:13px;color:var(--blue);text-decoration:none;'
                     'padding:6px 12px;border:1px solid var(--blue);border-radius:4px;'
                     'font-family:\'Courier New\',monospace;">'
@@ -2929,28 +3042,41 @@ class NiceGuiNode(Node):
                 ui.separator().classes('w-full my-1')
 
                 # ── ros2grapher ──────────────────────────────────────────
-                _grapher_proc: list = [None]
+                _grapher_proc: list = _shared('grapher', lambda: [None])
                 _grapher_lbl = ui.label('').classes('text-xs font-mono').style('color:#57606a')
+                _restore_label(_grapher_lbl, _grapher_proc[0])
                 def _start_grapher():
-                    if _grapher_proc[0] is not None and _grapher_proc[0].poll() is None:
+                    if _alive(_grapher_proc[0]):
                         _grapher_lbl.set_text('already running')
                         return
                     try:
-                        _grapher_proc[0] = subprocess.Popen(
-                            ['ros2grapher', '/workspace'],
-                            stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
-                        )
+                        # ros2grapher serves its output directory over plain HTTP on
+                        # all interfaces. Give it a private directory holding only
+                        # index.html so it cannot expose the workspace (.env etc).
+                        os.makedirs(_GRAPHER_DIR, exist_ok=True)
+                        _grapher_proc[0] = _spawn_logged(
+                            ['ros2grapher', '/workspace', '-o', f'{_GRAPHER_DIR}/index.html',
+                             '--port', '8888'],
+                            '/tmp/ros2grapher.log', cwd=_GRAPHER_DIR)
                         _grapher_lbl.set_text(
-                            f'started (pid {_grapher_proc[0].pid}) — '
-                            f'open http://localhost:8888')
+                            f'started (pid {_grapher_proc[0].pid}) - open http://{_host}:8888 '
+                            f'(scan takes a few seconds) - log: /tmp/ros2grapher.log')
                         _grapher_lbl.style('color:#1a7f37')
+                        _report_if_exited(_grapher_proc[0], _grapher_lbl, '/tmp/ros2grapher.log')
                     except Exception as exc:
                         _grapher_lbl.set_text(f'ERROR: {exc}')
                         _grapher_lbl.style('color:#cf222e')
+                async def _stop_grapher():
+                    await ng_run.io_bound(_kill_group, _grapher_proc[0])
+                    _grapher_proc[0] = None
+                    _grapher_lbl.set_text('stopped')
+                    _grapher_lbl.style('color:#57606a')
                 ui.button('Start ros2grapher', on_click=_start_grapher).props(
                     'outline no-caps').classes('px-4')
+                ui.button('Stop', on_click=_stop_grapher).props(
+                    'outline no-caps').classes('px-4')
                 ui.html(
-                    '<a href="http://localhost:8888/" target="_blank" '
+                    f'<a href="http://{_host}:8888/" target="_blank" '
                     'style="font-size:13px;color:var(--blue);text-decoration:none;'
                     'padding:6px 12px;border:1px solid var(--blue);border-radius:4px;'
                     'font-family:\'Courier New\',monospace;">'
@@ -2967,12 +3093,13 @@ class NiceGuiNode(Node):
                 ui.separator().classes('w-full my-1')
 
                 # ── RViz ─────────────────────────────────────────────────
-                _rviz_proc: list = [None]
-                _rviz_daemons: list = []  # Xvfb, x11vnc, websockify - tracked for clean shutdown
+                _rviz_proc: list = _shared('rviz', lambda: [None])
+                _rviz_daemons: list = _shared('rviz_daemons', list)
                 _rviz_lbl = ui.label('').classes('text-xs font-mono').style('color:#57606a')
+                _restore_label(_rviz_lbl, _rviz_proc[0])
 
-                def _start_rviz():
-                    if _rviz_proc[0] is not None and _rviz_proc[0].poll() is None:
+                async def _start_rviz():
+                    if _alive(_rviz_proc[0]):
                         _rviz_lbl.set_text('already running')
                         return
                     try:
@@ -2986,56 +3113,25 @@ class NiceGuiNode(Node):
                             )
                         except PackageNotFoundError:
                             rviz_cfg = None
-
-                        # We don't use `with` for these because we save the process arguments and
-                        # manage them manually.
-                        # Spawn Xvfb only if :98 isn't already taken (re-launch safe).
-                        if not os.path.exists('/tmp/.X98-lock'):
-                            _rviz_daemons.append(subprocess.Popen(
-                                ['Xvfb', ':98', '-screen', '0', '1920x1080x24',
-                                 '-nolisten', 'tcp'],
-                                stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
-                            ))
-                            time.sleep(0.5)
-
-                        _rviz_daemons.append(subprocess.Popen(
-                            ['x11vnc', '-display', ':98', '-nopw', '-forever', '-shared',
-                             '-quiet', '-rfbport', '5901'],
-                            stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
-                        ))
-                        _rviz_daemons.append(subprocess.Popen(
-                            ['websockify', '--web', '/usr/share/novnc', '6081',
-                             'localhost:5901'],
-                            stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
-                        ))
-                        time.sleep(0.5)
-
+                        await ng_run.io_bound(_start_vnc_stack, ':98', 5901, 6081, _rviz_daemons)
                         rviz_args = ['ros2', 'run', 'rviz2', 'rviz2']
                         if rviz_cfg is not None:
                             rviz_args += ['-d', rviz_cfg]
-
-                        _rviz_proc[0] = subprocess.Popen(
-                            rviz_args,
-                            stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
-                            env={**os.environ, 'DISPLAY': ':98'},
-                        )
+                        _rviz_proc[0] = _spawn_logged(
+                            rviz_args, '/tmp/rviz.log', env={**os.environ, 'DISPLAY': ':98'})
                         suffix = '' if rviz_cfg else ' (no topo config found)'
-                        _rviz_lbl.set_text(f'started (pid {_rviz_proc[0].pid}){suffix}')
+                        _rviz_lbl.set_text(
+                            f'started (pid {_rviz_proc[0].pid}){suffix} - log: /tmp/rviz.log')
                         _rviz_lbl.style('color:#1a7f37')
+                        _report_if_exited(_rviz_proc[0], _rviz_lbl, '/tmp/rviz.log')
                     except Exception as exc:
                         _rviz_lbl.set_text(f'ERROR: {exc}')
                         _rviz_lbl.style('color:#cf222e')
 
-                def _stop_rviz():
-                    if _rviz_proc[0] is not None:
-                        _rviz_proc[0].terminate()
-                        _rviz_proc[0] = None
-                    for p in _rviz_daemons:
-                        try:
-                            p.terminate()
-                        except Exception:
-                            pass
-                    _rviz_daemons.clear()
+                async def _stop_rviz():
+                    await ng_run.io_bound(_kill_group, _rviz_proc[0])
+                    _rviz_proc[0] = None
+                    await ng_run.io_bound(_stop_all, _rviz_daemons)
                     _rviz_lbl.set_text('stopped')
                     _rviz_lbl.style('color:#57606a')
 
@@ -3044,7 +3140,7 @@ class NiceGuiNode(Node):
                 ui.button('Stop RViz', on_click=_stop_rviz).props(
                     'outline no-caps').classes('px-4')
                 ui.html(
-                    '<a href="http://localhost:6081/vnc.html" target="_blank" '
+                    f'<a href="http://{_host}:6081/vnc.html" target="_blank" '
                     'style="font-size:13px;color:var(--blue);text-decoration:none;'
                     'padding:6px 12px;border:1px solid var(--blue);border-radius:4px;'
                     'font-family:\'Courier New\',monospace;">'
@@ -3113,7 +3209,7 @@ class NiceGuiNode(Node):
                     'outline no-caps').classes('px-4')
                 ui.button('Stop Medkit Gateway', on_click=_stop_medkit).props(
                     'outline no-caps').classes('px-4')
-                _medkit_host = ui.context.client.request.url.hostname
+                _medkit_host = ui.context.client.request.url.hostname or 'localhost'
                 if ':' in _medkit_host:
                     _medkit_host = f'[{_medkit_host}]'
                 _medkit_host = escape(_medkit_host, quote=True)
@@ -3140,10 +3236,11 @@ class NiceGuiNode(Node):
                 ui.separator().classes('w-full my-1')
 
                 # ── Gazebo Sim ───────────────────────────────────────────
-                _gazebo_proc: list = [None]
-                _spawn_proc: list = [None]
-                _gazebo_daemons: list = []   # Xvfb, x11vnc, websockify for browser mode
+                _gazebo_proc: list = _shared('gazebo', lambda: [None])
+                _spawn_proc: list = _shared('gazebo_spawn', lambda: [None])
+                _gazebo_daemons: list = _shared('gazebo_daemons', list)  # Xvfb, x11vnc, websockify
                 _gazebo_lbl = ui.label('').classes('text-xs font-mono').style('color:#57606a')
+                _restore_label(_gazebo_lbl, _gazebo_proc[0])
 
                 # Robot model selector — controls which xacro is spawned and
                 # which urdf arg is passed to sowbot_sim.launch.py.
@@ -3190,7 +3287,7 @@ class NiceGuiNode(Node):
                         f'headless:={"true" if headless else "false"}',
                     ]
 
-                def _start_gazebo_browser():
+                async def _start_gazebo_browser():
                     if _gazebo_proc[0] is not None and _gazebo_proc[0].poll() is None:
                         _gazebo_lbl.set_text('already running')
                         return
@@ -3198,25 +3295,7 @@ class NiceGuiNode(Node):
                         # We don't use `with` for these because we save the process arguments and
                         # manage them manually.
                         # Spawn Xvfb on :99 only if not already taken
-                        if not os.path.exists('/tmp/.X99-lock'):
-                            p = subprocess.Popen(
-                                ['Xvfb', ':99', '-screen', '0', '1920x1080x24',
-                                 '-nolisten', 'tcp'],
-                                stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
-                            )
-                            _gazebo_daemons.append(p)
-                            time.sleep(0.5)
-                        _gazebo_daemons.append(subprocess.Popen(
-                            ['x11vnc', '-display', ':99', '-nopw', '-forever',
-                             '-shared', '-quiet', '-rfbport', '5900'],
-                            stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
-                        ))
-                        _gazebo_daemons.append(subprocess.Popen(
-                            ['websockify', '--web', '/usr/share/novnc',
-                             '6080', 'localhost:5900'],
-                            stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
-                        ))
-                        time.sleep(0.5)
+                        await ng_run.io_bound(_start_vnc_stack, ':99', 5900, 6080, _gazebo_daemons)
                         # Xvfb has no DRI/GLX driver, so it can't honour
                         # whatever hardware-render env manage.py set for the
                         # container (nvidia __GLX_VENDOR_LIBRARY_NAME, or
@@ -3256,15 +3335,9 @@ class NiceGuiNode(Node):
                             f'mount -t tmpfs tmpfs /dev/dri 2>/dev/null; '
                             f'exec {_quoted_cmd}',
                         ]
-                        # Log to a file (not DEVNULL) so a crashed launch is
-                        # diagnosable — tail /tmp/gazebo_sim.log.
-                        _gz_log = open('/tmp/gazebo_sim.log', 'w',encoding='utf-8')
-                        _gazebo_proc[0] = subprocess.Popen(
-                            wrapped_cmd,
-                            stdout=_gz_log, stderr=subprocess.STDOUT,
-                            env=env,
-                            start_new_session=True,
-                        )
+                        # Log to a file so a crashed launch is diagnosable:
+                        # tail /tmp/gazebo_sim.log.
+                        _gazebo_proc[0] = _spawn_logged(wrapped_cmd, '/tmp/gazebo_sim.log', env=env)
                         _gazebo_lbl.set_text(
                             f'browser mode — {_robot_model["xacro"]} — pid {_gazebo_proc[0].pid}')
                         _gazebo_lbl.style('color:#1a7f37')
@@ -3272,26 +3345,11 @@ class NiceGuiNode(Node):
                         _gazebo_lbl.set_text(f'ERROR: {exc}')
                         _gazebo_lbl.style('color:#cf222e')
 
-                def _stop_gazebo():
+                async def _stop_gazebo():
                     for proc_var in (_gazebo_proc, _spawn_proc):
-                        if proc_var[0] is not None:
-                            try:
-                                pgid = os.getpgid(proc_var[0].pid)
-                                os.killpg(pgid, signal.SIGTERM)
-                                proc_var[0].wait(timeout=5)
-                            except subprocess.TimeoutExpired:
-                                os.killpg(pgid, signal.SIGKILL)
-                                proc_var[0].wait(timeout=2)
-                            except Exception:
-                                pass
-                            proc_var[0] = None
-                    for p in _gazebo_daemons:
-                        try:
-                            p.terminate()
-                            p.wait(timeout=3)
-                        except Exception:
-                            pass
-                    _gazebo_daemons.clear()
+                        await ng_run.io_bound(_kill_group, proc_var[0])
+                        proc_var[0] = None
+                    await ng_run.io_bound(_stop_all, _gazebo_daemons)
                     _gazebo_lbl.set_text('stopped')
                     _gazebo_lbl.style('color:#57606a')
 
@@ -3393,13 +3451,8 @@ class NiceGuiNode(Node):
                         _gazebo_lbl.set_text('already running')
                         return
                     try:
-                        _gazebo_proc[0] = subprocess.Popen(
-                            _sim_cmd(headless),
-                            stdout=open('/tmp/gazebo_sim.log', 'w', encoding='utf-8'),
-                            stderr=subprocess.STDOUT,
-                            env=_SIM_ENV,
-                            start_new_session=True,
-                        )
+                        _gazebo_proc[0] = _spawn_logged(
+                            _sim_cmd(headless), '/tmp/gazebo_sim.log', env=_SIM_ENV)
                         _gazebo_lbl.set_text(
                             f'sim launching{" (headless)" if headless else ""} — '
                             f'{_robot_model["xacro"]} — pid {_gazebo_proc[0].pid}')
@@ -3683,7 +3736,7 @@ class NiceGuiNode(Node):
                     ui.button('Stop Sim', on_click=_stop_gazebo).props(
                         'outline no-caps').classes('px-4')
                     ui.html(
-                        '<a href="http://localhost:6080/vnc.html" target="_blank" '
+                        f'<a href="http://{_host}:6080/vnc.html" target="_blank" '
                         'style="font-size:13px;color:var(--blue);text-decoration:none;'
                         'padding:6px 12px;border:1px solid var(--blue);border-radius:4px;'
                         'font-family:\'Courier New\',monospace;">'
@@ -3699,45 +3752,34 @@ class NiceGuiNode(Node):
                 # (started by sim_nav.launch.py) calls /row_follow/enable
                 # on this process when topo nav reaches an _IN node.
                 ui.separator().classes('w-full my-1')
-                _neo_proc: list = [None]
+                _neo_proc: list = _shared('neo', lambda: [None])
                 _neo_lbl = ui.label('').classes('text-xs font-mono').style('color:#57606a')
+                _restore_label(_neo_lbl, _neo_proc[0])
 
                 def _start_neo():
                     if _neo_proc[0] is not None and _neo_proc[0].poll() is None:
                         _neo_lbl.set_text('already running')
                         return
                     try:
-                        _neo_proc[0] = subprocess.Popen(
+                        _neo_proc[0] = _spawn_logged(
                             [
                                 'ros2', 'launch', 'devkit_bringup', 'neo.launch.py',
                                 'use_camera:=false',
                                 'detector:=tsm',
                                 'image_topic:=/camera/image_raw',
                             ],
-                            stdout=open('/tmp/neo_sim.log', 'w', encoding='utf-8'),
-                            stderr=subprocess.STDOUT,
-                            env=os.environ.copy(),
-                            start_new_session=True,
-                        )
+                            '/tmp/neo_sim.log', env=os.environ.copy())
                         _neo_lbl.set_text(f'running — pid {_neo_proc[0].pid} · log: /tmp/neo_sim.log')
                         _neo_lbl.style('color:#1a7f37')
                     except Exception as exc:
                         _neo_lbl.set_text(f'ERROR: {exc}')
                         _neo_lbl.style('color:#cf222e')
 
-                def _stop_neo():
+                async def _stop_neo():
                     if _neo_proc[0] is None:
                         _neo_lbl.set_text('not running')
                         return
-                    try:
-                        pgid = os.getpgid(_neo_proc[0].pid)
-                        os.killpg(pgid, signal.SIGTERM)
-                        _neo_proc[0].wait(timeout=5)
-                    except subprocess.TimeoutExpired:
-                        os.killpg(pgid, signal.SIGKILL)
-                        _neo_proc[0].wait(timeout=2)
-                    except Exception:
-                        pass
+                    await ng_run.io_bound(_kill_group, _neo_proc[0])
                     _neo_proc[0] = None
                     _neo_lbl.set_text('stopped')
                     _neo_lbl.style('color:#57606a')
