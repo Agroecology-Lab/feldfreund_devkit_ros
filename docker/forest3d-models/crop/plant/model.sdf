@@ -3,16 +3,7 @@
     <model name="plant">
         <static>true</static>
         <link name="link">
-                 <!-- TO DO Out for testing but should be put back at some point       
-            <collision name="collision">
-                <geometry>
-                    <cylinder>
-                        <radius>0.02</radius>
-                        <length>0.6</length>
-                    </cylinder>
-                </geometry>
-            </collision>
-                        -->
+                 
             <visual name="visual">
                 <geometry>
                     <mesh><uri>mesh/plant.glb</uri><scale>0.700000 0.700000 0.700000</scale></mesh>

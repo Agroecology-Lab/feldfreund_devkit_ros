@@ -1495,7 +1495,7 @@ class NiceGuiNode(Node):
         for rid_a, rid_b in pairwise(added):
             # Imported plans mark fragments of one obstacle-split row: no
             # headland edge between them, it would cross the obstacle.
-            if (rid_a - row_id_start) in self._f2c_break_after:
+            if rid_a - row_id_start in self._f2c_break_after:
                 continue
             _, out_a = row_names[rid_a]
             in_b, _  = row_names[rid_b]
