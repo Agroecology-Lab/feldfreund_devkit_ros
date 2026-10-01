@@ -7,7 +7,7 @@
 <style>
 html,body{height:100%;margin:0;font:14px system-ui,sans-serif}
 #app{display:flex;height:100%}#side{width:250px;padding:12px;box-sizing:border-box;overflow:auto}
-#map{flex:1}label{display:block;margin:8px 0 2px}input[type=number]{width:100%;box-sizing:border-box}
+#map{flex:1}label{display:block;margin:8px 0 2px}input[type=number],input[type=file],input[type=range]{width:100%;box-sizing:border-box}
 button{margin:8px 4px 0 0;padding:6px 10px}#msg{margin-top:10px;white-space:pre-wrap;color:#444}
 @media(max-width:640px){#app{flex-direction:column-reverse}#side{width:auto;max-height:45%}}
 </style></head><body><div id="app">
@@ -17,56 +17,186 @@ button{margin:8px 4px 0 0;padding:6px 10px}#msg{margin-top:10px;white-space:pre-
 <label>Angle (deg)<input id="a" type="number" value="0" step="5"></label>
 <label>Headland (m)<input id="h" type="number" value="0" min="0" step="1"></label>
 <label>Obstacle padding (m)<input id="p" type="number" value="0" min="0" step="0.5"></label>
-<label><input id="s" type="checkbox" checked> Snake order</label>
+<label><input id="s" type="checkbox" checked> Snake order (connected path)</label>
+<label>Survey (recon.csv from the robot)<input id="rc" type="file" accept=".csv"></label>
+<label><input id="ct" type="checkbox"> Contour rows (needs survey; angle ignored)</label>
+<label>Survey grid resolution (m)<input id="dr" type="number" value="1" min="0.25" step="0.25"></label>
+<label>DEM (GeoTIFF, read locally)<input id="dem" type="file" accept=".tif,.tiff"></label>
+<label>DEM opacity<input id="do" type="range" min="0" max="1" step="0.05" value="0.6"></label>
 <button id="go" disabled>Plan</button><button id="dl" disabled>GeoJSON</button><button id="rs">Reset</button>
 <div id="msg">Loading Python…</div></div><div id="map"></div></div>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/leaflet.js"></script>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/leaflet.draw/1.0.4/leaflet.draw.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/proj4js/2.9.0/proj4.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/geotiff@2.1.3/dist-browser/geotiff.js"></script>
 <script src="https://cdn.jsdelivr.net/pyodide/v0.26.4/full/pyodide.js"></script>
 <script>
 const $=id=>document.getElementById(id), msg=t=>$('msg').textContent=t;
 const map=L.map('map').setView([51.45,-2.6],15);
+map.createPane('dem').style.zIndex=250;
 L.tileLayer('https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}',{maxZoom:19,attribution:'Esri'}).addTo(map);
 const drawn=new L.FeatureGroup().addTo(map), out=new L.FeatureGroup().addTo(map);
 map.addControl(new L.Control.Draw({edit:{featureGroup:drawn},draw:{polygon:{allowIntersection:false},polyline:false,rectangle:true,circle:false,marker:false,circlemarker:false}}));
 map.on(L.Draw.Event.CREATED,e=>{const hasField=drawn.getLayers().length>0;e.layer.setStyle({color:hasField?'#d33':'#fc0'});drawn.addLayer(e.layer);});
-let py,geo=null;
+
+// Joins rows into one boustrophedon path. Greedy: from the current end, go to the nearest unvisited
+// row end whose connector stays inside field minus (padded) obstacles; otherwise start a new pass.
+const SNAKE=`
+import math
+from shapely.geometry import LineString, Polygon
+from shapely.ops import unary_union
+def connect(rows, field, obs, pad):
+    la0, lo0 = field[0]; R = 6378137.0; c = math.cos(math.radians(la0))
+    fw = lambda q: (math.radians(q[1]-lo0)*R*c, math.radians(q[0]-la0)*R)
+    inv = lambda q: [la0+math.degrees(q[1]/R), lo0+math.degrees(q[0]/(R*c))]
+    segs = [[fw(q) for q in r] for r in rows if len(r) > 1]
+    if not segs: return []
+    free = Polygon([fw(q) for q in field])
+    if obs: free = free.difference(unary_union([Polygon([fw(q) for q in o]).buffer(pad) for o in obs]))
+    free = free.buffer(0.2)
+    paths = []; path = list(segs.pop(0))
+    while segs:
+        end = path[-1]
+        cand = sorted((math.dist(end, s[-1 if rev else 0]), i, rev) for i, s in enumerate(segs) for rev in (0, 1))
+        pick = next(((i, rev) for d, i, rev in cand if free.covers(LineString([end, segs[i][-1 if rev else 0]]))), None)
+        if pick is None:
+            paths.append(path); i, rev = cand[0][1], cand[0][2]; path = []
+        else: i, rev = pick
+        s = segs.pop(i)
+        path += s[::-1] if rev else s
+    paths.append(path)
+    return [[inv(q) for q in p] for p in paths]
+`;
+
+let py,geo=null,dem=null,demLayer=null,recon=null,contourReady=false;
+const survey=new L.FeatureGroup().addTo(map);
 (async()=>{try{
- py=await loadPyodide();
- await py.loadPackage(['numpy','shapely'],{
-   messageCallback:m=>msg(m),
-   errorCallback:e=>{console.error(e);msg('Package error: '+e)}});
- py.runPython('import shapely');   // throws here if the load failed, instead of "Ready"
- py.FS.mkdirTree('/lib/devkit_f2c_planner');
- py.FS.writeFile('/lib/devkit_f2c_planner/__init__.py','');
- py.FS.writeFile('/lib/devkit_f2c_planner/f2c_planner.py',await (await fetch('f2c_planner.py')).text());
- py.runPython("import sys;sys.path.insert(0,'/lib')");
- $('go').disabled=false;msg('Ready. Draw a field polygon.');
+py=await loadPyodide();
+await py.loadPackage(['numpy','shapely'],{
+messageCallback:m=>msg(m),
+errorCallback:e=>{console.error(e);msg('Package error: '+e)}});
+py.runPython('import shapely'); // throws here if the load failed, instead of "Ready"
+py.FS.mkdirTree('/lib/devkit_f2c_planner');
+py.FS.writeFile('/lib/devkit_f2c_planner/__init__.py','');
+py.FS.writeFile('/lib/devkit_f2c_planner/f2c_planner.py',await (await fetch('f2c_planner.py')).text());
+py.runPython("import sys;sys.path.insert(0,'/lib')");
+py.runPython(SNAKE);
+$('go').disabled=false;msg('Ready. Draw a field polygon.');
 }catch(e){msg('Failed to load: '+e);console.error(e)}})();
+
+// ---- DEM ----
+const EPSG={27700:'+proj=tmerc +lat_0=49 +lon_0=-2 +k=0.9996012717 +x_0=400000 +y_0=-100000 +ellps=airy +towgs84=446.448,-125.157,542.06,0.15,0.247,0.842,-20.489 +units=m +no_defs'};
+const crsDef=c=>c==4326||c==4258?'EPSG:4326':c==3857?'EPSG:3857':EPSG[c]||
+(c>=32601&&c<=32660?`+proj=utm +zone=${c-32600} +datum=WGS84`:c>=32701&&c<=32760?`+proj=utm +zone=${c-32700} +south +datum=WGS84`:
+c>=25828&&c<=25838?`+proj=utm +zone=${c-25800} +ellps=GRS80 +units=m`:null);
+const ym=la=>Math.log(Math.tan(Math.PI/4+la*Math.PI/360)), yl=y=>(2*Math.atan(Math.exp(y))-Math.PI/2)*180/Math.PI;
+const ramp=[[40,100,60],[200,190,110],[150,110,90],[255,255,255]];
+const colour=t=>{t=Math.min(.9999,Math.max(0,t))*3;const i=Math.floor(t),f=t-i;return ramp[i].map((v,k)=>v+(ramp[i+1][k]-v)*f)};
+
+$('dem').onchange=async ev=>{const f=ev.target.files[0];if(!f)return;
+try{msg('Reading DEM…');
+const im=await (await GeoTIFF.fromArrayBuffer(await f.arrayBuffer())).getImage(),k=im.getGeoKeys();
+const code=k.ProjectedCSTypeGeoKey||k.GeographicTypeGeoKey,def=crsDef(code);
+if(!def)throw Error('unsupported CRS (EPSG:'+code+'). Reproject first: gdalwarp -t_srs EPSG:4326 in.tif out.tif');
+const [x0,y0,x1,y1]=im.getBoundingBox(),sc=Math.min(1,1200/Math.max(im.getWidth(),im.getHeight())),
+W=Math.round(im.getWidth()*sc),H=Math.round(im.getHeight()*sc),nd=im.getGDALNoData();
+const raw=(await im.readRasters({width:W,height:H,resampleMethod:'bilinear'}))[0];
+const Z=Float32Array.from(raw,v=>v===nd||!(v>-1e4)?NaN:v);
+const fwd=proj4(def,'EPSG:4326'),inv=proj4('EPSG:4326',def);
+const at=(la,lo)=>{const [x,y]=inv.forward([lo,la]),u=(x-x0)/(x1-x0)*W-.5,v=(y1-y)/(y1-y0)*H-.5,i=Math.floor(u),j=Math.floor(v);
+if(!(i>=0&&j>=0&&i+1<W&&j+1<H))return NaN;const fu=u-i,fv=v-j,g=(a,b)=>Z[(j+b)*W+i+a];
+return (g(0,0)*(1-fu)+g(1,0)*fu)*(1-fv)+(g(0,1)*(1-fu)+g(1,1)*fu)*fv};
+const cs=[[x0,y0],[x1,y0],[x1,y1],[x0,y1]].map(c=>fwd.forward(c)),lo=cs.map(c=>c[0]),la=cs.map(c=>c[1]);
+const lon0=Math.min(...lo),lon1=Math.max(...lo),lat0=Math.min(...la),lat1=Math.max(...la);
+const mx=(lon1-lon0)*111320*Math.cos((lat0+lat1)*Math.PI/360),my=(lat1-lat0)*110574;
+const Wo=mx>=my?1024:Math.max(2,Math.round(1024*mx/my)),Ho=mx>=my?Math.max(2,Math.round(1024*my/mx)):1024,
+csx=mx/Wo,csy=my/Ho,E=new Float32Array(Wo*Ho),a0=ym(lat1),a1=ym(lat0);
+let mn=Infinity,mxz=-Infinity;
+for(let j=0;j<Ho;j++){const lat=yl(a0+(a1-a0)*(j+.5)/Ho);
+for(let i=0;i<Wo;i++){const e=at(lat,lon0+(lon1-lon0)*(i+.5)/Wo);E[j*Wo+i]=e;if(e<mn)mn=e;if(e>mxz)mxz=e}}
+if(!isFinite(mn))throw Error('DEM does not return any valid elevations (check CRS/nodata)');
+const cv=document.createElement('canvas');cv.width=Wo;cv.height=Ho;const cx=cv.getContext('2d'),img=cx.createImageData(Wo,Ho);
+for(let j=0;j<Ho;j++)for(let i=0;i<Wo;i++){const n=j*Wo+i,e=E[n];if(isNaN(e))continue;
+const g=(ii,jj)=>{const v=E[Math.min(Ho-1,Math.max(0,jj))*Wo+Math.min(Wo-1,Math.max(0,ii))];return isNaN(v)?e:v};
+const dx=(g(i+1,j)-g(i-1,j))/(2*csx),dy=(g(i,j-1)-g(i,j+1))/(2*csy),
+sh=Math.min(1,Math.max(0,(.5*dx-.5*dy+.707)/Math.sqrt(1+dx*dx+dy*dy))),c=colour((e-mn)/((mxz-mn)||1));
+img.data.set([c[0]*(.35+.65*sh),c[1]*(.35+.65*sh),c[2]*(.35+.65*sh),255],n*4)}
+cx.putImageData(img,0,0);
+if(demLayer)map.removeLayer(demLayer);
+const b=[[lat0,lon0],[lat1,lon1]];
+demLayer=L.imageOverlay(cv.toDataURL(),b,{pane:'dem',opacity:+$('do').value}).addTo(map);map.fitBounds(b);
+dem={at};msg(`DEM loaded: ${mn.toFixed(0)} to ${mxz.toFixed(0)} m. Draw a field inside it.`);
+}catch(e){dem=null;msg('DEM error: '+e.message);console.error(e)}};
+$('rc').onchange=async ev=>{const f=ev.target.files[0];if(!f)return;
+try{const t=await f.text(),r=t.trim().split(/\r?\n/),h=r[0].split(',').map(x=>x.trim()),i=['lat','lon','alt'].map(c=>h.indexOf(c));
+if(i.includes(-1))throw Error('expected columns stamp,lat,lon,alt,x,y');
+const pts=r.slice(1).map(l=>l.split(',')).map(c=>[+c[i[0]],+c[i[1]],+c[i[2]]]).filter(p=>p.every(isFinite));
+if(pts.length<3)throw Error('need at least 3 valid points');
+recon=t;survey.clearLayers();const st=Math.ceil(pts.length/1500);
+pts.filter((_,k)=>k%st==0).forEach(p=>L.circleMarker([p[0],p[1]],{radius:2,color:'#0f0',weight:1,fillOpacity:.8}).addTo(survey));
+map.fitBounds(L.latLngBounds(pts.map(p=>[p[0],p[1]])));
+const z=pts.map(p=>p[2]);msg(`Survey: ${pts.length} points, ${Math.min(...z).toFixed(1)} to ${Math.max(...z).toFixed(1)} m. Draw the field inside it, tick Contour rows, then Plan.`);
+}catch(e){recon=null;msg('Survey error: '+e.message)}};
+$('do').oninput=()=>demLayer&&demLayer.setOpacity(+$('do').value);
+
+const dist=(p,q)=>map.distance(p,q);
+const len=l=>l.slice(1).reduce((s,q,i)=>s+dist(l[i],q),0);
+// elevation gain and steepest ~5 m step along lines
+const prof=lines=>{let up=0,mxs=0,n=0;
+for(const l of lines){let pz=NaN;for(let i=1;i<l.length;i++){const d=dist(l[i-1],l[i]),m=Math.max(1,Math.ceil(d/5));
+for(let t=(i==1?0:1);t<=m;t++){const la=l[i-1][0]+(l[i][0]-l[i-1][0])*t/m,lo=l[i-1][1]+(l[i][1]-l[i-1][1])*t/m,z=dem.at(la,lo);
+if(!isNaN(z)&&!isNaN(pz)){const s=Math.atan(Math.abs(z-pz)/(d/m));if(s>mxs)mxs=s;if(z>pz)up+=z-pz;n++}pz=z}}}
+return n?`\nElevation: ${up.toFixed(0)} m total climb, steepest step ${(mxs*180/Math.PI).toFixed(1)}°`:'\nPath is outside the DEM.'};
+
 const ring=l=>(l.getLatLngs()[0]).map(p=>[p.lat,p.lng]);
-$('go').onclick=()=>{
- const ls=drawn.getLayers();if(!ls.length)return msg('Draw a field first.');
- out.clearLayers();
- const req={field:ring(ls[0]),obs:ls.slice(1).map(ring),w:+$('w').value,a:+$('a').value,h:+$('h').value,p:+$('p').value,s:$('s').checked};
- try{
-  py.globals.set('req_json',JSON.stringify(req));
-  const res=JSON.parse(py.runPython(`
+$('go').onclick=async()=>{
+const ls=drawn.getLayers();if(!ls.length)return msg('Draw a field first.');
+out.clearLayers();
+const req={field:ring(ls[0]),obs:ls.slice(1).map(ring),w:+$('w').value,a:+$('a').value,h:+$('h').value,p:+$('p').value,s:$('s').checked,c:$('ct').checked&&!!recon,dr:+$('dr').value};
+if($('ct').checked&&!recon)return msg('Contour rows need a survey file first.');
+try{
+if(req.c&&!contourReady){$('go').disabled=true;msg('Loading scipy and scikit-image (first contour run only, large download)…');
+await py.loadPackage(['scipy','scikit-image']);
+py.FS.mkdirTree('/lib/devkit_ui');
+for(const [src,dst] of [['devkit_ui/__init__.py','devkit_ui/__init__.py'],['devkit_ui/dem.py','devkit_ui/dem.py'],['devkit_ui/terrain_mask.py','devkit_ui/terrain_mask.py'],['contour_web.py','contour_web.py']])
+py.FS.writeFile('/lib/'+dst,await (await fetch(src)).text());
+contourReady=true;$('go').disabled=false}
+if(req.c){msg('Fitting survey surface and planning contour rows… this can take a minute.');await new Promise(r=>setTimeout(r,30))}
+py.globals.set('recon_csv',recon||'');
+py.globals.set('req_json',JSON.stringify(req));
+const res=JSON.parse(py.runPython(`
 import json,io,contextlib
 from devkit_f2c_planner import f2c_planner as P
 r=json.loads(req_json)
 with contextlib.redirect_stderr(io.StringIO()):
-    rows=P._run_f2c(r['field'],r['obs'],r['w'],r['a'],r['p'],r['h'],r['s'],backend='shapely')
-json.dumps({'rows':rows,'tags':P.tag_rows(rows,r['field'],r['a'])})`));
-  const rows=res.rows,tags=res.tags,ll=pts=>pts.map(([la,lo])=>[lo,la]);
-  const poly=(role,rg)=>({type:'Feature',properties:{role},geometry:{type:'Polygon',coordinates:[ll([...rg,rg[0]])]}});
-  geo={type:'FeatureCollection',
-   properties:{version:1,generator:'feldfreund-web-planner',origin:req.field[0],tool_width:req.w,angle:req.a,headland:req.h,snake:req.s},
-   features:[poly('field',req.field),...req.obs.map(o=>poly('obstacle',o)),
-    ...rows.map((r,i)=>({type:'Feature',properties:{role:'row',row:tags[i][0],frag:tags[i][1]},geometry:{type:'LineString',coordinates:ll(r)}}))]};
-  rows.forEach(r=>L.polyline(r,{color:'#0af',weight:2}).addTo(out));
-  const len=rows.reduce((t,r)=>t+r.slice(1).reduce((s,q,i)=>s+map.distance(r[i],q),0),0);
-  msg(`${rows.length} rows, ${(len/1000).toFixed(2)} km of swath`);$('dl').disabled=!rows.length;
- }catch(e){msg('Planner error: '+e)}};
+    rows=None
+    if r['c']:
+        import contour_web
+        rows=contour_web.plan_contour(r['field'],r['obs'],recon_csv,r['w'],r['p'],r['h'],r['s'],r['dr'])
+    used=rows is not None
+    if rows is None:
+        rows=P._run_f2c(r['field'],r['obs'],r['w'],r['a'],r['p'],r['h'],r['s'],backend='shapely')
+rows=[[list(q) for q in row] for row in rows]
+tags=[[i,0] for i in range(len(rows))] if used else P.tag_rows(rows,r['field'],r['a'])
+o={'rows':rows,'tags':tags,'contour':used,'asked':r['c']}
+if r['s']: o['path']=connect(rows,r['field'],r['obs'],r['p'])
+json.dumps(o)`));
+const rows=res.rows,tags=res.tags,path=res.path||[];
+const ll=pts=>pts.map(([la,lo])=>{const z=dem?dem.at(la,lo):NaN;return isNaN(z)?[lo,la]:[lo,la,+z.toFixed(2)]});
+const poly=(role,rg)=>({type:'Feature',properties:{role},geometry:{type:'Polygon',coordinates:[ll([...rg,rg[0]])]}});
+geo={type:'FeatureCollection',
+properties:{version:1,generator:'feldfreund-web-planner',origin:req.field[0],tool_width:req.w,angle:req.a,headland:req.h,snake:req.s,contour:!!res.contour},
+features:[poly('field',req.field),...req.obs.map(o=>poly('obstacle',o)),
+...rows.map((r,i)=>({type:'Feature',properties:{role:'row',row:tags[i][0],frag:tags[i][1]},geometry:{type:'LineString',coordinates:ll(r)}})),
+...path.map((p,i)=>({type:'Feature',properties:{role:'path',pass:i},geometry:{type:'LineString',coordinates:ll(p)}}))]};
+rows.forEach(r=>L.polyline(r,{color:'#0af',weight:path.length?1:2,opacity:path.length?.5:1}).addTo(out));
+path.forEach(p=>L.polyline(p,{color:'#f80',weight:2}).addTo(out));
+const swath=rows.reduce((t,r)=>t+len(r),0);
+let m=(res.asked&&!res.contour?'No usable contour (field too flat, or outside the survey): used straight rows.\n':'')+(res.contour?'Contour rows. ':'')+`${rows.length} rows, ${(swath/1000).toFixed(2)} km of swath`;
+if(path.length)m+=`\nSnake path ${(path.reduce((t,p)=>t+len(p),0)/1000).toFixed(2)} km`+(path.length>1?`, ${path.length} separate passes (a connector would cross an obstacle or leave the field)`:', 1 pass');
+if(dem)m+=prof(path.length?path:rows);
+msg(m);$('dl').disabled=!rows.length;
+}catch(e){$('go').disabled=false;msg('Planner error: '+e)}};
 $('dl').onclick=()=>{const a=document.createElement('a');a.href=URL.createObjectURL(new Blob([JSON.stringify(geo)],{type:'application/geo+json'}));a.download='swaths.geojson';a.click()};
 $('rs').onclick=()=>{drawn.clearLayers();out.clearLayers();$('dl').disabled=true;msg('Ready.')};
 </script></body></html>
