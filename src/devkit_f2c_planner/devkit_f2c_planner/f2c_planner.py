@@ -225,9 +225,11 @@ def _swaths_shapely(poly: Polygon, tool_width: float, angle_rad: float) -> list:
     cb, sb = math.cos(angle_rad), math.sin(angle_rad)
 
     def rot(x, y):
+        """Rotate local coordinates into the frame where swaths run along the x axis."""
         return x * c - y * s, x * s + y * c
 
     def unrot(x, y):
+        """Rotate swath coordinates back into the original local frame."""
         return x * cb - y * sb, x * sb + y * cb
 
     polys = list(poly.geoms) if poly.geom_type == 'MultiPolygon' else [poly]

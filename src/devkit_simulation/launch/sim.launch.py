@@ -18,6 +18,7 @@ GZ_BIN = "/opt/ros/jazzy/opt/gz_tools_vendor/bin/gz"
 
 
 def generate_launch_description():
+    """Build the Gazebo launch with robot spawning and ROS bridges, optionally headless."""
     pkg_name  = "devkit_simulation"
     pkg_share = get_package_share_directory(pkg_name)
 

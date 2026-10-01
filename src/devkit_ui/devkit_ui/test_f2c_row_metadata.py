@@ -70,6 +70,7 @@ F2CSaveHarness = load_f2c_save_harness()
 
 
 def make_node(swaths, *, contour_used=False):
+    """Build a simulated F2C save harness with supplied swaths and in-memory persistence."""
     node = F2CSaveHarness()
     node._f2c_swaths = swaths
     node._f2c_contour_used = contour_used

@@ -210,6 +210,7 @@ def _topo_nav_nodes(tmap2_file: str, devkit_launch_pkg: str, use_sim_time: bool 
 # ---------------------------------------------------------------------------
 
 def generate_launch_description():
+    """Build the simulation bringup with world generation, Gazebo, and navigation."""
     pkg_agro          = get_package_share_directory('devkit_simulation')
     devkit_launch_pkg = get_package_share_directory('devkit_bringup')
 

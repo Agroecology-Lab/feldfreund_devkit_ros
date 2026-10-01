@@ -35,12 +35,14 @@ class Plan(NamedTuple):
 
 
 def _num(v, what):
+    """Return a finite numeric value as a float, or raise PlanError labeled with what."""
     if isinstance(v, bool) or not isinstance(v, (int, float)) or not math.isfinite(v):
         raise PlanError(f'{what}: not a finite number')
     return float(v)
 
 
 def _latlon(lat, lon, what):
+    """Return validated latitude/longitude degrees, or raise PlanError for invalid values."""
     lat, lon = _num(lat, what), _num(lon, what)
     if not (-90 <= lat <= 90 and -180 <= lon <= 180):
         raise PlanError(f'{what}: coordinate out of range')
@@ -48,6 +50,7 @@ def _latlon(lat, lon, what):
 
 
 def _dist_m(a, b):
+    """Estimate distance in metres between two (latitude, longitude) pairs in degrees."""
     r = 6_378_137.0
     dx = math.radians(b[1] - a[1]) * r * math.cos(math.radians(a[0]))
     dy = math.radians(b[0] - a[0]) * r

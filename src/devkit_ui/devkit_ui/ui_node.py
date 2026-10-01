@@ -1970,6 +1970,7 @@ class NiceGuiNode(Node):
                     'color=primary no-caps').classes('w-full mt-1')
                 save_btn.set_enabled(False)
                 async def do_import(e):
+                    """Import an uploaded plan and update its status and save button."""
                     data = (await e.file.read()) if hasattr(e, 'file') else e.content.read()
                     msg = self.import_plan_geojson(data.decode('utf-8', errors='replace'))
                     f2c_status.set_text(msg)
@@ -3376,6 +3377,7 @@ class NiceGuiNode(Node):
                 _AGRO_PKG = '/workspace/install/devkit_simulation/share/devkit_simulation'
 
                 def _launch_sim(headless: bool = False):
+                    """Launch the selected simulation, optionally headless, and update its status."""
                     # Single button, runs the exact same thing as the CLI:
                     # `ros2 launch devkit_bringup sowbot_sim.launch.py
                     #   world:=maize.world urdf:=<selected xacro>`
