@@ -1,0 +1,29 @@
+name: Deploy swath planner to Pages
+on:
+  push:
+    branches: [caatinga-dev]
+    paths: ['web/**', 'src/devkit_f2c_planner/**', '.github/workflows/pages.yml']
+  workflow_dispatch:
+permissions: {contents: read, pages: write, id-token: write}
+concurrency: {group: pages, cancel-in-progress: true}
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with: {python-version: '3.12'}
+      - run: pip install shapely pytest
+      - run: cd src/devkit_f2c_planner && python -m pytest -q
+  deploy:
+    needs: test
+    runs-on: ubuntu-latest
+    environment: {name: github-pages, url: '${{ steps.d.outputs.page_url }}'}
+    steps:
+      - uses: actions/checkout@v4
+      - run: cp src/devkit_f2c_planner/devkit_f2c_planner/f2c_planner.py web/
+      - uses: actions/configure-pages@v5
+      - uses: actions/upload-pages-artifact@v3
+        with: {path: web}
+      - id: d
+        uses: actions/deploy-pages@v4
