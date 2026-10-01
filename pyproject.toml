@@ -24,6 +24,7 @@ disable_error_code = [
     "no-redef",
     "var-annotated",
     "func-returns-value",
+    "operator",
 ]
 
 [[tool.mypy.overrides]]
@@ -42,7 +43,6 @@ module = [
     "ublox_ubx_msgs.*",
     "lifecycle_msgs.*",
     "nav2_msgs.*",
-    "std_srvs.*",
     "topological_navigation_msgs.*",
     "topological_nav_simulator.*",
     "devkit_f2c_planner.*",
@@ -52,23 +52,22 @@ ignore_missing_imports = true
 
 [tool.pylint]
 disable = [
-    "C0103", # Invalid name (e.g., variable/function/class naming conventions)
-    "C0111", # Missing docstring (in function/class/method)
-    "C0114", # Missing module docstring
-    "C0115", # Missing class docstring
-    "C0116", # Missing function or method docstring
-    "C0301", # Line too long (exceeds character limit)
-    "R0902", # Too many public methods
-    "R0903", # Too few public methods
-    "R0904", # Too many public methods
-    "R0911", # Too many return statements
-    "R0912", # Too many branches
-    "R0913", # Too many arguments
-    "R0914", # Too many local variables
-    "R0915", # Too many statements
-    "R0917", # Too many positional arguments
-    "W0511", # TODO: comments
-    "W0718", # Catching too general exception
+    "C0103",
+    "C0111",
+    "C0114",
+    "C0115",
+    "C0116",
+    "R0902",
+    "R0903",
+    "R0904",
+    "R0911",
+    "R0912",
+    "R0913",
+    "R0914",
+    "R0915",
+    "R0917",
+    "W0511",
+    "W0718",
 ]
 
 [tool.pylint.'TYPECHECK']
