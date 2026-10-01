@@ -8,6 +8,7 @@ from launch.actions import (
     RegisterEventHandler,
     TimerAction,
 )
+from launch.conditions import IfCondition, UnlessCondition
 from launch.event_handlers import OnProcessExit
 from launch.substitutions import Command, LaunchConfiguration, PathJoinSubstitution
 from launch_ros.actions import Node
@@ -33,6 +34,10 @@ def generate_launch_description():
         "world", default_value="maize.world",
         description="SDF world file name inside devkit_simulation/worlds/",
     )
+    headless_arg = DeclareLaunchArgument(
+        "headless", default_value="false",
+        description="true: run gz sim server-only (no GUI, no X display needed)",
+    )
     urdf_arg = DeclareLaunchArgument(
         "urdf", default_value="sowbot_01.xacro",
         description="URDF/xacro filename inside devkit_simulation/urdf/",
@@ -54,6 +59,16 @@ def generate_launch_description():
         name="gz_sim",
         output="screen",
         additional_env=gz_env,
+        condition=UnlessCondition(LaunchConfiguration("headless")),
+    )
+    # Headless: identical except server-only (-s, no GUI) with EGL headless
+    # rendering so camera/lidar sensors still render without an X display.
+    gz_sim_headless = ExecuteProcess(
+        cmd=[GZ_BIN, "sim", "-r", "-s", "--headless-rendering", world_file],
+        name="gz_sim",
+        output="screen",
+        additional_env=gz_env,
+        condition=IfCondition(LaunchConfiguration("headless")),
     )
 
     # ── 2. robot_state_publisher ──────────────────────────────────────────────
@@ -156,8 +171,9 @@ def generate_launch_description():
 
     return LaunchDescription([
         x_arg, y_arg, z_arg,
-        world_arg, urdf_arg,
+        world_arg, urdf_arg, headless_arg,
         gz_sim,
+        gz_sim_headless,
         robot_state_publisher,
         spawn_entity,
         ros_gz_bridge,

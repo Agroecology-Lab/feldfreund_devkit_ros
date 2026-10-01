@@ -1,0 +1,69 @@
+<!doctype html>
+<html lang="en-GB"><head><meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Feldfreund swath planner</title>
+<link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/leaflet.css">
+<link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/leaflet.draw/1.0.4/leaflet.draw.css">
+<style>
+html,body{height:100%;margin:0;font:14px system-ui,sans-serif}
+#app{display:flex;height:100%}#side{width:250px;padding:12px;box-sizing:border-box;overflow:auto}
+#map{flex:1}label{display:block;margin:8px 0 2px}input[type=number]{width:100%;box-sizing:border-box}
+button{margin:8px 4px 0 0;padding:6px 10px}#msg{margin-top:10px;white-space:pre-wrap;color:#444}
+@media(max-width:640px){#app{flex-direction:column-reverse}#side{width:auto;max-height:45%}}
+</style></head><body><div id="app">
+<div id="side"><b>Swath planner</b>
+<p>Draw the field first, then any obstacles. Planning runs in your browser; nothing is uploaded.</p>
+<label>Tool width (m)<input id="w" type="number" value="5" min="0.5" step="0.5"></label>
+<label>Angle (deg)<input id="a" type="number" value="0" step="5"></label>
+<label>Headland (m)<input id="h" type="number" value="0" min="0" step="1"></label>
+<label>Obstacle padding (m)<input id="p" type="number" value="0" min="0" step="0.5"></label>
+<label><input id="s" type="checkbox" checked> Snake order</label>
+<button id="go" disabled>Plan</button><button id="dl" disabled>GeoJSON</button><button id="rs">Reset</button>
+<div id="msg">Loading Python…</div></div><div id="map"></div></div>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/leaflet.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/leaflet.draw/1.0.4/leaflet.draw.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/pyodide@0.26.4/pyodide.js"></script>
+<script>
+const $=id=>document.getElementById(id), msg=t=>$('msg').textContent=t;
+const map=L.map('map').setView([51.45,-2.6],15);
+L.tileLayer('https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}',{maxZoom:19,attribution:'Esri'}).addTo(map);
+const drawn=new L.FeatureGroup().addTo(map), out=new L.FeatureGroup().addTo(map);
+map.addControl(new L.Control.Draw({edit:{featureGroup:drawn},draw:{polygon:{allowIntersection:false},polyline:false,rectangle:true,circle:false,marker:false,circlemarker:false}}));
+map.on(L.Draw.Event.CREATED,e=>{const hasField=drawn.getLayers().length>0;e.layer.setStyle({color:hasField?'#d33':'#fc0'});drawn.addLayer(e.layer);});
+let py,geo=null;
+(async()=>{try{
+ py=await loadPyodide();await py.loadPackage('shapely');
+ py.FS.mkdirTree('/lib/devkit_f2c_planner');
+ py.FS.writeFile('/lib/devkit_f2c_planner/__init__.py','');
+ py.FS.writeFile('/lib/devkit_f2c_planner/f2c_planner.py',await (await fetch('f2c_planner.py')).text());
+ py.runPython("import sys;sys.path.insert(0,'/lib')");
+ $('go').disabled=false;msg('Ready. Draw a field polygon.');
+}catch(e){msg('Failed to load: '+e)}})();
+const ring=l=>(l.getLatLngs()[0]).map(p=>[p.lat,p.lng]);
+$('go').onclick=()=>{
+ const ls=drawn.getLayers();if(!ls.length)return msg('Draw a field first.');
+ out.clearLayers();
+ const req={field:ring(ls[0]),obs:ls.slice(1).map(ring),w:+$('w').value,a:+$('a').value,h:+$('h').value,p:+$('p').value,s:$('s').checked};
+ try{
+  py.globals.set('req_json',JSON.stringify(req));
+  const res=JSON.parse(py.runPython(`
+import json,io,contextlib
+from devkit_f2c_planner import f2c_planner as P
+r=json.loads(req_json)
+with contextlib.redirect_stderr(io.StringIO()):
+    rows=P._run_f2c(r['field'],r['obs'],r['w'],r['a'],r['p'],r['h'],r['s'],backend='shapely')
+json.dumps({'rows':rows,'tags':P.tag_rows(rows,r['field'],r['a'])})`));
+  const rows=res.rows,tags=res.tags,ll=pts=>pts.map(([la,lo])=>[lo,la]);
+  const poly=(role,rg)=>({type:'Feature',properties:{role},geometry:{type:'Polygon',coordinates:[ll([...rg,rg[0]])]}});
+  geo={type:'FeatureCollection',
+   properties:{version:1,generator:'feldfreund-web-planner',origin:req.field[0],tool_width:req.w,angle:req.a,headland:req.h,snake:req.s},
+   features:[poly('field',req.field),...req.obs.map(o=>poly('obstacle',o)),
+    ...rows.map((r,i)=>({type:'Feature',properties:{role:'row',row:tags[i][0],frag:tags[i][1]},geometry:{type:'LineString',coordinates:ll(r)}}))]};
+  const res2=rows;
+  res2.forEach(r=>L.polyline(r,{color:'#0af',weight:2}).addTo(out));
+  const len=rows.reduce((t,r)=>t+r.slice(1).reduce((s,q,i)=>s+map.distance(r[i],q),0),0);
+  msg(`${rows.length} rows, ${(len/1000).toFixed(2)} km of swath`);$('dl').disabled=!rows.length;
+ }catch(e){msg('Planner error: '+e)}};
+$('dl').onclick=()=>{const a=document.createElement('a');a.href=URL.createObjectURL(new Blob([JSON.stringify(geo)],{type:'application/geo+json'}));a.download='swaths.geojson';a.click()};
+$('rs').onclick=()=>{drawn.clearLayers();out.clearLayers();$('dl').disabled=true;msg('Ready.')};
+</script></body></html>

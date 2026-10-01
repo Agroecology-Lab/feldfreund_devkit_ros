@@ -74,6 +74,7 @@ def make_node(swaths, *, contour_used=False):
     node._f2c_swaths = swaths
     node._f2c_contour_used = contour_used
     node._f2c_origin_ll = (51.0, -2.0)
+    node._f2c_break_after = set()
     node._is_sim = True
     node.latest_odom = None
     node.latest_gps = SimpleNamespace(

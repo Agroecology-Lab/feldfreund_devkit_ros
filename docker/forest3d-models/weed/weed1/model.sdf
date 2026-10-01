@@ -3,11 +3,13 @@
     <model name="weed1">
         <static>true</static>
         <link name="link">
+            <!-- TO DO Out for testing but should be put back at some point
             <collision name="collision">
                 <geometry>
                     <mesh><uri>mesh/weed1_collision.glb</uri><scale>0.010000 0.010000 0.010000</scale></mesh>
                 </geometry>
             </collision>
+            -->
             <visual name="visual">
                 <geometry>
                     <mesh><uri>mesh/weed1.glb</uri><scale>0.400000 0.400000 0.400000</scale></mesh>

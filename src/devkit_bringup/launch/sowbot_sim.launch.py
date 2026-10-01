@@ -225,6 +225,10 @@ def generate_launch_description():
                     'Use sowbot_01.xacro (TrackedVehicle) or '
                     'robo_caatinga.urdf.xacro (DiffDrive skid-steer).',
     )
+    headless_arg = DeclareLaunchArgument(
+        'headless', default_value='false',
+        description='true: gz sim server-only, no GUI',
+    )
     x_arg = DeclareLaunchArgument('x', default_value='0.0')
     y_arg = DeclareLaunchArgument('y', default_value='0.0')
     z_arg = DeclareLaunchArgument('z', default_value='0.3')
@@ -252,6 +256,7 @@ def generate_launch_description():
         launch_arguments={
             'world': LaunchConfiguration('world'),
             'urdf':  LaunchConfiguration('urdf'),
+            'headless': LaunchConfiguration('headless'),
             'x':     LaunchConfiguration('x'),
             'y':     LaunchConfiguration('y'),
             'z':     LaunchConfiguration('z'),
@@ -584,6 +589,7 @@ def generate_launch_description():
         gz_resource_path,
         set_urdf_env,
         world_arg,
+        headless_arg,
         urdf_arg,
         x_arg,
         y_arg,

@@ -106,6 +106,7 @@ from devkit_ui.pages.run.navigation_sidebar import NavigationSidebar
 from devkit_ui.pages.run.node_map_card import NodeMapCard
 from devkit_ui.pages.run.row_discovery_card import RowDiscoveryCard
 from devkit_ui.pages.run.track_card import TrackCard
+from devkit_ui import plan_import
 from devkit_ui.parse import dump_topo_yaml, parse_topo_json, parse_topo_yaml
 from devkit_ui.utils.topo_renderer import build_robot_svg, build_svg, inject_click_js
 from devkit_ui.view_models.global_view_model import GlobalViewModel
@@ -580,6 +581,7 @@ class NiceGuiNode(Node):
         self._f2c_angle_deg:  float = 0.0
         self._f2c_contour_used: bool = False
         self._f2c_origin_ll = None
+        self._f2c_break_after: set = set()
         self.f2c_save_status: str   = ''
 
         # OBSTACLE: manager owns obstacles.yaml + /obstacles publisher.
@@ -1135,6 +1137,31 @@ class NiceGuiNode(Node):
 
     # ── F2C → topo rows ──────────────────────────────────────────────────────
 
+    def import_plan_geojson(self, text: str) -> str:
+        """Load a web-planner plan into the F2C state so 'Save as Topo Rows' can build nodes.
+
+        Returns a status string; does not touch the topo map itself.
+        """
+        robot_ll = None
+        if self.latest_gps is not None:
+            lat, lon = self.latest_gps.latitude, self.latest_gps.longitude
+            if math.isfinite(lat) and math.isfinite(lon) and (abs(lat) > 1e-9 or abs(lon) > 1e-9):
+                robot_ll = (lat, lon)
+        if robot_ll is None and not self._is_sim:
+            return 'ERROR: no GPS fix; cannot check the plan is near the robot'
+        try:
+            plan = plan_import.parse_plan(text, robot_ll=None if self._is_sim else robot_ll)
+        except plan_import.PlanError as e:
+            return f'ERROR: {e}'
+        self._f2c_swaths = plan.swaths
+        self._f2c_origin_ll = plan.origin_ll
+        self._f2c_contour_used = False
+        self._f2c_break_after = plan.break_after
+        if plan.params.get('tool_width'):
+            self._f2c_tool_width = float(plan.params['tool_width'])
+        split = f' · {len(plan.break_after)} obstacle splits (not linked)' if plan.break_after else ''
+        return f'imported {len(plan.swaths)} rows{split}; review, then Save as Topo Rows'
+
     def save_f2c_rows_to_topo(self, prefix: str, row_id_start: int,
                               overwrite: bool = False) -> None:
         """
@@ -1367,6 +1394,10 @@ class NiceGuiNode(Node):
                 node.add_edge(other, action=NAV_ACTION)
 
         for rid_a, rid_b in pairwise(added):
+            # Imported plans mark fragments of one obstacle-split row: no
+            # headland edge between them, it would cross the obstacle.
+            if (rid_a - row_id_start) in self._f2c_break_after:
+                continue
             _, out_a = row_names[rid_a]
             in_b, _  = row_names[rid_b]
             _add_headland_edge(out_a, in_b)
@@ -1938,6 +1969,15 @@ class NiceGuiNode(Node):
                 save_btn  = ui.button('Save as Topo Rows').props(
                     'color=primary no-caps').classes('w-full mt-1')
                 save_btn.set_enabled(False)
+                async def do_import(e):
+                    data = (await e.file.read()) if hasattr(e, 'file') else e.content.read()
+                    msg = self.import_plan_geojson(data.decode('utf-8', errors='replace'))
+                    f2c_status.set_text(msg)
+                    f2c_status.style('color:' + ('#cf222e' if msg.startswith('ERROR') else '#1a7f37'))
+                    save_btn.set_enabled(not msg.startswith('ERROR'))
+
+                ui.upload(label='Import web plan (.geojson)', auto_upload=True,
+                          on_upload=do_import).props('accept=.geojson,.json').classes('w-full mt-1')
                 f2c_overwrite = ui.checkbox('Overwrite existing rows with same prefix',
                                             value=False).classes('text-xs mt-1')
                 clear_btn = ui.button('Clear').props(
@@ -2086,6 +2126,7 @@ class NiceGuiNode(Node):
             # — instead of being offset by the distance between the field and
             # whatever latest_gps happened to read (in sim, the datum fix).
             self._f2c_origin_ll = tuple(corners_ll[0]) if corners_ll else None
+            self._f2c_break_after = set()
 
             hl_note  = f' · {headland_m}m headland' if headland_m > 0 else ''
             snk_note = ' · snake' if snake else ''
@@ -3139,12 +3180,13 @@ class NiceGuiNode(Node):
                            if os.environ.get('GZ_SIM_RESOURCE_PATH') else '')
                     ),
                 }
-                def _sim_cmd() -> list:
+                def _sim_cmd(headless: bool = False) -> list:
                     """Build the sowbot_sim launch command using the current robot model."""
                     return [
                         'ros2', 'launch', 'devkit_bringup', 'sowbot_sim.launch.py',
                         'world:=maize.world',
                         f'urdf:={_robot_model["xacro"]}',
+                        f'headless:={"true" if headless else "false"}',
                     ]
 
                 def _start_gazebo_browser():
@@ -3333,7 +3375,7 @@ class NiceGuiNode(Node):
                 # is not set in the UI node's subprocess environment.
                 _AGRO_PKG = '/workspace/install/devkit_simulation/share/devkit_simulation'
 
-                def _launch_sim():
+                def _launch_sim(headless: bool = False):
                     # Single button, runs the exact same thing as the CLI:
                     # `ros2 launch devkit_bringup sowbot_sim.launch.py
                     #   world:=maize.world urdf:=<selected xacro>`
@@ -3350,14 +3392,15 @@ class NiceGuiNode(Node):
                         return
                     try:
                         _gazebo_proc[0] = subprocess.Popen(
-                            _sim_cmd(),
+                            _sim_cmd(headless),
                             stdout=open('/tmp/gazebo_sim.log', 'w', encoding='utf-8'),
                             stderr=subprocess.STDOUT,
                             env=_SIM_ENV,
                             start_new_session=True,
                         )
                         _gazebo_lbl.set_text(
-                            f'sim launching — {_robot_model["xacro"]} — pid {_gazebo_proc[0].pid}')
+                            f'sim launching{" (headless)" if headless else ""} — '
+                            f'{_robot_model["xacro"]} — pid {_gazebo_proc[0].pid}')
                         _gazebo_lbl.style('color:#1a7f37')
                     except Exception as exc:
                         _gazebo_lbl.set_text(f'ERROR: {exc}')
@@ -3629,6 +3672,9 @@ class NiceGuiNode(Node):
                 with ui.row().classes('items-center gap-2 flex-wrap'):
                     ui.button('Launch Sim', on_click=_launch_sim).props('color=positive no-caps').classes('px-4 font-bold')
                     ui.button('Rebuild World from Map', on_click=_rebuild_world).props(
+                        'outline no-caps').classes('px-4')
+                    ui.button('Launch Sim (headless)',
+                              on_click=lambda: _launch_sim(headless=True)).props(
                         'outline no-caps').classes('px-4')
                     ui.button('Launch Sim (browser)', on_click=_start_gazebo_browser).props(
                         'outline no-caps').classes('px-4')

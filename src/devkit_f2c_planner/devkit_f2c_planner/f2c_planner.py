@@ -21,8 +21,14 @@ same-package import.
 import math
 import sys
 
-# pylint: disable=import-error
-import fields2cover as f2c
+# fields2cover is optional: it is built from source in docker/Dockerfile and is
+# unavailable in the browser (Pyodide). Without it, _run_f2c() falls back to a
+# pure-shapely swath generator (backend='shapely').
+try:
+    # pylint: disable=import-error
+    import fields2cover as f2c
+except ImportError:  # pragma: no cover
+    f2c = None
 from shapely.geometry import LineString, MultiLineString, Polygon
 from shapely.ops import unary_union
 
@@ -100,8 +106,19 @@ def _run_f2c(corners_ll: list,
              angle_deg: float,
              obstacle_pad_m: float = 0.0,
              headland_width_m: float = 0.0,
-             snake_order: bool = True) -> list:
-    """Generate straight-swath field rows for the boundary, clipped around obstacles."""
+             snake_order: bool = True,
+             backend: str = 'auto') -> list:
+    """Generate straight-swath field rows for the boundary, clipped around obstacles.
+
+    backend: 'f2c' (Fields2Cover), 'shapely' (pure Python, runs in Pyodide)
+    or 'auto' (f2c if importable, else shapely).
+    """
+    if backend == 'auto':
+        backend = 'f2c' if f2c is not None else 'shapely'
+    if backend not in ('f2c', 'shapely'):
+        raise ValueError(f'unknown backend {backend!r}')
+    if backend == 'f2c' and f2c is None:
+        raise ImportError('backend="f2c" requested but fields2cover is not installed')
 
     def _log(msg):
         """Write a prefixed diagnostic line to stderr."""
@@ -113,6 +130,11 @@ def _run_f2c(corners_ll: list,
          f'width={tool_width}m, angle={angle_deg}°')
 
     lat0, lon0 = corners_ll[0]
+
+    if backend == 'shapely':
+        return _run_shapely(corners_ll, obstacle_rings, tool_width, angle_deg,
+                            obstacle_pad_m, headland_width_m, snake_order,
+                            lat0, lon0, _log)
 
     # ── Outer boundary ────────────────────────────────────────────────
     outer = f2c.LinearRing()
@@ -190,6 +212,87 @@ def _run_f2c(corners_ll: list,
             result.append(pts_ll)
     _log(f'returning {len(result)} swaths to UI')
     return result
+
+
+def _swaths_shapely(poly: Polygon, tool_width: float, angle_rad: float) -> list:
+    """Parallel swaths at angle_rad (from +x) spaced tool_width apart.
+
+    Mirrors SG_BruteForce for a fixed angle: rotate so swaths run along x,
+    first row half a width inside the lower extent, intersect each row with
+    the polygon, rotate back. Concave fields give several fragments per row.
+    """
+    c, s = math.cos(-angle_rad), math.sin(-angle_rad)
+    cb, sb = math.cos(angle_rad), math.sin(angle_rad)
+
+    def rot(x, y):
+        return x * c - y * s, x * s + y * c
+
+    def unrot(x, y):
+        return x * cb - y * sb, x * sb + y * cb
+
+    polys = list(poly.geoms) if poly.geom_type == 'MultiPolygon' else [poly]
+    out: list = []
+    for part in polys:
+        rp = Polygon([rot(x, y) for x, y in part.exterior.coords],
+                     [[rot(x, y) for x, y in h.coords] for h in part.interiors])
+        minx, miny, maxx, maxy = rp.bounds
+        y = miny + tool_width / 2
+        while y <= maxy:
+            row = LineString([(minx - 1, y), (maxx + 1, y)]).intersection(rp)
+            geoms = list(row.geoms) if hasattr(row, 'geoms') else [row]
+            for g in sorted((g for g in geoms if g.geom_type == 'LineString' and g.length > 0),
+                            key=lambda g: g.coords[0][0]):
+                out.append([unrot(px, py) for px, py in g.coords])
+            y += tool_width
+    return out
+
+
+def _run_shapely(corners_ll, obstacle_rings, tool_width, angle_deg,
+                 obstacle_pad_m, headland_width_m, snake_order, lat0, lon0, _log):
+    """Pure-shapely twin of the F2C branch in _run_f2c()."""
+    field = Polygon([_f2c_latlon_to_xy(lat, lon, lat0, lon0) for lat, lon in corners_ll])
+    if not field.is_valid:
+        field = field.buffer(0)
+    obstacle_polys_xy = _build_obstacle_polys(
+        obstacle_rings, lat0, lon0, obstacle_pad_m, _log, f2c_cell=None)
+
+    swath_poly = field
+    if headland_width_m > 0:
+        inset = field.buffer(-headland_width_m, join_style=2)
+        if inset.is_empty:
+            _log(f'headland: inset {headland_width_m}m emptied the field, using full boundary')
+        else:
+            swath_poly = inset
+
+    raw_xy = _swaths_shapely(swath_poly, tool_width, math.radians(angle_deg % 180))
+    _log(f'shapely produced {len(raw_xy)} raw swaths')
+    if snake_order and raw_xy:
+        raw_xy = [list(reversed(p)) if i % 2 == 1 else list(p) for i, p in enumerate(raw_xy)]
+    if obstacle_polys_xy:
+        raw_xy = _clip_lines_against_obstacles(raw_xy, obstacle_polys_xy, tool_width * 0.5, _log)
+    result = [[_f2c_xy_to_latlon(x, y, lat0, lon0) for x, y in p] for p in raw_xy if len(p) >= 2]
+    _log(f'returning {len(result)} swaths')
+    return result
+
+
+def tag_rows(rows_ll: list, corners_ll: list, angle_deg: float) -> list:
+    """Return (row, frag) for each swath returned by _run_f2c().
+
+    Obstacle clipping splits one row into consecutive swaths. Those share a
+    perpendicular offset (to the swath direction), so group on that. Row
+    numbers count from 0 in order of first appearance; frag counts from 0
+    within a row.
+    """
+    lat0, lon0 = corners_ll[0]
+    a = math.radians(angle_deg % 180)
+    tags, seen, frags = [], {}, {}
+    for row in rows_ll:
+        x, y = _f2c_latlon_to_xy(row[0][0], row[0][1], lat0, lon0)
+        key = round((-math.sin(a) * x + math.cos(a) * y) * 100)  # 1 cm bins
+        rid = seen.setdefault(key, len(seen))
+        frags[rid] = frags.get(rid, -1) + 1
+        tags.append((rid, frags[rid]))
+    return tags
 
 
 def _build_obstacle_polys(obstacle_rings: list, lat0: float, lon0: float,
