@@ -154,6 +154,7 @@ This repo may contain traces of LLM slop, We've done our best to mitigate this. 
 - [Git](https://github.com/git-guides/install-git)
 - [Docker](https://docs.docker.com/engine/install/debian/#install-using-the-repository)
 - ```sudo apt install python3-serial setserial v4l-utils```
+- ```sudo apt install -y pipx && pipx install 'glances[web]' && pipx ensurepath && (nohup ~/.local/bin/glances -w --bind 127.0.0.1 > /tmp/glances.log 2>&1 < /dev/null &)```
 
 #### Mac
 - xcode-select --install
