@@ -291,10 +291,12 @@ _GRAPHER_DIR = '/tmp/ros2grapher'
 
 
 def _shared(name: str, factory: Callable):
+    """Return the shared tool entry, storing the factory result if absent."""
     return _TOOLS.setdefault(name, factory())
 
 
 def _alive(proc) -> bool:
+    """Return whether a process handle exists and is still running."""
     return proc is not None and proc.poll() is None
 
 
@@ -321,6 +323,7 @@ def _kill_group(proc, grace: float = 5.0) -> None:
 
 
 def _stop_all(procs: list) -> None:
+    """Stop the listed process groups and clear the list; blocks while waiting."""
     for proc in procs:
         _kill_group(proc, grace=3.0)
     procs.clear()
@@ -374,6 +377,7 @@ def _report_if_exited(proc, lbl, log: str) -> None:
 
 
 def _shutdown_tools() -> None:
+    """Stop registered tool process groups during application shutdown."""
     for entry in _TOOLS.values():
         for proc in (entry if isinstance(entry, list) else [entry]):
             if isinstance(proc, subprocess.Popen):
