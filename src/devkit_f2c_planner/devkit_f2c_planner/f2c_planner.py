@@ -421,6 +421,29 @@ def _clip_lines_against_obstacles(raw_xy: list, obstacle_polys_xy: list,
 # than emitted looped/garbled — flagged as follow-up work once there's
 # real field DEM data to know how often this actually bites, rather than
 # guessed at now.
+def _extend_line(line: LineString, dist: float, probe_m: float) -> LineString:
+    """Extend both ends of line along their end tangents by dist metres.
+
+    The reference contour only exists where the DEM does, so it is usually
+    shorter than the field. Offsetting it as-is leaves the rest of the field
+    uncovered. The tangent is taken over probe_m (not the last segment) so a
+    noisy end vertex doesn't swing the extension.
+    """
+    if dist <= 0 or line.length == 0:
+        return line
+    probe = min(probe_m, line.length / 2)
+    pts = list(line.coords)
+
+    def _tip(end_pt, inner_pt):
+        dx, dy = end_pt[0] - inner_pt.x, end_pt[1] - inner_pt.y
+        n = math.hypot(dx, dy)
+        return pts[0] if n == 0 else (end_pt[0] + dx / n * dist, end_pt[1] + dy / n * dist)
+
+    tail = _tip(pts[-1], line.interpolate(line.length - probe))
+    head = _tip(pts[0], line.interpolate(probe))
+    return LineString([head, *pts, tail])
+
+
 def _run_contour_f2c(corners_ll: list,
                       obstacle_rings: list,
                       reference_line_ll: list,
@@ -428,7 +451,8 @@ def _run_contour_f2c(corners_ll: list,
                       obstacle_pad_m: float = 0.0,
                       headland_width_m: float = 0.0,
                       snake_order: bool = True,
-                      max_rows_each_side: int = 500) -> list:
+                      max_rows_each_side: int = 500,
+                      extend_reference: bool = True) -> list:
     """Generate contour-following rows offset from a reference line, clipped to the field."""
 
     def _log(msg):
@@ -465,6 +489,10 @@ def _run_contour_f2c(corners_ll: list,
         _log(f'reference line has {len(ref_xy)} pts, need >= 2 — returning no rows')
         return []
     ref_line = LineString(ref_xy)
+    if extend_reference:
+        minx, miny, maxx, maxy = swath_poly.bounds
+        ref_line = _extend_line(ref_line, math.hypot(maxx - minx, maxy - miny),
+                                3 * tool_width)
 
     # ── Offset outward from the reference line until we run off the field ──
     def _row_at(offset_m: float) -> list | None:
@@ -486,7 +514,9 @@ def _run_contour_f2c(corners_ll: list,
         clipped = line.intersection(swath_poly)
         if clipped.is_empty:
             return None
-        return list(clipped.coords) if clipped.geom_type == 'LineString' else None
+        parts = [clipped] if clipped.geom_type == 'LineString' else getattr(clipped, 'geoms', [])
+        pieces = [list(g.coords) for g in parts if g.geom_type == 'LineString' and len(g.coords) >= 2]
+        return pieces or None
 
     rows_by_offset: dict = {}
     center = _row_at(0.0)
@@ -503,13 +533,16 @@ def _run_contour_f2c(corners_ll: list,
                 break
             rows_by_offset[offset_m] = row
 
-    raw_xy = [rows_by_offset[k] for k in sorted(rows_by_offset)]
-    _log(f'generated {len(raw_xy)} contour rows before obstacle clipping')
-
     # ── Snake ordering, same as _run_f2c() ────────────────────────────
-    if snake_order and raw_xy:
-        raw_xy = [list(reversed(pts)) if i % 2 == 1 else list(pts)
-                  for i, pts in enumerate(raw_xy)]
+    # A row that re-enters the field (concave boundary) yields several
+    # pieces; flipping reverses the order of the pieces as well as each one.
+    raw_xy = []
+    for i, k in enumerate(sorted(rows_by_offset)):
+        pieces = rows_by_offset[k]
+        if snake_order and i % 2 == 1:
+            pieces = [list(reversed(pc)) for pc in reversed(pieces)]
+        raw_xy.extend(list(pc) for pc in pieces)
+    _log(f'generated {len(raw_xy)} contour rows before obstacle clipping')
 
     # ── Post-clip against obstacle union ──────────────────────────────
     if obstacle_polys_xy:

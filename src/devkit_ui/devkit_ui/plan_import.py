@@ -7,7 +7,7 @@ robot's live GPS/odometry anchor and the loaded topo map.
 
 Schema (version 1): GeoJSON FeatureCollection, [lon, lat] coordinates.
   properties: version, generator, origin [lat, lon], tool_width, angle,
-              headland, snake
+              headland, snake, contour (bool, optional)
   features:   properties.role == 'row', LineString, properties.row (int),
               properties.frag (int). Feature order is mission order.
               'field' / 'obstacle' features are informational and ignored.
@@ -111,5 +111,6 @@ def parse_plan(text, robot_ll=None, max_distance_m=DEFAULT_MAX_DISTANCE_M) -> Pl
             raise PlanError(f'plan is {d / 1000:.1f} km from the robot '
                             f'(limit {max_distance_m / 1000:.1f} km); refusing to import')
 
-    params = {k: props.get(k) for k in ('tool_width', 'angle', 'headland', 'snake', 'generator')}
+    keys = ('tool_width', 'angle', 'headland', 'snake', 'contour', 'generator')
+    params = {k: props.get(k) for k in keys}
     return Plan(swaths, origin_ll, break_after, params)

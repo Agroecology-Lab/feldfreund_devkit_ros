@@ -88,7 +88,7 @@ class ContourRowsTest(unittest.TestCase):
         """Rows follow the reference: every point of a row is a whole number of tool widths away from it."""
         reference_xy = [(x, 22.5 + 0.002 * (x - 50) ** 2) for x in range(0, 101, 2)]
         reference = LineString(reference_xy)
-        rows = contour_rows(reference_xy=reference_xy, snake_order=False)
+        rows = contour_rows(reference_xy=reference_xy, snake_order=False, extend_reference=False)
         self.assertGreater(len(rows), 5)
         for index, row in enumerate(rows):
             with self.subTest(row=index):
@@ -96,6 +96,30 @@ class ContourRowsTest(unittest.TestCase):
                 self.assertLess(max(distances) - min(distances), 2e-3)
                 mean_in_widths = sum(distances) / len(distances) / TOOL_WIDTH
                 self.assertAlmostEqual(mean_in_widths, round(mean_in_widths), delta=1e-3)
+
+    def test_short_reference_is_extended_so_rows_span_the_field(self):
+        """A survey only covers part of the field; rows must still reach both field edges."""
+        rows = sorted(contour_rows(reference_xy=[(40, 25), (60, 25)], snake_order=False), key=row_y)
+        self.assertEqual(len(rows), 13)
+        for index, row in enumerate(rows):
+            with self.subTest(row=index):
+                self.assertAlmostEqual(min(x for x, _ in row), 0.0, delta=TOLERANCE_M)
+                self.assertAlmostEqual(max(x for x, _ in row), 100.0, delta=TOLERANCE_M)
+
+    def test_short_reference_without_extension_keeps_rows_short(self):
+        rows = contour_rows(reference_xy=[(40, 25), (60, 25)], extend_reference=False)
+        for row in rows:
+            self.assertLess(max(x for x, _ in row) - min(x for x, _ in row), 20.0 + TOLERANCE_M)
+
+    def test_row_that_reenters_the_field_keeps_all_its_pieces(self):
+        """A concave field splits a row in two; the old code dropped it and stopped planning."""
+        field_xy = [(0, 0), (100, 0), (100, 50), (60, 50), (60, 20), (40, 20), (40, 50), (0, 50)]
+        rows_ll = planner._run_contour_f2c(
+            to_ll(field_xy), [], to_ll([(0, 30), (100, 30)]), TOOL_WIDTH, snake_order=False)
+        rows = [to_xy(row) for row in rows_ll]
+        top = [row for row in rows if row_y(row) > 21]
+        self.assertTrue(any(max(x for x, _ in row) <= 40 + TOLERANCE_M for row in top))
+        self.assertTrue(any(min(x for x, _ in row) >= 60 - TOLERANCE_M for row in top))
 
 
 if __name__ == '__main__':

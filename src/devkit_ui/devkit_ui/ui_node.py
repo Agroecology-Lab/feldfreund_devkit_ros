@@ -1263,7 +1263,7 @@ class NiceGuiNode(Node):
             return f'ERROR: {e}'
         self._f2c_swaths = plan.swaths
         self._f2c_origin_ll = plan.origin_ll
-        self._f2c_contour_used = False
+        self._f2c_contour_used = bool(plan.params.get('contour'))
         self._f2c_break_after = plan.break_after
         if plan.params.get('tool_width'):
             self._f2c_tool_width = float(plan.params['tool_width'])
