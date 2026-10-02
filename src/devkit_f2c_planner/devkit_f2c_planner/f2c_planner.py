@@ -385,6 +385,7 @@ def _clip_lines_against_obstacles(raw_xy: list, obstacle_polys_xy: list,
         remaining = line.difference(obstacles_union)
         if remaining.is_empty:
             dropped_count += 1
+            pending_break |= bool(clipped)
             continue
         geoms = (list(remaining.geoms)
                  if isinstance(remaining, MultiLineString)
@@ -399,6 +400,8 @@ def _clip_lines_against_obstacles(raw_xy: list, obstacle_polys_xy: list,
                     clipped_count += 1
         if len(clipped) > start:
             pending_break = False
+        elif clipped:
+            pending_break = True
     if break_after is not None:
         break_after.clear()
         break_after.update(clipped_breaks)
