@@ -108,6 +108,33 @@ class ClipLinesAgainstObstaclesTest(unittest.TestCase):
         self.assertEqual(len(result), 5)
         self.assertIn([(0.0, 5.0), (10.0, 5.0)], result)
 
+    def test_break_indices_follow_splits_and_dropped_fragments(self):
+        rows = [[(0, 0), (10, 0)], [(4.2, 0), (5.8, 0)],
+                [(4.1, 0), (6.1, 0)], [(0, 5), (10, 5)], [(0, 6), (10, 6)]]
+        for initial_breaks in ({0}, {1}, {2}):
+            with self.subTest(initial_breaks=initial_breaks):
+                breaks = set(initial_breaks)
+                result = planner._clip_lines_against_obstacles(
+                    rows, [Polygon(self.OBSTACLE)], 0.5, lambda _msg: None, breaks)
+                self.assertEqual(len(result), 4)
+                self.assertEqual(breaks, {0, 1})
+
+    def test_dropped_rows_create_breaks_only_between_surviving_rows(self):
+        surviving_rows = [[(0, 5), (10, 5)], [(0, 6), (10, 6)], [(0, 7), (10, 7)]]
+        fully_removed = [(4.2, 0), (5.8, 0)]
+        too_short = [(4.1, 0), (6.1, 0)]
+        for dropped_rows in ([fully_removed], [too_short], [fully_removed, too_short]):
+            with self.subTest(dropped_rows=dropped_rows):
+                rows = [
+                    *dropped_rows, surviving_rows[0], *dropped_rows,
+                    *surviving_rows[1:], *dropped_rows,
+                ]
+                breaks = set()
+                result = planner._clip_lines_against_obstacles(
+                    rows, [Polygon(self.OBSTACLE)], 0.5, lambda _msg: None, breaks)
+                self.assertEqual(result, surviving_rows)
+                self.assertEqual(breaks, {0})
+
 
 if __name__ == '__main__':
     unittest.main()

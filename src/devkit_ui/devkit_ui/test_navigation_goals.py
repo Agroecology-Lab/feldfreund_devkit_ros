@@ -95,7 +95,10 @@ def load_navigation_harness():
         'GotoNode': SimpleNamespace(Goal=Goal),
         'threading': SimpleNamespace(Thread=ImmediateThread, Event=threading.Event),
     }
-    exec(compile(ast.fix_missing_locations(ast.Module(methods, type_ignores=[])), source_path, 'exec'), namespace)
+    exec(
+        compile(
+            ast.fix_missing_locations(ast.Module(methods, type_ignores=[])), source_path, 'exec'),
+        namespace)
     return type('NavigationHarness', (), {name: namespace[name] for name in method_names})
 
 

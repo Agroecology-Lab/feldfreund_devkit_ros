@@ -65,6 +65,18 @@ class ParsePlanTest(unittest.TestCase):
         with self.assertRaises(PlanError):
             parse_plan(text, robot_ll=(28.6, 77.2))
 
+    def test_contour_may_be_missing_or_boolean(self):
+        self.assertIsNone(parse_plan(_plan([_feat(ROW0, 0)])).params['contour'])
+        for contour in (False, True):
+            with self.subTest(contour=contour):
+                plan = parse_plan(_plan([_feat(ROW0, 0)], contour=contour))
+                self.assertIs(plan.params['contour'], contour)
+
+    def test_rejects_present_non_boolean_contour(self):
+        for contour in ('false', 'true', '', 0, 1, None, [], {}):
+            with self.subTest(contour=contour), self.assertRaisesRegex(PlanError, 'contour'):
+                parse_plan(_plan([_feat(ROW0, 0)], contour=contour))
+
 
 if __name__ == '__main__':
     unittest.main()

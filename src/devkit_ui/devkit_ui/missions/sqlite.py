@@ -210,5 +210,6 @@ class MissionSqliteStore:
             'rows': json.loads(row.get('rows', '[]')),
             'action_params': json.loads(row.get('action_params', '{}')),
             'active': row.get('active', 1) == 1,
-            'last_run_success': None if row.get('last_run_success') is None else bool(row['last_run_success']),
+            'last_run_success': (
+                None if row.get('last_run_success') is None else bool(row['last_run_success'])),
         }

@@ -449,7 +449,8 @@ class ObstacleManager:
 
 def attach_nav_card(node, manager: ObstacleManager) -> None:
     """
-    Render the “Mark Obstacle” card and keep its status display synchronized with the obstacle manager.
+    Render the “Mark Obstacle” card and keep its status display synchronized with the obstacle
+    manager.
 
     Parameters:
         node: UI node used to store the default radius, GPS data, and status.

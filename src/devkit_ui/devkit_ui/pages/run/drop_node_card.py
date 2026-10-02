@@ -77,7 +77,8 @@ class DropNodeCard(ui.card):
                     Update the current-node display and provide its text.
 
                     Parameters:
-                        current_node (str): The current topology node name, or a dash indicating no node.
+                        current_node (str): The current topology node name, or a dash indicating no
+                        node.
 
                     Returns:
                         str: The formatted current-node text.
@@ -113,7 +114,8 @@ class DropNodeCard(ui.card):
                 Returns:
                     str: The unchanged status text.
                 """
-                self.status_lbl.style(f'color:{"#cf222e" if status.startswith("ERROR") else "#1a7f37"}')
+                self.status_lbl.style(
+                    f'color:{"#cf222e" if status.startswith("ERROR") else "#1a7f37"}')
                 return status
 
             self.status_lbl.bind_text_from(state, 'status', backward=sync_status)

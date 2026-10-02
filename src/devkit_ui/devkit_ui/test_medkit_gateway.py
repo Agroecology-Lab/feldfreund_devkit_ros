@@ -174,12 +174,18 @@ class TestMedkitGateway(unittest.IsolatedAsyncioTestCase):
     async def test_shutdown_escalates_only_after_each_timeout(self) -> None:
         timeout = subprocess.TimeoutExpired('ros2', 15)
         for waits, expected in (
-            ([0], [unittest.mock.call.send_signal(signal.SIGINT), unittest.mock.call.wait(timeout=15)]),
-            ([timeout, 0], [unittest.mock.call.send_signal(signal.SIGINT), unittest.mock.call.wait(timeout=15),
-                            unittest.mock.call.terminate(), unittest.mock.call.wait(timeout=5)]),
-            ([timeout, timeout, 0], [unittest.mock.call.send_signal(signal.SIGINT), unittest.mock.call.wait(timeout=15),
-                                     unittest.mock.call.terminate(), unittest.mock.call.wait(timeout=5),
-                                     unittest.mock.call.kill(), unittest.mock.call.wait(timeout=5)]),
+            ([0], [
+                unittest.mock.call.send_signal(signal.SIGINT),
+                unittest.mock.call.wait(timeout=15)]),
+            ([timeout, 0], [
+                unittest.mock.call.send_signal(signal.SIGINT),
+                unittest.mock.call.wait(timeout=15),
+                unittest.mock.call.terminate(), unittest.mock.call.wait(timeout=5)]),
+            ([timeout, timeout, 0], [
+                unittest.mock.call.send_signal(signal.SIGINT),
+                unittest.mock.call.wait(timeout=15),
+                unittest.mock.call.terminate(), unittest.mock.call.wait(timeout=5),
+                unittest.mock.call.kill(), unittest.mock.call.wait(timeout=5)]),
         ):
             with self.subTest(waits=waits):
                 process = make_process(pid=204)
@@ -283,7 +289,8 @@ class TestMedkitGateway(unittest.IsolatedAsyncioTestCase):
 
 
 def make_process(pid: int):
-    process = Mock(spec=['pid', 'poll', 'terminate', 'wait', 'communicate', 'kill', 'send_signal'], pid=pid)
+    process = Mock(
+        spec=['pid', 'poll', 'terminate', 'wait', 'communicate', 'kill', 'send_signal'], pid=pid)
     process.poll.return_value = None
     return process
 

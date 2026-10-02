@@ -19,7 +19,8 @@ class TestMissionSqliteStore(unittest.TestCase):
         missions = self._store.missions
 
         self.assertEqual(len(missions), 3)
-        self.assertEqual([mission['id'] for mission in missions], ['MISSION_1', 'MISSION_2', 'MISSION_3'])
+        self.assertEqual(
+            [mission['id'] for mission in missions], ['MISSION_1', 'MISSION_2', 'MISSION_3'])
         self.assertEqual([mission['name'] for mission in missions], ['THIRD', 'FIRST', 'SECOND'])
         self.assertEqual([mission['action'] for mission in missions], ['spray', 'weed', 'seed'])
         self.assertEqual([mission['rows'] for mission in missions], [[3], [1], [2]])

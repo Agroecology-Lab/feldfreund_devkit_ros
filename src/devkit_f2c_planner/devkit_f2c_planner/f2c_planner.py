@@ -354,11 +354,14 @@ def _build_obstacle_polys(obstacle_rings: list, lat0: float, lon0: float,
 
 
 def _clip_lines_against_obstacles(raw_xy: list, obstacle_polys_xy: list,
-                                   min_fragment_len_m: float, _log) -> list:
+                                   min_fragment_len_m: float, _log,
+                                   break_after: set[int] | None = None) -> list:
     """line.difference(obstacle_union) for every row, dropping fragments
     too short to be worth driving. Shared post-clip step for both swath
     styles — see the OBSTACLE comment above _run_f2c() for why this is
     done in shapely rather than trusted to F2C's own hole handling.
+    When provided, break_after is remapped in place and includes new gaps
+    introduced by obstacle clipping.
     """
     obstacles_union = unary_union(obstacle_polys_xy)
     _log(f'obstacle union: type={obstacles_union.geom_type} '
@@ -371,22 +374,37 @@ def _clip_lines_against_obstacles(raw_xy: list, obstacle_polys_xy: list,
              f'to ({sample[-1][0]:.1f},{sample[-1][1]:.1f})')
 
     clipped: list = []
+    clipped_breaks: set[int] = set()
+    pending_break = False
     clipped_count, dropped_count = 0, 0
-    for pts in raw_xy:
+    for index, pts in enumerate(raw_xy):
+        pending_break |= break_after is not None and index - 1 in break_after
+        start = len(clipped)
         line = LineString(pts)
         intersects = line.intersects(obstacles_union)
         remaining = line.difference(obstacles_union)
         if remaining.is_empty:
             dropped_count += 1
+            pending_break |= bool(clipped)
             continue
         geoms = (list(remaining.geoms)
                  if isinstance(remaining, MultiLineString)
                  else [remaining])
         for sub in geoms:
             if sub.length > min_fragment_len_m:
+                if clipped and pending_break:
+                    clipped_breaks.add(len(clipped) - 1)
                 clipped.append(list(sub.coords))
+                pending_break = True
                 if intersects:
                     clipped_count += 1
+        if len(clipped) > start:
+            pending_break = False
+        elif clipped:
+            pending_break = True
+    if break_after is not None:
+        break_after.clear()
+        break_after.update(clipped_breaks)
     _log(f'clipped {clipped_count} rows against obstacles, '
          f'{dropped_count} fully dropped, final={len(clipped)}')
     return clipped
@@ -421,6 +439,29 @@ def _clip_lines_against_obstacles(raw_xy: list, obstacle_polys_xy: list,
 # than emitted looped/garbled — flagged as follow-up work once there's
 # real field DEM data to know how often this actually bites, rather than
 # guessed at now.
+def _extend_line(line: LineString, dist: float, probe_m: float) -> LineString:
+    """Extend both ends of line along their end tangents by dist metres.
+
+    The reference contour only exists where the DEM does, so it is usually
+    shorter than the field. Offsetting it as-is leaves the rest of the field
+    uncovered. The tangent is taken over probe_m (not the last segment) so a
+    noisy end vertex doesn't swing the extension.
+    """
+    if dist <= 0 or line.length == 0:
+        return line
+    probe = min(probe_m, line.length / 2)
+    pts = list(line.coords)
+
+    def _tip(end_pt, inner_pt):
+        dx, dy = end_pt[0] - inner_pt.x, end_pt[1] - inner_pt.y
+        n = math.hypot(dx, dy)
+        return pts[0] if n == 0 else (end_pt[0] + dx / n * dist, end_pt[1] + dy / n * dist)
+
+    tail = _tip(pts[-1], line.interpolate(line.length - probe))
+    head = _tip(pts[0], line.interpolate(probe))
+    return LineString([head, *pts, tail])
+
+
 def _run_contour_f2c(corners_ll: list,
                       obstacle_rings: list,
                       reference_line_ll: list,
@@ -428,8 +469,15 @@ def _run_contour_f2c(corners_ll: list,
                       obstacle_pad_m: float = 0.0,
                       headland_width_m: float = 0.0,
                       snake_order: bool = True,
-                      max_rows_each_side: int = 500) -> list:
-    """Generate contour-following rows offset from a reference line, clipped to the field."""
+                      max_rows_each_side: int = 500,
+                      extend_reference: bool = True,
+                      *, break_after: set[int] | None = None) -> list:
+    """Generate contour rows; fill break_after with indices of gaps between fragments."""
+
+    if break_after is None:
+        break_after = set()
+    else:
+        break_after.clear()
 
     def _log(msg):
         """Write a prefixed diagnostic line to stderr."""
@@ -465,6 +513,12 @@ def _run_contour_f2c(corners_ll: list,
         _log(f'reference line has {len(ref_xy)} pts, need >= 2 — returning no rows')
         return []
     ref_line = LineString(ref_xy)
+    if extend_reference:
+        minx, miny, maxx, maxy = swath_poly.bounds
+        extended = _extend_line(ref_line, math.hypot(maxx - minx, maxy - miny),
+                                3 * tool_width)
+        if extended.is_simple:
+            ref_line = extended
 
     # ── Offset outward from the reference line until we run off the field ──
     def _row_at(offset_m: float) -> list | None:
@@ -486,7 +540,9 @@ def _run_contour_f2c(corners_ll: list,
         clipped = line.intersection(swath_poly)
         if clipped.is_empty:
             return None
-        return list(clipped.coords) if clipped.geom_type == 'LineString' else None
+        parts = [clipped] if clipped.geom_type == 'LineString' else getattr(clipped, 'geoms', [])
+        pieces = [list(g.coords) for g in parts if g.geom_type == 'LineString' and len(g.coords) >= 2]
+        return pieces or None
 
     rows_by_offset: dict = {}
     center = _row_at(0.0)
@@ -503,18 +559,24 @@ def _run_contour_f2c(corners_ll: list,
                 break
             rows_by_offset[offset_m] = row
 
-    raw_xy = [rows_by_offset[k] for k in sorted(rows_by_offset)]
-    _log(f'generated {len(raw_xy)} contour rows before obstacle clipping')
-
     # ── Snake ordering, same as _run_f2c() ────────────────────────────
-    if snake_order and raw_xy:
-        raw_xy = [list(reversed(pts)) if i % 2 == 1 else list(pts)
-                  for i, pts in enumerate(raw_xy)]
+    # A row that re-enters the field (concave boundary) yields several
+    # pieces; flipping reverses the order of the pieces as well as each one.
+    raw_xy = []
+    for i, k in enumerate(sorted(rows_by_offset)):
+        pieces = rows_by_offset[k]
+        if snake_order and i % 2 == 1:
+            pieces = [list(reversed(pc)) for pc in reversed(pieces)]
+        for fragment, pc in enumerate(pieces):
+            if fragment:
+                break_after.add(len(raw_xy) - 1)
+            raw_xy.append(list(pc))
+    _log(f'generated {len(raw_xy)} contour rows before obstacle clipping')
 
     # ── Post-clip against obstacle union ──────────────────────────────
     if obstacle_polys_xy:
         raw_xy = _clip_lines_against_obstacles(
-            raw_xy, obstacle_polys_xy, tool_width * 0.5, _log)
+            raw_xy, obstacle_polys_xy, tool_width * 0.5, _log, break_after)
 
     result: list = []
     for pts_xy in raw_xy:

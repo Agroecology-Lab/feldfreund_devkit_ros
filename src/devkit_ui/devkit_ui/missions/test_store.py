@@ -29,14 +29,17 @@ class TestValidateMission(unittest.TestCase):
         self.assertIn('unknown action', cast(str, validate_mission('A', ['R1'], 'teleport', None)))
 
     def test_non_integer_repeat_is_rejected(self) -> None:
-        self.assertIn('must be an integer', cast(str, validate_mission('A', ['R1'], 'drive', 'often')))  # type: ignore[arg-type]
+        self.assertIn(
+            'must be an integer',
+            cast(str, validate_mission('A', ['R1'], 'drive', 'often')))  # type: ignore[arg-type]
 
     def test_non_positive_repeat_is_rejected(self) -> None:
         self.assertIn('must be > 0', cast(str, validate_mission('A', ['R1'], 'drive', 0)))
         self.assertIn('must be > 0', cast(str, validate_mission('A', ['R1'], 'drive', -3)))
 
     def test_uncleaned_name_is_rejected(self) -> None:
-        self.assertIn('invalid name', cast(str, validate_mission('not clean', ['R1'], 'drive', None)))
+        self.assertIn(
+            'invalid name', cast(str, validate_mission('not clean', ['R1'], 'drive', None)))
 
 
 class TestMissionStoreEditing(unittest.TestCase):
@@ -99,7 +102,8 @@ class TestMissionStoreEditing(unittest.TestCase):
     def test_update_changes_mutable_fields(self) -> None:
         mission_id = cast(str, self.store.add(rows=['R1'], action='drive', name='OLD'))
 
-        self.assertTrue(self.store.update(mission_id, name='new name', rows=['R2', 'R3'], repeat_every_hours=8))
+        self.assertTrue(
+            self.store.update(mission_id, name='new name', rows=['R2', 'R3'], repeat_every_hours=8))
 
         mission = self.store.find(mission_id)
         assert mission is not None
@@ -277,7 +281,8 @@ class TestMissionStoreScheduling(unittest.TestCase):
             {'id': 'NEVER_RAN', 'rows': ['R1', 'R2'], 'action': 'weed', 'action_params': {'rpm': 3},
              'repeat_every_hours': 6},
             {'id': 'FAILED', 'rows': ['R3'], 'action': 'drive',
-             'last_run_at': '2026-01-01T11:00:00Z', 'last_run_success': False, 'repeat_every_hours': 6},
+             'last_run_at': '2026-01-01T11:00:00Z', 'last_run_success': False,
+             'repeat_every_hours': 6},
             {'id': 'RECURRING_WAITING', 'rows': ['R4'], 'action': 'drive', 'repeat_every_hours': 6,
              'last_run_at': '2026-01-01T10:00:00Z', 'last_run_success': True},
             {'id': 'RECURRING_ELAPSED', 'rows': ['R5'], 'action': 'drive', 'repeat_every_hours': 6,

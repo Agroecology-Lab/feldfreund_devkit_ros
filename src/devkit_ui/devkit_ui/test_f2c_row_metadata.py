@@ -9,7 +9,7 @@ from datetime import UTC, datetime
 from itertools import pairwise
 from pathlib import Path
 from types import SimpleNamespace
-from unittest.mock import Mock
+from unittest.mock import AsyncMock, Mock
 
 from devkit_ui.models import NodeID, TopoDoc, TopoEdge, TopoNode, TopoPose, TopoProperties, Vector2
 
@@ -17,7 +17,9 @@ NAV_ACTION = 'nav_to_pose'
 ROW_ACTION = 'row_follow'
 
 
-def latlon_to_xy(lat: float, lon: float, anchor_lat: float, anchor_lon: float) -> tuple[float, float]:
+def latlon_to_xy(
+    lat: float, lon: float, anchor_lat: float, anchor_lon: float,
+) -> tuple[float, float]:
     return lat - anchor_lat, lon - anchor_lon
 
 
@@ -142,6 +144,66 @@ class TestF2CRowMetadata(unittest.TestCase):
         for name, row_role in expected.items():
             with self.subTest(name=name):
                 self.assert_row_metadata(node._topo_doc.get_node(name), 3, row_role)
+
+
+class TestDirectContourPlanning(unittest.IsolatedAsyncioTestCase):
+    async def test_fragment_breaks_reach_topo_and_reset_for_straight_plans(self):
+        swaths = [
+            [(51.0, -2.0), (51.001, -2.0)],
+            [(51.002, -2.0), (51.003, -2.0)],
+            [(51.003, -1.999), (51.0, -1.999)],
+        ]
+        node = make_node([])
+        node._obstacle_mgr = Mock()
+        node._obstacle_mgr.rings_ll.return_value = []
+
+        def plan_contours(*_args, break_after):
+            break_after.add(0)
+            return swaths
+
+        source_path = Path(__file__).with_name('ui_node.py')
+        tree = ast.parse(source_path.read_text(encoding='utf-8'))
+        methods = [method for method in ast.walk(tree)
+                   if isinstance(method, ast.FunctionDef | ast.AsyncFunctionDef)
+                   and method.name in ('_plan_contour_rows', 'do_plan')]
+        namespace = {
+            'self': node, 'corners_ll': [(51.0, -2.0), (51.003, -2.0), (51.0, -1.999)],
+            'swath_layers': [], 'mission_map': Mock(),
+            'plan_btn': Mock(), 'save_btn': Mock(), 'f2c_status': Mock(),
+            'ng_run': SimpleNamespace(
+                io_bound=AsyncMock(side_effect=lambda fn, *a, **kw: fn(*a, **kw))),
+            '_run_contour_f2c': plan_contours, '_run_f2c': Mock(return_value=swaths),
+            'load_recon_points': Mock(return_value=([], [], [])),
+            'build_elevation_grid': Mock(return_value=([], (0, 0), 0)),
+            'field_centroid_xy': Mock(return_value=(0, 0)),
+            'select_reference_contour_latlon': Mock(return_value=swaths[0]),
+            'np': Mock(),
+        }
+        values = {'f2c_width': 4, 'f2c_angle': 0, 'f2c_row_id_start': 7,
+                  'f2c_headland': 0, 'f2c_snake': True, 'f2c_contour': True,
+                  'obstacle_pad': 0, 'f2c_recon_path': 'test.csv', 'f2c_dem_res': 1}
+        namespace.update({name: SimpleNamespace(value=value) for name, value in values.items()})
+        module = ast.Module(body=methods, type_ignores=[])
+        exec(compile(ast.fix_missing_locations(module), source_path, 'exec'), namespace)
+
+        await namespace['do_plan']()
+        self.assertEqual(node._f2c_break_after, {0})
+        self.assertTrue(node._f2c_contour_used)
+        node.save_f2c_rows_to_topo('curve', row_id_start=7)
+        nodes = node._topo_doc
+        self.assertNotIn('CURVE_R8_IN', [e.node for e in nodes.get_node('CURVE_R7_OUT').edges])
+        self.assertNotIn('CURVE_R7_OUT', [e.node for e in nodes.get_node('CURVE_R8_IN').edges])
+        self.assertIn('CURVE_R9_IN', [e.node for e in nodes.get_node('CURVE_R8_OUT').edges])
+
+        namespace['select_reference_contour_latlon'].return_value = None
+        await namespace['do_plan']()
+        self.assertEqual(node._f2c_break_after, set())
+        self.assertFalse(node._f2c_contour_used)
+
+        node._f2c_break_after = {0}
+        namespace['f2c_contour'].value = False
+        await namespace['do_plan']()
+        self.assertEqual(node._f2c_break_after, set())
 
 
 if __name__ == '__main__':
