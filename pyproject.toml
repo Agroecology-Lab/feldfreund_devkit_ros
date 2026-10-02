@@ -70,6 +70,9 @@ disable = [
     "W0718",
 ]
 
+[tool.pylint.format]
+max-line-length = 120  # same as ruff's line-length
+
 [tool.pylint.'TYPECHECK']
 ignored-modules = [
     "rclpy",
