@@ -27,6 +27,8 @@ Development is led by the <a href="https://agroecologylab.org.uk" target="_blank
 
 ## Sowbot Roadmap
 
+Related [Safety Roadmap](https://github.com/Agroecology-Lab/feldfreund_devkit_ros/blob/caatinga-dev/safety_roadmap.md)
+
 | # | Feature | Description | Status | TRL | Phase |
 |---|---------|-------------|--------|-----|-------|
 | **FOUNDATION** | | | | | **2025** |
