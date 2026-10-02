@@ -158,8 +158,10 @@ try{
 if(req.c&&!contourReady){$('go').disabled=true;msg('Loading scipy and scikit-image (first contour run only, large download)…');
 await py.loadPackage(['scipy','scikit-image']);
 py.FS.mkdirTree('/lib/devkit_ui');
-for(const [src,dst] of [['devkit_ui/__init__.py','devkit_ui/__init__.py'],['devkit_ui/dem.py','devkit_ui/dem.py'],['devkit_ui/terrain_mask.py','devkit_ui/terrain_mask.py'],['contour_web.py','contour_web.py']])
-py.FS.writeFile('/lib/'+dst,await (await fetch(src)).text());
+py.FS.writeFile('/lib/devkit_ui/__init__.py','');
+for(const f of ['devkit_ui/dem.py','devkit_ui/terrain_mask.py','contour_web.py']){
+const r=await fetch(f);if(!r.ok)throw Error(f+' not found on this site (HTTP '+r.status+'). The Pages workflow must copy dem.py and terrain_mask.py into web/devkit_ui/.');
+py.FS.writeFile('/lib/'+f,await r.text())}
 contourReady=true;$('go').disabled=false}
 if(req.c){msg('Fitting survey surface and planning contour rows… this can take a minute.');await new Promise(r=>setTimeout(r,30))}
 py.globals.set('recon_csv',recon||'');
