@@ -59,7 +59,8 @@ class DevkitDriver(Node):
             self._bms_handler = BMSHandler(self, self.system.feldfreund.bms)
 
         if getattr(self.system.feldfreund, 'bumper', None) is not None:
-            self._bumper_handler = BumperHandler(self, self.system.feldfreund.bumper, self.system.feldfreund.estop)
+            self._bumper_handler = BumperHandler(
+                self, self.system.feldfreund.bumper, self.system.feldfreund.estop)
         self._twist_handler = TwistHandler(self, self.system.feldfreund.wheels)
         self._estop_handler = EStopHandler(self, self.system.feldfreund.estop)
 
@@ -117,7 +118,8 @@ def on_startup() -> None:
 
     log.info("Loading hardware configuration from %s", config_path)
 
-    simulation_mode = os.environ.get('FELDFREUND_SIMULATION', 'false').lower() in ('true', '1', 'yes')
+    simulation_mode = os.environ.get('FELDFREUND_SIMULATION', 'false').lower() in (
+        'true', '1', 'yes')
     if simulation_mode:
         rosys.enter_simulation()
 

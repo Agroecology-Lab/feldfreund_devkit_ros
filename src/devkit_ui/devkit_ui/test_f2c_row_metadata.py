@@ -17,7 +17,9 @@ NAV_ACTION = 'nav_to_pose'
 ROW_ACTION = 'row_follow'
 
 
-def latlon_to_xy(lat: float, lon: float, anchor_lat: float, anchor_lon: float) -> tuple[float, float]:
+def latlon_to_xy(
+    lat: float, lon: float, anchor_lat: float, anchor_lon: float,
+) -> tuple[float, float]:
     return lat - anchor_lat, lon - anchor_lon
 
 

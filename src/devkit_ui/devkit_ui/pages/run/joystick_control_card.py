@@ -17,11 +17,14 @@ class JoystickControlCard(ui.card):
                  Initialize the joystick control card with its state and control callbacks.
 
                  Parameters:
-                     global_store (GlobalViewModel): Global application state containing the emergency-stop status.
+                     global_store (GlobalViewModel): Global application state containing the
+                     emergency-stop status.
                      state (RunViewModel.Joystick): Joystick state containing the displayed pose.
-                     on_move (Callable[[float, float], None]): Callback invoked with the joystick's y and x coordinates.
+                     on_move (Callable[[float, float], None]): Callback invoked with the joystick's
+                     y and x coordinates.
                      on_stop (Callable[[], None]): Callback invoked when joystick movement ends.
-                     on_estop (Callable[[], None]): Callback invoked when the emergency-stop button is pressed.
+                     on_estop (Callable[[], None]): Callback invoked when the emergency-stop button
+                     is pressed.
                  """
         super().__init__()
 
@@ -61,5 +64,6 @@ class JoystickControlCard(ui.card):
 
                     # Pose label
                     ui.label().bind_text_from(self._state, 'pose_lbl').classes(
-                        'text-xs font-mono text-[#57606a] text-center max-w-[130px] whitespace-pre-line'
+                        'text-xs font-mono text-[#57606a] text-center '
+                        'max-w-[130px] whitespace-pre-line'
                     )

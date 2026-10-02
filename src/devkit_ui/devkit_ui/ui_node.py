@@ -466,9 +466,12 @@ class NiceGuiNode(Node):
 
     def __init__(self) -> None:
         """
-        Initialize the ROS node, GUI view models, navigation interfaces, sensor state, and mission-planning components.
+        Initialize the ROS node, GUI view models, navigation interfaces, sensor state, and
+        mission-planning components.
 
-        In simulation, configure the dedicated fallback GPS source used when no recent real GPS fix is available. Register the NiceGUI root page and initialize topology, obstacle, mission, safety, and navigation state.
+        In simulation, configure the dedicated fallback GPS source used when no recent real GPS fix
+        is available. Register the NiceGUI root page and initialize topology, obstacle, mission,
+        safety, and navigation state.
         """
         super().__init__(NODE_NAME)
 
@@ -503,7 +506,8 @@ class NiceGuiNode(Node):
             depth=1,
             reliability=ReliabilityPolicy.BEST_EFFORT,
         )
-        self.create_subscription(NavSatFix,    '/gnss/fix',           self.store_gps,                  _SENSOR_QOS)
+        self.create_subscription(
+            NavSatFix, '/gnss/fix', self.store_gps, _SENSOR_QOS)
 
         # Sim GPS shim: saving a topo map hard-requires a finite, non-zero fix
         # (see save path) to anchor nodes to a datum, and at cold start
@@ -556,12 +560,18 @@ class NiceGuiNode(Node):
                 f'Sim mode: publishing fake fix on {_FAKE_GPS_TOPIC} at datum '
                 f'({self._FAKE_GPS_LAT}, {self._FAKE_GPS_LON}) — fusioncore '
                 'does not subscribe to this topic')
-        self.create_subscription(BatteryState, 'battery_state',       self.store_battery,               1)
-        self.create_subscription(Bool,         'bumper/front_top',    self.update_bumper_front_top,    SAFETY_QOS)
-        self.create_subscription(Bool,         'bumper/front_bottom', self.update_bumper_front_bottom, SAFETY_QOS)
-        self.create_subscription(Bool,         'bumper/back',         self.update_bumper_back,         SAFETY_QOS)
-        self.create_subscription(Bool,         'estop/front',         self.update_estop_front,         SAFETY_QOS)
-        self.create_subscription(Bool,         'estop/back',          self.update_estop_back,          SAFETY_QOS)
+        self.create_subscription(
+            BatteryState, 'battery_state', self.store_battery, 1)
+        self.create_subscription(
+            Bool, 'bumper/front_top', self.update_bumper_front_top, SAFETY_QOS)
+        self.create_subscription(
+            Bool, 'bumper/front_bottom', self.update_bumper_front_bottom, SAFETY_QOS)
+        self.create_subscription(
+            Bool, 'bumper/back', self.update_bumper_back, SAFETY_QOS)
+        self.create_subscription(
+            Bool, 'estop/front', self.update_estop_front, SAFETY_QOS)
+        self.create_subscription(
+            Bool, 'estop/back', self.update_estop_back, SAFETY_QOS)
 
         _ODOM_QOS = QoSProfile(
             depth=10,
@@ -880,11 +890,13 @@ class NiceGuiNode(Node):
     def drop_topo_node(self, name: str, row_id: int | None,
                        row_role: str = 'entry') -> None:
         """
-                       Add a topology node at the current robot position and persist it to the active map.
+                       Add a topology node at the current robot position and persist it to the
+                       active map.
 
                        Parameters:
                         name (str): Name for the new node.
-                        row_id (int | None): Row identifier to associate with the node, or None for a navigation node.
+                        row_id (int | None): Row identifier to associate with the node, or None for
+                        a navigation node.
                         row_role (str): Role of the node within its row, such as "entry" or "exit".
                        """
         name = re.sub(r'[^A-Z0-9_]', '', name.strip().upper().replace(' ', '_'))
@@ -970,7 +982,8 @@ class NiceGuiNode(Node):
         gps_str  = (f' [{gps_meta["gps_lat"]:.5f},{gps_meta["gps_lon"]:.5f}]'
                     if gps_meta else '')
         row_str  = f' row={row_id}/{row_role}' if is_row else ''
-        self._run_vm.drop_node.status = f'{name}{conn_str} at ({x}, {y}){row_str}{gps_str} — writing…'
+        self._run_vm.drop_node.status = (
+            f'{name}{conn_str} at ({x}, {y}){row_str}{gps_str} — writing…')
 
         def _publish_and_persist():
             """Persist the updated topology map and make it available to the navigation system.
@@ -1030,7 +1043,8 @@ class NiceGuiNode(Node):
                     else:
                         self._topo_map_pub.publish(_topo_to_msg(self._topo_doc))
                         err = sr.message if sr else 'timeout'
-                        self._run_vm.drop_node.status = f'{name}{conn_str} saved (switch failed: {err})'
+                        self._run_vm.drop_node.status = (
+                            f'{name}{conn_str} saved (switch failed: {err})')
                         self.get_logger().warn(f'switch_topological_map failed ({err})')
                 else:
                     self._topo_map_pub.publish(_topo_to_msg(self._topo_doc))
@@ -1042,7 +1056,8 @@ class NiceGuiNode(Node):
                     f'Node dropped: {name} at ({x:.3f},{y:.3f}){conn_str}{row_str}{gps_str}')
             except Exception as e:
                 self._run_vm.drop_node.status = f'ERROR: {e}'
-                self.get_logger().error(f'drop_topo_node failed: {e} ({type(e)}\n{traceback.format_exc()})')
+                self.get_logger().error(
+                    f'drop_topo_node failed: {e} ({type(e)}\n{traceback.format_exc()})')
 
         threading.Thread(target=_publish_and_persist, daemon=True).start()
         return
@@ -1058,7 +1073,8 @@ class NiceGuiNode(Node):
                         prefix (str): Prefix used for numbered node names after normalization.
                         interval (float): Time in seconds between recorded nodes.
                         row_id (int | None): Optional row identifier associated with each node.
-                        row_role (str | None): Role assigned to recorded nodes when no row identifier is provided.
+                        row_role (str | None): Role assigned to recorded nodes when no row
+                        identifier is provided.
                     """
         prefix = re.sub(r'[^A-Z0-9_]', '', prefix.strip().upper().replace(' ', '_'))
         if not prefix:
@@ -1085,7 +1101,9 @@ class NiceGuiNode(Node):
         is_row = row_id is not None
 
         def _drop() -> None:
-            """Record the next topology node in the active tracking sequence and update tracking status."""
+            """Record the next topology node in the active tracking sequence and update tracking
+            status.
+            """
             self._track_counter += 1
             node_name = f'{prefix}_{self._track_counter}'
             if is_row:
@@ -1171,13 +1189,17 @@ class NiceGuiNode(Node):
     def _persist_and_reload(self, modify_fn: Callable[[TopoDoc], None], status_owner: object,
                              status_attr: str, success_msg: str) -> None:
         """
-                             Apply a topology modification, persist the updated map, and make it live.
+                             Apply a topology modification, persist the updated map, and make it
+                             live.
 
                              Parameters:
-                                 modify_fn (Callable[[TopoDoc], None]): Function that mutates the topology document.
-                                 status_owner (object): Object whose status attribute receives progress or error messages.
+                                 modify_fn (Callable[[TopoDoc], None]): Function that mutates the
+                                 topology document.
+                                 status_owner (object): Object whose status attribute receives
+                                 progress or error messages.
                                  status_attr (str): Name of the status attribute to update.
-                                 success_msg (str): Message reported after the map is persisted successfully.
+                                 success_msg (str): Message reported after the map is persisted
+                                 successfully.
                              """
         map_name = self._topo_doc.name
         map_file = f'/workspace/maps/{map_name}'
@@ -1240,7 +1262,8 @@ class NiceGuiNode(Node):
                 self.get_logger().info(f'_persist_and_reload: {success_msg}')
             except Exception as e:
                 setattr(status_owner, status_attr, f'ERROR: {e}')
-                self.get_logger().error(f'_persist_and_reload failed: {e} ({type(e)}\n{traceback.format_exc()})')
+                self.get_logger().error(
+                    f'_persist_and_reload failed: {e} ({type(e)}\n{traceback.format_exc()})')
 
         threading.Thread(target=_work, daemon=True).start()
 
@@ -1268,18 +1291,21 @@ class NiceGuiNode(Node):
         self._f2c_break_after = plan.break_after
         if plan.params.get('tool_width'):
             self._f2c_tool_width = float(plan.params['tool_width'])
-        split = f' · {len(plan.break_after)} obstacle splits (not linked)' if plan.break_after else ''
+        split = (
+            f' · {len(plan.break_after)} obstacle splits (not linked)' if plan.break_after else '')
         return f'imported {len(plan.swaths)} rows{split}; review, then Save as Topo Rows'
 
     def save_f2c_rows_to_topo(self, prefix: str, row_id_start: int,
                               overwrite: bool = False) -> None:
         """
-                              Save the most recently planned F2C swaths as rows in the loaded topology map.
+                              Save the most recently planned F2C swaths as rows in the loaded
+                              topology map.
 
                               Parameters:
                                   prefix (str): Prefix used to name the generated row nodes.
                                   row_id_start (int): Identifier assigned to the first planned row.
-                                  overwrite (bool): Whether to replace existing nodes with the specified prefix.
+                                  overwrite (bool): Whether to replace existing nodes with the
+                                  specified prefix.
                               """
         prefix = re.sub(r'[^A-Z0-9_]', '',
                         (prefix or '').strip().upper().replace(' ', '_'))
@@ -1565,10 +1591,12 @@ class NiceGuiNode(Node):
 
     def repair_row_connectivity(self, connect_to: str | None = None) -> None:
         """
-        Rebuild missing in-row and headland connections for existing rows in the loaded topology map.
+        Rebuild missing in-row and headland connections for existing rows in the loaded topology
+        map.
 
         Parameters:
-            connect_to (str | None): Optional node name to connect bidirectionally to the first row entry and last row exit.
+            connect_to (str | None): Optional node name to connect bidirectionally to the first row
+            entry and last row exit.
         """
         if not self._topo_doc:
             self.f2c_save_status = 'ERROR: map not loaded'
@@ -1781,7 +1809,8 @@ class NiceGuiNode(Node):
             return
         with ui.dialog() as d, ui.card():
             ui.label(f'Delete row {row_id}?').classes('font-semibold')
-            ui.label(f'{len(targets)} nodes will be removed:').classes('text-xs').style('color:#57606a')
+            ui.label(f'{len(targets)} nodes will be removed:').classes('text-xs').style(
+                'color:#57606a')
             ui.label(', '.join(targets)).classes('text-xs font-mono').style(
                 'color:#8c959f;max-width:340px;word-break:break-all')
             with ui.row().classes('w-full justify-end gap-2 mt-2'):
@@ -1832,7 +1861,9 @@ class NiceGuiNode(Node):
 
     def _nav_content(self) -> None:
 
-        """Builds the navigation interface and keeps its displayed state synchronized with the robot and topology."""
+        """Builds the navigation interface and keeps its displayed state synchronized with the robot
+        and topology.
+        """
         with ui.row().classes('w-full gap-3 items-stretch'):
 
             with ui.column().classes('flex-1 gap-3').style('min-width:0'):
@@ -1877,7 +1908,9 @@ class NiceGuiNode(Node):
             navigation_sidebar = NavigationSidebar(
                 global_store=self._global_vm,
                 topo_state=self._run_vm.topo,
-                on_go=lambda: self.send_nav_goal(self._run_vm.topo.selected_node) if self._run_vm.topo.selected_node else None,
+                on_go=lambda:
+                    self.send_nav_goal(self._run_vm.topo.selected_node)
+                    if self._run_vm.topo.selected_node else None,
                 on_cancel=self.cancel_nav_goal,
                 on_delete=lambda: self.confirm_delete_node(self._run_vm.topo.selected_node),
                 on_select=lambda name: setattr(self._run_vm.topo, 'selected_node', name),
@@ -2082,7 +2115,8 @@ class NiceGuiNode(Node):
                     data = (await e.file.read()) if hasattr(e, 'file') else e.content.read()
                     msg = self.import_plan_geojson(data.decode('utf-8', errors='replace'))
                     f2c_status.set_text(msg)
-                    f2c_status.style('color:' + ('#cf222e' if msg.startswith('ERROR') else '#1a7f37'))
+                    f2c_status.style(
+                        'color:' + ('#cf222e' if msg.startswith('ERROR') else '#1a7f37'))
                     save_btn.set_enabled(not msg.startswith('ERROR'))
 
                 ui.upload(label='Import web plan (.geojson)', auto_upload=True,
@@ -2262,7 +2296,9 @@ class NiceGuiNode(Node):
         save_btn.on_click(do_save)
 
         async def do_repair():
-            """Open a dialog to repair row connectivity and optionally connect the repaired chain to a base node."""
+            """Open a dialog to repair row connectivity and optionally connect the repaired chain to
+            a base node.
+            """
             topo_doc = self._topo_doc
             if topo_doc is None:
                 return
@@ -2399,7 +2435,8 @@ class NiceGuiNode(Node):
                         with ui.row().classes('items-center gap-1 w-full'):
                             with ui.column().classes('flex-1 gap-0'):
                                 ui.label(
-                                    f'Row {rid}  {adef.icon if adef else "?"} {adef.label if adef else act}'
+                                    f'Row {rid}  {adef.icon if adef else "?"} '
+                                    f'{adef.label if adef else act}'
                                 ).classes('text-sm font-mono')
                                 if param_str:
                                     ui.label(param_str).classes('text-xs font-mono').style(
@@ -2515,11 +2552,13 @@ class NiceGuiNode(Node):
                 ).classes('flex-1').props('dense outlined')
                 save_repeat = ui.number(
                 label='Repeat (h)', value=None, min=1, step=1, precision=0,
-                ).classes('w-24').props('dense outlined clearable').tooltip('Leave blank for one-shot')
+                ).classes('w-24').props('dense outlined clearable').tooltip(
+                    'Leave blank for one-shot')
 
                 def _save_mission():
                     if not mission_queue:
-                        # This is a protected method, we should probably find a better way of bubbling up the error.
+                        # This is a protected method, we should probably find a better way
+                        # of bubbling up the error.
                         self._mission_store._set_status('ERROR: queue is empty')  # pylint: disable=protected-access
                         return
                     topo_doc = self._topo_doc
@@ -2784,7 +2823,8 @@ class NiceGuiNode(Node):
             timeout_sec (float): Maximum time to wait for navigation completion.
 
         Returns:
-            bool: True if navigation succeeds, False if it fails, is cancelled, times out, or the action server is unavailable.
+            bool: True if navigation succeeds, False if it fails, is cancelled, times out, or the
+            action server is unavailable.
         """
         if not _ACTION_OK:
             return False
@@ -2928,16 +2968,20 @@ class NiceGuiNode(Node):
     # ── System tab ────────────────────────────────────────────────────────────
 
     def _system_content(self) -> None:
-        """Build the System tab interface for telemetry, safety monitoring, GPS, simulation tools, plant configuration, and map management."""
+        """Build the System tab interface for telemetry, safety monitoring, GPS, simulation tools,
+        plant configuration, and map management.
+        """
         with ui.row().classes('items-stretch w-full gap-3'):
             with ui.card().classes('flex-1'):
                 ui.label('Telemetry').classes('font-semibold mb-2')
                 ui.html('<div class="sec-label">Linear velocity</div>')
                 ui.slider(min=-1, max=1, step=0.05, value=0).props(
-                    'readonly selection-color=transparent color=green').bind_value(self, 'linear_velocity')
+                    'readonly selection-color=transparent color=green').bind_value(
+                        self, 'linear_velocity')
                 ui.html('<div class="sec-label mt-2">Angular velocity</div>')
                 ui.slider(min=-1, max=1, step=0.05, value=0).props(
-                    'readonly selection-color=transparent color=green').bind_value(self, 'angular_velocity')
+                    'readonly selection-color=transparent color=green').bind_value(
+                        self, 'angular_velocity')
                 ui.html('<div class="sec-label mt-3">Battery</div>')
                 ui.label().classes('text-sm').bind_text_from(self, 'latest_battery',
                     lambda msg: (f'{msg.percentage*100:.1f}%  {msg.voltage:.1f} V'
@@ -2953,7 +2997,8 @@ class NiceGuiNode(Node):
                         ui.label(label).classes('text-sm')
                     def _mk(d=dot, a=attr):
                         def _u():
-                            d.set_content(f'<span class="dot-{"warn" if getattr(self,a) else "ok"}"></span>')
+                            d.set_content(
+                                f'<span class="dot-{"warn" if getattr(self,a) else "ok"}"></span>')
                         return _u
                     ui.timer(0.2, _mk())
                 ui.html('<div class="sec-label mt-3">E-stops</div>')
@@ -2963,17 +3008,28 @@ class NiceGuiNode(Node):
                         ui.label(label).classes('text-sm')
                     def _mk2(d=dot, a=attr):
                         def _u():
-                            d.set_content(f'<span class="dot-{"warn" if getattr(self,a) else "off"}"></span>')
+                            d.set_content(
+                                f'<span class="dot-{"warn" if getattr(self,a) else "off"}"></span>')
                         return _u
                     ui.timer(0.2, _mk2())
         with ui.card().classes('w-full mt-3'):
             ui.label('ESP').classes('font-semibold mb-2')
             with ui.row().classes('gap-2 flex-wrap'):
-                ui.button('Enable',    on_click=lambda: self.esp_enable_publisher.publish(Empty())).props('color=positive outline no-caps').classes('px-4')
-                ui.button('Disable',   on_click=lambda: self.esp_disable_publisher.publish(Empty())).props('color=negative outline no-caps').classes('px-4')
-                ui.button('Reset',     on_click=lambda: self.esp_reset_publisher.publish(Empty())).props('color=warning outline no-caps').classes('px-4')
-                ui.button('Restart',   on_click=lambda: self.esp_restart_publisher.publish(Empty())).props('color=primary outline no-caps').classes('px-4')
-                ui.button('Configure', on_click=lambda: self.esp_configure_publisher.publish(Empty())).props('outline no-caps').classes('px-4')
+                ui.button('Enable',
+                    on_click=lambda: self.esp_enable_publisher.publish(Empty())).props(
+                        'color=positive outline no-caps').classes('px-4')
+                ui.button('Disable',
+                    on_click=lambda: self.esp_disable_publisher.publish(Empty())).props(
+                        'color=negative outline no-caps').classes('px-4')
+                ui.button('Reset',
+                    on_click=lambda: self.esp_reset_publisher.publish(Empty())).props(
+                        'color=warning outline no-caps').classes('px-4')
+                ui.button('Restart',
+                    on_click=lambda: self.esp_restart_publisher.publish(Empty())).props(
+                        'color=primary outline no-caps').classes('px-4')
+                ui.button('Configure',
+                    on_click=lambda: self.esp_configure_publisher.publish(Empty())).props(
+                        'outline no-caps').classes('px-4')
         with ui.card().classes('w-full mt-3'):
             ui.label('GPS').classes('font-semibold mb-2')
             leaflet = ui.leaflet(center=FIELD27_CENTER, zoom=18).classes('w-full h-80')
@@ -3019,7 +3075,8 @@ class NiceGuiNode(Node):
                             ['ros2', 'run', 'ros2graph_explorer', 'ros2graph_explorer'],
                             '/tmp/ros2graph_explorer.log')
                         _explorer_lbl.set_text(
-                            f'started (pid {_explorer_proc[0].pid}) - log: /tmp/ros2graph_explorer.log')
+                            f'started (pid {_explorer_proc[0].pid}) '
+                            '- log: /tmp/ros2graph_explorer.log')
                         _explorer_lbl.style('color:#1a7f37')
                         _report_if_exited(_explorer_proc[0], _explorer_lbl,
                                           '/tmp/ros2graph_explorer.log')
@@ -3394,7 +3451,9 @@ class NiceGuiNode(Node):
                         scale = float(plant_scale.value or 100) / 100.0
                         cat = scale_category.value or 'all'
                         model = plant_model.value or 'plant'
-                        weed_density = int(weed_density_scale.value) if weed_density_scale.value is not None else 10
+                        weed_density = (
+                            int(weed_density_scale.value)
+                            if weed_density_scale.value is not None else 10)
                         # Validate selected model exists on disk
                         model_dir = _CROP_MODELS_DIR / model
                         if not model_dir.is_dir() or not (model_dir / 'model.sdf').is_file():
@@ -3446,7 +3505,8 @@ class NiceGuiNode(Node):
                 _AGRO_PKG = '/workspace/install/devkit_simulation/share/devkit_simulation'
 
                 def _launch_sim(headless: bool = False):
-                    """Launch the selected simulation, optionally headless, and update its status."""
+                    """Launch the selected simulation, optionally headless, and update its status.
+                    """
                     # Single button, runs the exact same thing as the CLI:
                     # `ros2 launch devkit_bringup sowbot_sim.launch.py
                     #   world:=maize.world urdf:=<selected xacro>`
@@ -3736,7 +3796,8 @@ class NiceGuiNode(Node):
                 ui.separator().classes('w-full my-2')
 
                 with ui.row().classes('items-center gap-2 flex-wrap'):
-                    ui.button('Launch Sim', on_click=_launch_sim).props('color=positive no-caps').classes('px-4 font-bold')
+                    ui.button('Launch Sim', on_click=_launch_sim).props(
+                        'color=positive no-caps').classes('px-4 font-bold')
                     ui.button('Rebuild World from Map', on_click=_rebuild_world).props(
                         'outline no-caps').classes('px-4')
                     ui.button('Launch Sim (headless)',
@@ -3780,7 +3841,8 @@ class NiceGuiNode(Node):
                                 'image_topic:=/camera/image_raw',
                             ],
                             '/tmp/neo_sim.log', env=os.environ.copy())
-                        _neo_lbl.set_text(f'running — pid {_neo_proc[0].pid} · log: /tmp/neo_sim.log')
+                        _neo_lbl.set_text(
+                            f'running — pid {_neo_proc[0].pid} · log: /tmp/neo_sim.log')
                         _neo_lbl.style('color:#1a7f37')
                     except Exception as exc:
                         _neo_lbl.set_text(f'ERROR: {exc}')
@@ -3796,9 +3858,13 @@ class NiceGuiNode(Node):
                     _neo_lbl.style('color:#57606a')
 
                 with ui.row().classes('items-center gap-2 flex-wrap'):
-                    ui.html('<span class=\"sec-label\" style=\"white-space:nowrap\">Sowbot Row Follow</span>')
-                    ui.button('Start', on_click=_start_neo).props('color=positive no-caps').classes('px-4')
-                    ui.button('Stop',  on_click=_stop_neo).props('color=negative outline no-caps').classes('px-4')
+                    ui.html(
+                        '<span class=\"sec-label\" style=\"white-space:nowrap\">'
+                        'Sowbot Row Follow</span>')
+                    ui.button('Start', on_click=_start_neo).props(
+                        'color=positive no-caps').classes('px-4')
+                    ui.button('Stop',  on_click=_stop_neo).props(
+                        'color=negative outline no-caps').classes('px-4')
 
                 # ── Soil texture import ──────────────────────────────────
                 # Import a soil asset folder (zipped): its image maps are
@@ -4000,7 +4066,8 @@ class NiceGuiNode(Node):
     # pylint: disable=multiple-statements
     def store_battery(self, msg: BatteryState) -> None:      self.latest_battery = msg
     def update_bumper_front_top(self, msg: Bool) -> None:    self.bumper_front_top_active = msg.data
-    def update_bumper_front_bottom(self, msg: Bool) -> None: self.bumper_front_bottom_active = msg.data
+    def update_bumper_front_bottom(self, msg: Bool) -> None:
+        self.bumper_front_bottom_active = msg.data
     def update_bumper_back(self, msg: Bool) -> None:         self.bumper_back_active = msg.data
     def update_estop_front(self, msg: Bool) -> None:         self.estop_front_active = msg.data
     def update_estop_back(self, msg: Bool) -> None:          self.estop_back_active = msg.data

@@ -16,10 +16,12 @@ class TestTimeUtils(unittest.TestCase):
         self.assertEqual(parsed.tzinfo, UTC)
 
     def test_parse_ts_reads_iso_format(self) -> None:
-        self.assertEqual(parse_ts('2025-04-01T09:30:00Z'), datetime(2025, 4, 1, 9, 30, 0, tzinfo=UTC))
+        self.assertEqual(
+            parse_ts('2025-04-01T09:30:00Z'), datetime(2025, 4, 1, 9, 30, 0, tzinfo=UTC))
 
     def test_parse_ts_reads_legacy_format(self) -> None:
-        self.assertEqual(parse_ts('01-04-2025_09-30-00'), datetime(2025, 4, 1, 9, 30, 0, tzinfo=UTC))
+        self.assertEqual(
+            parse_ts('01-04-2025_09-30-00'), datetime(2025, 4, 1, 9, 30, 0, tzinfo=UTC))
 
     def test_parse_ts_returns_none_for_missing_input(self) -> None:
         self.assertIsNone(parse_ts(None))

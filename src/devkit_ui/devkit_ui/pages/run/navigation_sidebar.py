@@ -18,12 +18,16 @@ class NavigationSidebar(ui.card):
                  Initialize the navigation sidebar and bind its controls to the run state.
 
                  Parameters:
-                     global_store (GlobalViewModel): Global application state used for emergency-stop handling.
-                     topo_state (RunViewModel.Topo): Run state containing node selection and navigation statuses.
+                     global_store (GlobalViewModel): Global application state used for
+                     emergency-stop handling.
+                     topo_state (RunViewModel.Topo): Run state containing node selection and
+                     navigation statuses.
                      on_go (Callable[[], None]): Callback invoked to start navigation.
                      on_cancel (Callable[[], None]): Callback invoked to cancel navigation.
-                     on_delete (Callable[[], Awaitable[None] | None]): Callback invoked to delete the selected node.
-                     on_select (Callable[[str], None]): Callback invoked with the name of the selected node.
+                     on_delete (Callable[[], Awaitable[None] | None]): Callback invoked to delete
+                     the selected node.
+                     on_select (Callable[[str], None]): Callback invoked with the name of the
+                     selected node.
                  """
         super().__init__()
 
