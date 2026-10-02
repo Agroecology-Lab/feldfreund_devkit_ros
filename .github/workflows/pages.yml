@@ -2,7 +2,7 @@ name: Deploy swath planner to Pages
 on:
   push:
     branches: [caatinga-dev]
-    paths: ['web/**', 'src/devkit_f2c_planner/**', '.github/workflows/pages.yml']
+    paths: ['web/**', 'src/devkit_f2c_planner/**', 'src/devkit_ui/devkit_ui/dem.py', 'src/devkit_ui/devkit_ui/terrain_mask.py', '.github/workflows/pages.yml']
   workflow_dispatch:
 permissions: {contents: read, pages: write, id-token: write}
 concurrency: {group: pages, cancel-in-progress: true}
@@ -21,7 +21,10 @@ jobs:
     environment: {name: github-pages, url: '${{ steps.d.outputs.page_url }}'}
     steps:
       - uses: actions/checkout@v4
-      - run: cp src/devkit_f2c_planner/devkit_f2c_planner/f2c_planner.py web/
+      - run: |
+          cp src/devkit_f2c_planner/devkit_f2c_planner/f2c_planner.py web/
+          mkdir -p web/devkit_ui
+          cp src/devkit_ui/devkit_ui/dem.py src/devkit_ui/devkit_ui/terrain_mask.py web/devkit_ui/
       - uses: actions/configure-pages@v5
       - uses: actions/upload-pages-artifact@v3
         with: {path: web}
