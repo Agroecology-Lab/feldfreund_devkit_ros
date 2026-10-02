@@ -419,7 +419,8 @@ _TF_STALENESS_LIMIT = 2.0  # s — map->base_link older than this: don't draw it
 
 def _plan_contour_rows(corners_ll: list, obstacle_rings: list, tool_width: float,
                         pad_m: float, headland_m: float, snake: bool,
-                        recon_path: str, dem_resolution_m: float) -> list | None:
+                        recon_path: str, dem_resolution_m: float,
+                        *, break_after: set[int] | None = None) -> list | None:
     """Recon CSV -> reference contour -> contour swaths, in one blocking
     call so do_plan() can run it via ng_run.io_bound() without blocking the
     event loop (RBFInterpolator fit + swath offsetting are both CPU-bound).
@@ -456,7 +457,7 @@ def _plan_contour_rows(corners_ll: list, obstacle_rings: list, tool_width: float
         return None
     return _run_contour_f2c(
         corners_ll, obstacle_rings, reference_line_ll, tool_width,
-        pad_m, headland_m, snake)
+        pad_m, headland_m, snake, break_after=break_after)
 
 
 # ── ROS node ──────────────────────────────────────────────────────────────────
@@ -1502,8 +1503,7 @@ class NiceGuiNode(Node):
                 node.add_edge(other, action=NAV_ACTION)
 
         for rid_a, rid_b in pairwise(added):
-            # Imported plans mark fragments of one obstacle-split row: no
-            # headland edge between them, it would cross the obstacle.
+            # Fragments of one row must not be linked across obstacles or field gaps.
             if rid_a - row_id_start in self._f2c_break_after:
                 continue
             _, out_a = row_names[rid_a]
@@ -2174,6 +2174,7 @@ class NiceGuiNode(Node):
 
             mode_note = ''
             contour_used = False
+            break_after: set[int] = set()
             try:
                 if contour_on:
                     recon_path = (f2c_recon_path.value or '').strip() or \
@@ -2181,7 +2182,8 @@ class NiceGuiNode(Node):
                     dem_res = float(f2c_dem_res.value or 1.0)
                     swaths = await ng_run.io_bound(
                         _plan_contour_rows, list(corners_ll), obstacle_rings,
-                        width, pad_m, headland_m, snake, recon_path, dem_res)
+                        width, pad_m, headland_m, snake, recon_path, dem_res,
+                        break_after=break_after)
                     if swaths is None:
                         mode_note = ' · flat field, straight swaths used'
                         swaths = await ng_run.io_bound(
@@ -2235,7 +2237,7 @@ class NiceGuiNode(Node):
             # — instead of being offset by the distance between the field and
             # whatever latest_gps happened to read (in sim, the datum fix).
             self._f2c_origin_ll = tuple(corners_ll[0]) if corners_ll else None
-            self._f2c_break_after = set()
+            self._f2c_break_after = break_after
 
             hl_note  = f' · {headland_m}m headland' if headland_m > 0 else ''
             snk_note = ' · snake' if snake else ''

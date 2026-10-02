@@ -111,6 +111,8 @@ def parse_plan(text, robot_ll=None, max_distance_m=DEFAULT_MAX_DISTANCE_M) -> Pl
             raise PlanError(f'plan is {d / 1000:.1f} km from the robot '
                             f'(limit {max_distance_m / 1000:.1f} km); refusing to import')
 
+    if 'contour' in props and not isinstance(props['contour'], bool):
+        raise PlanError('contour must be a boolean')
     keys = ('tool_width', 'angle', 'headland', 'snake', 'contour', 'generator')
     params = {k: props.get(k) for k in keys}
     return Plan(swaths, origin_ll, break_after, params)

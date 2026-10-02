@@ -108,6 +108,17 @@ class ClipLinesAgainstObstaclesTest(unittest.TestCase):
         self.assertEqual(len(result), 5)
         self.assertIn([(0.0, 5.0), (10.0, 5.0)], result)
 
+    def test_break_indices_follow_splits_and_dropped_fragments(self):
+        rows = [[(0, 0), (10, 0)], [(4.2, 0), (5.8, 0)],
+                [(4.1, 0), (6.1, 0)], [(0, 5), (10, 5)], [(0, 6), (10, 6)]]
+        for initial_breaks in ({0}, {1}, {2}):
+            with self.subTest(initial_breaks=initial_breaks):
+                breaks = set(initial_breaks)
+                result = planner._clip_lines_against_obstacles(
+                    rows, [Polygon(self.OBSTACLE)], 0.5, lambda _msg: None, breaks)
+                self.assertEqual(len(result), 4)
+                self.assertEqual(breaks, {0, 1})
+
 
 if __name__ == '__main__':
     unittest.main()

@@ -111,6 +111,31 @@ class ContourRowsTest(unittest.TestCase):
         for row in rows:
             self.assertLess(max(x for x, _ in row) - min(x for x, _ in row), 20.0 + TOLERANCE_M)
 
+    def test_self_crossing_extension_keeps_original_reference(self):
+        reference = [(40, 40), (20, 40), (20, 10), (80, 10), (80, 40), (60, 40)]
+        self.assertTrue(LineString(reference).is_simple)
+        self.assertFalse(planner._extend_line(LineString(reference), 112, 12).is_simple)
+        expected = contour_rows(reference_xy=reference, extend_reference=False)
+        self.assertTrue(expected)
+        self.assertEqual(contour_rows(reference_xy=reference), expected)
+
+    def test_fragment_breaks_survive_snaking_and_obstacle_clipping(self):
+        field = [(0, 0), (100, 0), (100, 50), (60, 50), (60, 20),
+                 (40, 20), (40, 50), (0, 50)]
+        obstacle = [(10, 15), (20, 15), (20, 45), (10, 45)]
+        for snake in (False, True):
+            for obstacles in ([], [to_ll(obstacle)]):
+                with self.subTest(snake=snake, obstacles=bool(obstacles)):
+                    breaks = {999}
+                    rows = planner._run_contour_f2c(
+                        to_ll(field), obstacles, to_ll([(0, 30), (100, 30)]),
+                        TOOL_WIDTH, snake_order=snake, break_after=breaks)
+                    rows = [to_xy(row) for row in rows]
+                    expected = {i for i in range(len(rows) - 1)
+                                if abs(row_y(rows[i]) - row_y(rows[i + 1])) < TOLERANCE_M}
+                    self.assertTrue(expected)
+                    self.assertEqual(breaks, expected)
+
     def test_row_that_reenters_the_field_keeps_all_its_pieces(self):
         """A concave field splits a row in two; the old code dropped it and stopped planning."""
         field_xy = [(0, 0), (100, 0), (100, 50), (60, 50), (60, 20), (40, 20), (40, 50), (0, 50)]
