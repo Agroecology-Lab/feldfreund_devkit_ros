@@ -176,3 +176,51 @@ class TestDropTopoNode(unittest.TestCase):
         saved = parse_topo_yaml(self.map_file)
         self.assertEqual(saved.actions, default_actions())
         self.assertEqual(saved.definitions, default_definitions())
+
+    def test_existing_map_preserves_disk_only_nodes_and_custom_settings(self) -> None:
+        disk = TopoDoc(
+            name='field.yaml', metric_map='survey',
+            nodes=[TopoNode(name='DISK', x=9.0, y=8.0)],
+            actions={'custom': {'composable': False}}, definitions={'custom_bt': '<custom/>'})
+        dump_topo_yaml(disk, self.map_file)
+        self.node._topo_doc.insert_node(TopoNode(name='UNSAVED'))
+
+        self.node.drop_topo_node('NEW', 0, 'entry')
+
+        saved = parse_topo_yaml(self.map_file)
+        self.assertEqual({node.name for node in saved.nodes}, {'DISK', 'NEW'})
+        self.assertEqual(saved.get_node('DISK').to_dict(), disk.get_node('DISK').to_dict())
+        self.assertEqual(saved.actions, disk.actions)
+        self.assertEqual(saved.definitions, disk.definitions)
+        self.assertEqual(saved.to_dict()['metric_map'], 'survey')
+        self.assertEqual(saved.get_node('NEW').meta['row_id'], 0)
+        self.assertEqual(saved.get_node('NEW').meta['row_role'], 'entry')
+
+    def test_failed_write_keeps_initial_addition_without_publishing(self) -> None:
+        live = self.node._topo_doc
+        self.namespace['dump_topo_yaml'].side_effect = OSError('disk full')
+
+        self.node.drop_topo_node('NEW', 1)
+
+        self.assertIs(self.node._topo_doc, live)
+        self.assertTrue(live.has_node('NEW'))
+        self.assertEqual(self.node._run_vm.drop_node.status, 'ERROR: disk full')
+        self.assertFalse(self.map_file.exists())
+        self.node._topo_map_pub.publish.assert_not_called()
+        self.node.get_logger().error.assert_called_once()
+
+    def test_pruning_saved_edges_does_not_mutate_initial_node(self) -> None:
+        self.node._topo_doc.insert_node(TopoNode(name='TARGET'))
+        self.node._run_vm.topo.current_node = 'TARGET'
+        live = self.node._topo_doc
+        self.node._row_action = VISION_ROW_ACTION
+
+        self.node.drop_topo_node('NEW', 1)
+
+        initial = live.get_node('NEW')
+        saved = self.node._topo_doc.get_node('NEW')
+        self.assertIsNot(initial, saved)
+        self.assertEqual(list(initial.edges), [TopoEdge(VISION_ROW_ACTION, 'NEW_TARGET', 'TARGET')])
+        self.assertEqual(list(saved.edges), [])
+        saved.meta['row_role'] = 'exit'
+        self.assertEqual(initial.meta['row_role'], 'entry')

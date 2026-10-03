@@ -5,6 +5,19 @@ from devkit_ui.topo_defaults import default_actions, default_definitions
 
 
 class TestTopoDefaults(unittest.TestCase):
+    def test_path_following_stays_outside_the_replanning_rate_limiter(self) -> None:
+        for name, planner in (('default_bt', 'ComputePathToPose'),
+                              ('row_traversal_bt', 'ComputePathThroughPoses')):
+            with self.subTest(definition=name):
+                tree = ElementTree.fromstring(default_definitions()[name])
+                pipeline = tree.find('.//PipelineSequence')
+                self.assertEqual([child.tag for child in pipeline],
+                                 ['RateController', 'FollowPath'])
+                rate, follow = pipeline
+                self.assertEqual(float(rate.attrib['hz']), 1.0)
+                self.assertEqual(rate.find(f'.//{planner}').attrib['planner_id'], 'GridBased')
+                self.assertEqual(follow.attrib['controller_id'], 'FollowPath')
+
     def test_action_factories_isolate_nested_templates(self) -> None:
         actions = default_actions()
         original = default_actions()

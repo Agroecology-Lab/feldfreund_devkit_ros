@@ -105,6 +105,32 @@ def make_node(swaths, *, contour_used=False):
 
 
 class TestF2CRowMetadata(unittest.TestCase):
+    def test_repair_preserves_existing_modes_and_is_idempotent_after_mode_change(self) -> None:
+        node = make_node([])
+        node._row_action = 'limbic_row_follow'
+        for name, role, y in (('IN', 'entry', 0), ('WP', 'waypoint', 5), ('OUT', 'exit', 10)):
+            node._topo_doc.insert_node(TopoNode(
+                name=name, x=0, y=y, meta={'row_id': 1, 'row_role': role}))
+        existing = TopoEdge('row_traversal', 'authored', 'WP')
+        node._topo_doc.get_node('IN').add_edge(existing)
+
+        node.repair_row_connectivity()
+
+        self.assertEqual(list(node._topo_doc.get_node('IN').edges), [existing])
+        self.assertEqual([edge.action for edge in node._topo_doc.get_node('WP').edges],
+                         ['limbic_row_follow'])
+        node._persist_and_reload.assert_called_once()
+        node._persist_and_reload.reset_mock()
+        node._row_action = 'row_traversal'
+
+        node.repair_row_connectivity()
+
+        self.assertEqual(list(node._topo_doc.get_node('IN').edges), [existing])
+        self.assertEqual([edge.action for edge in node._topo_doc.get_node('WP').edges],
+                         ['limbic_row_follow'])
+        self.assertIn('already wired', node.f2c_save_status)
+        node._persist_and_reload.assert_not_called()
+
     def test_selected_mode_applies_to_straight_and_contour_chains_only(self) -> None:
         for action in ('row_traversal', 'limbic_row_follow'):
             for contour in (False, True):

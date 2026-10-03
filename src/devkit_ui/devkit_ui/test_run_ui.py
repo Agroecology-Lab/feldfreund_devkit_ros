@@ -353,6 +353,20 @@ class TestDropNodeCard(unittest.TestCase):
         self.state.row_id = None
         self.assertEqual(self.card.row_hint.refresh_binding(), NAV_ACTION)
 
+    def test_card_created_with_vision_selection_displays_it_without_switching_mode(self) -> None:
+        fake_ui.reset()
+        self.state.row_action = VISION_ROW_ACTION
+        self.state.row_id = 3
+        callback = Mock()
+
+        card = DropNodeCard(self.state, self.topo, self.on_drop, callback)
+
+        toggle = next(element for element in fake_ui.elements
+                      if element.kind == 'toggle' and element.binding.attribute == 'row_action')
+        self.assertEqual(toggle.value, VISION_ROW_ACTION)
+        self.assertEqual(card.row_hint.text, VISION_ROW_ACTION)
+        callback.assert_not_called()
+
 
 class TestNavigationSidebar(unittest.TestCase):
     def setUp(self) -> None:

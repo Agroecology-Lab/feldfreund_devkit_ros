@@ -75,3 +75,20 @@ class TestRowActions(unittest.TestCase):
         saved = parse_topo_yaml(self.directory / 'live')
         self.assertEqual(list(saved.get_node('DISK').edges), [
             TopoEdge(VISION_ROW_ACTION, 'extra', 'A')])
+
+    def test_failed_save_keeps_selected_mode_but_preserves_live_and_disk_edges(self) -> None:
+        live = self.node._topo_doc
+        dump_topo_yaml(live, self.directory / 'live')
+        original = copy.deepcopy(live.to_dict())
+        original_bytes = (self.directory / 'live').read_bytes()
+        self.namespace['dump_topo_yaml'].side_effect = OSError('read only')
+
+        self.node.set_row_action(VISION_ROW_ACTION)
+
+        self.assertEqual(self.node._run_vm.drop_node.status, 'ERROR: read only')
+        self.assertEqual(self.node._row_action, VISION_ROW_ACTION)
+        self.assertEqual(self.node._run_vm.drop_node.row_action, VISION_ROW_ACTION)
+        self.assertIs(self.node._topo_doc, live)
+        self.assertEqual(live.to_dict(), original)
+        self.assertEqual((self.directory / 'live').read_bytes(), original_bytes)
+        self.node._topo_map_pub.publish.assert_not_called()

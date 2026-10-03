@@ -5,6 +5,38 @@ from devkit_ui.models import TopoDoc, TopoEdge, TopoNode
 
 
 class TestTopoDoc(unittest.TestCase):
+    def test_switch_handles_self_loops_and_missing_targets_idempotently(self) -> None:
+        original_edge = TopoEdge('row_traversal', 'self', 'A')
+        node = TopoNode(name='A', edges=[
+            original_edge,
+            TopoEdge('limbic_row_follow', 'missing', 'MISSING'),
+            TopoEdge('custom', 'custom', 'OTHER'),
+        ])
+        doc = TopoDoc(name='field', nodes=[node])
+        actions = {'row_traversal', 'limbic_row_follow'}
+
+        self.assertEqual(doc.set_row_action(actions, 'row_traversal'), 1)
+        self.assertEqual(doc.set_row_action(actions, 'row_traversal'), 0)
+        self.assertEqual(list(node.edges), [
+            original_edge, TopoEdge('row_traversal', 'missing', 'MISSING'),
+            TopoEdge('custom', 'custom', 'OTHER'),
+        ])
+        self.assertEqual(actions, {'row_traversal', 'limbic_row_follow'})
+        self.assertEqual({entry.name for entry in doc.nodes}, {'A'})
+
+    def test_renaming_to_same_name_still_returns_an_independent_document(self) -> None:
+        source = TopoDoc(name='field', nodes=[
+            TopoNode(name='A', pointset='field', meta={'tags': ['crop']})])
+        source.ensure_meta('field')
+        renamed = source.renamed('field')
+        self.assertEqual(renamed.to_dict(), source.to_dict())
+
+        source.get_node('A').meta['tags'].append('changed')
+        source.insert_node(TopoNode(name='B'))
+
+        self.assertEqual(renamed.get_node('A').meta['tags'], ['crop'])
+        self.assertFalse(renamed.has_node('B'))
+
     def test_switch_counts_edges_across_nodes_and_preserves_edge_identity(self) -> None:
         a = TopoNode(name='A', edges=[
             TopoEdge('row_traversal', 'forward', 'B'),
