@@ -34,6 +34,7 @@ def load_map_harness(directory):
                           decorator_list=[])
 
     def local_path(path):
+        """Map a path under /workspace/maps into the temporary test directory."""
         return directory / Path(path).relative_to('/workspace/maps')
 
     namespace = {
@@ -64,11 +65,13 @@ def load_map_harness(directory):
 
 class TestMapOperations(unittest.TestCase):
     def setUp(self) -> None:
+        """Create an isolated map harness with a temporary persistence directory."""
         # pylint: disable-next=consider-using-with
         self.directory = Path(self.enterContext(TemporaryDirectory()))
         self.node, self.namespace = load_map_harness(self.directory)
 
     def test_save_prefers_persisted_state_and_leaves_live_map_untouched(self) -> None:
+        """Verify a named copy uses disk state and leaves the live map unchanged."""
         persisted = TopoDoc(name='live', metric_map='occupancy',
                             nodes=[TopoNode(name='DISK', x=9.0, y=8.0)])
         dump_topo_yaml(persisted, self.directory / 'live')
@@ -90,6 +93,7 @@ class TestMapOperations(unittest.TestCase):
         self.node._topo_map_pub.publish.assert_not_called()
 
     def test_save_without_disk_source_accepts_name_boundaries(self) -> None:
+        """Verify one-character and 64-character names work when copying an in-memory map."""
         for name in ('7', 'a' * 64):
             with self.subTest(name=name):
                 self.assertEqual(self.node.save_map_as(name), f'saved → {name}')
@@ -100,6 +104,7 @@ class TestMapOperations(unittest.TestCase):
         self.assertEqual(self.node._topo_doc.name, 'live')
 
     def test_invalid_names_never_touch_filesystem(self) -> None:
+        """Verify invalid copy names are rejected before any filesystem operations."""
         for name in (None, '', ' ', '../escape', '/absolute', 'a/b', 'a\\b', '.hidden',
                      '_field', '-field', 'two words', 'field.yaml', 'é', 'a' * 65, 'a\nb'):
             with self.subTest(name=name):
@@ -110,6 +115,7 @@ class TestMapOperations(unittest.TestCase):
         self.assertEqual(list(self.directory.iterdir()), [])
 
     def test_save_refuses_live_name_and_existing_target(self) -> None:
+        """Verify saving refuses the live map name and preserves an existing target file."""
         target = self.directory / 'existing'
         target.write_text('keep me', encoding='utf-8')
         self.assertEqual(self.node.save_map_as(' live '), 'ERROR: that is the live map name')
@@ -118,6 +124,7 @@ class TestMapOperations(unittest.TestCase):
         self.namespace['dump_topo_yaml'].assert_not_called()
 
     def test_save_rejects_unloaded_and_empty_maps(self) -> None:
+        """Verify saving rejects missing maps and empty maps in memory or on disk."""
         self.node._topo_doc = None
         self.assertEqual(self.node.save_map_as('copy'), 'ERROR: map not loaded')
         self.node._topo_doc = TopoDoc(name='live')
@@ -128,6 +135,7 @@ class TestMapOperations(unittest.TestCase):
         self.namespace['dump_topo_yaml'].assert_not_called()
 
     def test_save_reports_read_and_write_errors_without_changing_live_map(self) -> None:
+        """Verify copy failures report disk errors and leave the live map unchanged."""
         dump_topo_yaml(self.node._topo_doc, self.directory / 'live')
         live = self.node._topo_doc
         for boundary in ('parse_topo_yaml', 'dump_topo_yaml'):
@@ -145,6 +153,7 @@ class TestMapOperations(unittest.TestCase):
         self.node._topo_map_pub.publish.assert_not_called()
 
     def test_clear_archives_custom_settings_then_resets_defaults_and_row_mode(self) -> None:
+        """Verify clearing archives custom settings and resets actions and row mode."""
         live = self.node._topo_doc
         live.seed_actions({'legacy': {'composable': True}}, {'legacy_bt': '<legacy/>'})
         live.transformation['translation'] = {'x': 42.0}
@@ -169,6 +178,7 @@ class TestMapOperations(unittest.TestCase):
         self.node._topo_map_pub.publish.assert_called_once_with(self.node._topo_doc.to_dict())
 
     def test_clear_archives_disk_state_without_overwriting_previous_archive(self) -> None:
+        """Verify clearing archives the saved map under the next available archive name."""
         dump_topo_yaml(TopoDoc(name='live', nodes=[TopoNode(name='DISK', x=0.0, y=0.0)]),
                        self.directory / 'live')
         previous = self.directory / 'live_1'
@@ -180,6 +190,7 @@ class TestMapOperations(unittest.TestCase):
         self.assertEqual(previous.read_text(encoding='utf-8'), 'previous archive')
 
     def test_failed_clear_keeps_live_document_and_row_mode(self) -> None:
+        """Verify a failed archive write preserves the live document and row selection."""
         live = self.node._topo_doc
         self.node._row_action = self.node._run_vm.drop_node.row_action = VISION_ROW_ACTION
         self.namespace['dump_topo_yaml'].side_effect = OSError('read only')
@@ -192,6 +203,7 @@ class TestMapOperations(unittest.TestCase):
         self.node._topo_map_pub.publish.assert_not_called()
 
     def test_persist_seeds_missing_actions_and_preserves_custom_actions(self) -> None:
+        """Verify new map files receive defaults only when the live map has no actions."""
         for custom in (False, True):
             with self.subTest(custom=custom):
                 node, _ = load_map_harness(self.directory)

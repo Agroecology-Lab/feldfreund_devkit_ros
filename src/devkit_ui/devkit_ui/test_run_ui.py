@@ -253,6 +253,7 @@ class Node:
 
 class TestRunViewModel(unittest.TestCase):
     def test_row_mode_starts_with_geometry_for_each_session(self) -> None:
+        """Verify each new session selects geometry mode independently of earlier sessions."""
         first = RunViewModel()
         self.assertEqual(first.drop_node.row_action, ROW_ACTION)
         first.drop_node.row_action = VISION_ROW_ACTION
@@ -323,6 +324,7 @@ class TestDropNodeCard(unittest.TestCase):
         self.on_drop.assert_called_once_with('ROW_2_OUT', 2, 'exit')
 
     def test_mode_toggle_binds_state_updates_hint_and_calls_callback(self) -> None:
+        """Verify the bound row toggle refreshes the hint and reports the selected action."""
         fake_ui.reset()
         callback = Mock()
         card = DropNodeCard(self.state, self.topo, self.on_drop, callback)
@@ -343,6 +345,7 @@ class TestDropNodeCard(unittest.TestCase):
         self.assertEqual(callback.call_count, 4)
 
     def test_mode_toggle_without_callback_and_row_id_changes_use_current_mode(self) -> None:
+        """Verify hints follow row selection and mode when no change callback is provided."""
         toggle = next(element for element in fake_ui.elements
                       if element.kind == 'toggle' and element.binding.attribute == 'row_action')
         self.state.row_action = VISION_ROW_ACTION
@@ -354,6 +357,7 @@ class TestDropNodeCard(unittest.TestCase):
         self.assertEqual(self.card.row_hint.refresh_binding(), NAV_ACTION)
 
     def test_card_created_with_vision_selection_displays_it_without_switching_mode(self) -> None:
+        """Verify card creation shows the existing vision mode without invoking its callback."""
         fake_ui.reset()
         self.state.row_action = VISION_ROW_ACTION
         self.state.row_id = 3

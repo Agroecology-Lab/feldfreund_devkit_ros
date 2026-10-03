@@ -142,6 +142,7 @@ class TestDropTopoNode(unittest.TestCase):
         self.node._topo_map_pub.publish.assert_not_called()
 
     def test_row_drop_persists_selected_mode_without_reverse_edge_backfill(self) -> None:
+        """Verify dropped row edges use the selected mode without adding reverse edges."""
         for action in (ROW_ACTION, VISION_ROW_ACTION):
             with self.subTest(action=action):
                 self.node._topo_doc = TopoDoc(
@@ -158,6 +159,7 @@ class TestDropTopoNode(unittest.TestCase):
                 self.assertEqual(list(saved.get_node('TARGET').edges), [])
 
     def test_standard_drop_uses_navigation_even_in_vision_mode(self) -> None:
+        """Verify non-row drops use navigation regardless of the selected row mode."""
         self.node._row_action = VISION_ROW_ACTION
         self.node._topo_doc.add_node(TopoNode(name='TARGET', x=0.0, y=0.0))
         self.node._run_vm.topo.current_node = 'TARGET'
@@ -169,6 +171,7 @@ class TestDropTopoNode(unittest.TestCase):
             TopoEdge(action=NAV_ACTION, edge_id='NEW_TARGET', node='TARGET')])
 
     def test_missing_map_replaces_stale_settings_with_defaults(self) -> None:
+        """Verify creating a map replaces stale actions and definitions with defaults."""
         self.node._topo_doc.seed_actions({'custom': {'composable': True}}, {'old': '<old/>'})
 
         self.node.drop_topo_node('NEW', None)
@@ -178,6 +181,7 @@ class TestDropTopoNode(unittest.TestCase):
         self.assertEqual(saved.definitions, default_definitions())
 
     def test_existing_map_preserves_disk_only_nodes_and_custom_settings(self) -> None:
+        """Verify a drop retains saved nodes and settings while excluding unsaved nodes."""
         disk = TopoDoc(
             name='field.yaml', metric_map='survey',
             nodes=[TopoNode(name='DISK', x=9.0, y=8.0)],
@@ -197,6 +201,7 @@ class TestDropTopoNode(unittest.TestCase):
         self.assertEqual(saved.get_node('NEW').meta['row_role'], 'entry')
 
     def test_failed_write_keeps_initial_addition_without_publishing(self) -> None:
+        """Verify a failed save reports an error and retains the node added in memory."""
         live = self.node._topo_doc
         self.namespace['dump_topo_yaml'].side_effect = OSError('disk full')
 
@@ -210,6 +215,7 @@ class TestDropTopoNode(unittest.TestCase):
         self.node.get_logger().error.assert_called_once()
 
     def test_pruning_saved_edges_does_not_mutate_initial_node(self) -> None:
+        """Verify pruning unsaved targets affects only the persisted copy of a node."""
         self.node._topo_doc.insert_node(TopoNode(name='TARGET'))
         self.node._run_vm.topo.current_node = 'TARGET'
         live = self.node._topo_doc

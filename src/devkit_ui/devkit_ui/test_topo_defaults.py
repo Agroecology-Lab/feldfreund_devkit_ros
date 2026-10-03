@@ -6,6 +6,7 @@ from devkit_ui.topo_defaults import default_actions, default_definitions
 
 class TestTopoDefaults(unittest.TestCase):
     def test_path_following_stays_outside_the_replanning_rate_limiter(self) -> None:
+        """Verify path following is a sibling of the planner rate limiter in both default trees."""
         for name, planner in (('default_bt', 'ComputePathToPose'),
                               ('row_traversal_bt', 'ComputePathThroughPoses')):
             with self.subTest(definition=name):
@@ -19,6 +20,7 @@ class TestTopoDefaults(unittest.TestCase):
                 self.assertEqual(follow.attrib['controller_id'], 'FollowPath')
 
     def test_action_factories_isolate_nested_templates(self) -> None:
+        """Verify mutating nested action templates leaves subsequent defaults unchanged."""
         actions = default_actions()
         original = default_actions()
 
@@ -29,6 +31,7 @@ class TestTopoDefaults(unittest.TestCase):
         self.assertEqual(default_actions(), original)
 
     def test_definition_factories_isolate_maps(self) -> None:
+        """Verify editing or removing copied definitions leaves subsequent defaults unchanged."""
         definitions = default_definitions()
         original = default_definitions()
         definitions['default_bt'] = '<custom/>'
@@ -36,6 +39,7 @@ class TestTopoDefaults(unittest.TestCase):
         self.assertEqual(default_definitions(), original)
 
     def test_actions_use_matching_goal_shapes_and_behavior_trees(self) -> None:
+        """Verify each default action matches its server, goal template, and behavior tree."""
         actions = default_actions()
         expected = {
             'navigate_to_pose': ('NavigateToPose', '/navigate_to_pose', False, 'default_bt'),
@@ -59,6 +63,7 @@ class TestTopoDefaults(unittest.TestCase):
                     self.assertIn(definition, default_definitions())
 
     def test_behavior_trees_bind_single_and_multiple_goals_correctly(self) -> None:
+        """Verify default trees share path bindings and prune passed goals for row traversal."""
         definitions = default_definitions()
         for name, planner, goal_key in (
             ('default_bt', 'ComputePathToPose', 'goal'),

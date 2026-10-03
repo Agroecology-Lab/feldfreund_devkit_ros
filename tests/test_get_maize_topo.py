@@ -12,6 +12,7 @@ from get_maize_topo import generate
 
 class TestMaizeTopologyDefaults(unittest.TestCase):
     def test_generated_maps_use_geometry_rows_and_shared_navigation_defaults(self) -> None:
+        """Verify both crop orientations generate geometry row edges and shared map defaults."""
         # NOTE: get_maize_topo adds the ROS package source directory to sys.path on import.
         # pylint: disable-next=import-outside-toplevel
         from devkit_ui.topo_defaults import default_actions, default_definitions

@@ -106,6 +106,7 @@ def make_node(swaths, *, contour_used=False):
 
 class TestF2CRowMetadata(unittest.TestCase):
     def test_repair_preserves_existing_modes_and_is_idempotent_after_mode_change(self) -> None:
+        """Verify repair preserves existing actions and skips saving fully connected rows."""
         node = make_node([])
         node._row_action = 'limbic_row_follow'
         for name, role, y in (('IN', 'entry', 0), ('WP', 'waypoint', 5), ('OUT', 'exit', 10)):
@@ -132,6 +133,7 @@ class TestF2CRowMetadata(unittest.TestCase):
         node._persist_and_reload.assert_not_called()
 
     def test_selected_mode_applies_to_straight_and_contour_chains_only(self) -> None:
+        """Verify both swath types use the selected row mode and navigation for headlands."""
         for action in ('row_traversal', 'limbic_row_follow'):
             for contour in (False, True):
                 with self.subTest(action=action, contour=contour):
@@ -156,6 +158,7 @@ class TestF2CRowMetadata(unittest.TestCase):
                     self.assertEqual({edge.action for edge in headland_edges}, {NAV_ACTION})
 
     def test_repair_uses_selected_mode_for_each_waypoint_and_navigation_for_headlands(self):
+        """Verify repair applies row actions along waypoint chains and navigation between rows."""
         for action in ('row_traversal', 'limbic_row_follow'):
             with self.subTest(action=action):
                 node = make_node([])

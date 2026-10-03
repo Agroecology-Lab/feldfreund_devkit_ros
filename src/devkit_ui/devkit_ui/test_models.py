@@ -6,6 +6,7 @@ from devkit_ui.models import TopoDoc, TopoEdge, TopoNode
 
 class TestTopoDoc(unittest.TestCase):
     def test_switch_handles_self_loops_and_missing_targets_idempotently(self) -> None:
+        """Verify action switching handles loops and dangling edges without adding nodes."""
         original_edge = TopoEdge('row_traversal', 'self', 'A')
         node = TopoNode(name='A', edges=[
             original_edge,
@@ -25,6 +26,7 @@ class TestTopoDoc(unittest.TestCase):
         self.assertEqual({entry.name for entry in doc.nodes}, {'A'})
 
     def test_renaming_to_same_name_still_returns_an_independent_document(self) -> None:
+        """Verify copying under the same name isolates nodes and nested metadata."""
         source = TopoDoc(name='field', nodes=[
             TopoNode(name='A', pointset='field', meta={'tags': ['crop']})])
         source.ensure_meta('field')
@@ -38,6 +40,7 @@ class TestTopoDoc(unittest.TestCase):
         self.assertFalse(renamed.has_node('B'))
 
     def test_switch_counts_edges_across_nodes_and_preserves_edge_identity(self) -> None:
+        """Verify switching counts changed edges while preserving their IDs and targets."""
         a = TopoNode(name='A', edges=[
             TopoEdge('row_traversal', 'forward', 'B'),
             TopoEdge('navigate_to_pose', 'headland', 'C'),
@@ -55,6 +58,7 @@ class TestTopoDoc(unittest.TestCase):
         self.assertEqual(list(c.edges), [TopoEdge('limbic_row_follow', 'vision', 'B')])
 
     def test_switch_empty_or_unmatched_actions_is_a_noop(self) -> None:
+        """Verify empty or unmatched selections and unchanged actions produce no edits."""
         node = TopoNode(name='A', edges=[TopoEdge('custom', 'A_B', 'B')])
         original = copy.deepcopy(node.to_dict())
         for actions in (set(), {'row_traversal'}, {'custom'}):
@@ -65,6 +69,7 @@ class TestTopoDoc(unittest.TestCase):
         self.assertEqual(TopoDoc(name='empty').set_row_action({'row_traversal'}, 'new'), 0)
 
     def test_renamed_copy_preserves_payload_and_isolates_nested_mutations(self) -> None:
+        """Verify renaming updates map references and deeply isolates the copied payload."""
         doc = TopoDoc(
             name='live', metric_map='occupancy', pointset='old',
             meta={'origin': {'latitude': 51.0}},
@@ -93,6 +98,7 @@ class TestTopoDoc(unittest.TestCase):
         self.assertEqual(doc.to_dict(), original)
 
     def test_renamed_empty_document_preserves_occupancy_map(self) -> None:
+        """Verify an empty renamed map retains its occupancy map reference."""
         doc = TopoDoc(name='live', metric_map='occupancy')
         renamed = doc.renamed('copy').to_dict()
         self.assertEqual((renamed['name'], renamed['pointset']), ('copy', 'copy'))
