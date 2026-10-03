@@ -2919,6 +2919,7 @@ class NiceGuiNode(Node):
             return
 
         def _modify(doc):
+            """Apply the selected driving action to the document's row edges."""
             doc.set_row_action({ROW_ACTION, VISION_ROW_ACTION}, action)
 
         self._persist_and_reload(
@@ -4009,6 +4010,7 @@ class NiceGuiNode(Node):
                 ).props('dense').classes('flex-1')
 
                 def _do_save():
+                    """Save a named map copy, show its status, and clear the name on success."""
                     status = self.save_map_as(save_name.value)
                     archive_lbl.set_text(status)
                     archive_lbl.style(

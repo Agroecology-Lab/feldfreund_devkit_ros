@@ -79,8 +79,10 @@ ACTIONS = {
 
 
 def default_definitions() -> dict:
+    """Return a deep copy of the default behavior-tree definitions for a new map."""
     return copy.deepcopy(DEFINITIONS)
 
 
 def default_actions() -> dict:
+    """Return a deep copy of the default navigation actions for a new map."""
     return copy.deepcopy(ACTIONS)

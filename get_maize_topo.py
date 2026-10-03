@@ -147,6 +147,7 @@ def node(name, map_name, x, y, edges, tol_xy, tol_yaw, vert, extra=''):
 
 
 def generate(csv_path, out_path, name, n_rows, headland, lat, lon, alt):
+    """Write a topology YAML map with row and headland routes from crop CSV data."""
     crops = load_csv(csv_path)
     orientation, centres, c0, c1, h0, h1 = analyse(crops, n_rows, headland)
     date = datetime.now().strftime('%d-%m-%Y_%H-%M-%S')

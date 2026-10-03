@@ -74,6 +74,7 @@ class DropNodeCard(ui.card):
                 ui.label('Row driving').classes('text-xs').style('color:#57606a')
 
                 def _row_mode(e):
+                    """Refresh the action hint and notify the row-driving callback."""
                     self.row_hint.set_text(
                         state.row_action if state.row_id else NAV_ACTION)
                     if on_row_action:

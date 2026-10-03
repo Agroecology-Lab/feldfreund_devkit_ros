@@ -64,6 +64,7 @@ if __name__ == '__main__':
 
 
 def test_set_row_action_only_touches_row_edges():
+    """Verify row-action changes preserve navigation edges and count only changed edges."""
     from devkit_ui.models import TopoDoc, TopoEdge, TopoNode
     a = TopoNode(name='a', x=0.0, y=0.0, edges=[
         TopoEdge(action='row_traversal', edge_id='a_b', node='b'),
@@ -80,6 +81,7 @@ def test_set_row_action_only_touches_row_edges():
 
 
 def test_renamed_copy_follows_new_name_and_leaves_original():
+    """Verify a renamed copy updates map metadata without changing the original document."""
     from devkit_ui.models import TopoDoc, TopoNode
     doc = TopoDoc(name='live', nodes=[TopoNode(name='a', x=0.0, y=0.0)])
     doc.ensure_meta('live')
