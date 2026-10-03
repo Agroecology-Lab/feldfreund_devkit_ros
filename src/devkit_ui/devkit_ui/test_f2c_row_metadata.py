@@ -79,6 +79,7 @@ def make_node(swaths, *, contour_used=False):
     node._f2c_origin_ll = (51.0, -2.0)
     node._f2c_break_after = set()
     node._is_sim = True
+    node._row_action = ROW_ACTION
     node.latest_odom = None
     node.latest_gps = SimpleNamespace(
         latitude=51.0,

@@ -61,3 +61,32 @@ class TestTopoDoc(unittest.TestCase):
 
 if __name__ == '__main__':
     unittest.main()
+
+
+def test_set_row_action_only_touches_row_edges():
+    from devkit_ui.models import TopoDoc, TopoEdge, TopoNode
+    a = TopoNode(name='a', x=0.0, y=0.0, edges=[
+        TopoEdge(action='row_traversal', edge_id='a_b', node='b'),
+        TopoEdge(action='navigate_to_pose', edge_id='a_c', node='c')])
+    b = TopoNode(name='b', x=1.0, y=0.0)
+    c = TopoNode(name='c', x=2.0, y=0.0)
+    doc = TopoDoc(name='t', nodes=[a, b, c])
+    rows = {'row_traversal', 'limbic_row_follow'}
+    assert doc.set_row_action(rows, 'limbic_row_follow') == 1
+    acts = {e.node: e.action for e in a.edges}
+    assert acts == {'b': 'limbic_row_follow', 'c': 'navigate_to_pose'}
+    assert doc.set_row_action(rows, 'limbic_row_follow') == 0
+    assert doc.set_row_action(rows, 'row_traversal') == 1
+
+
+def test_renamed_copy_follows_new_name_and_leaves_original():
+    from devkit_ui.models import TopoDoc, TopoNode
+    doc = TopoDoc(name='live', nodes=[TopoNode(name='a', x=0.0, y=0.0)])
+    doc.ensure_meta('live')
+    new = doc.renamed('north_field')
+    d = new.to_dict()
+    assert d['name'] == d['pointset'] == 'north_field'
+    assert d['nodes'][0]['meta']['map'] == 'north_field'
+    assert d['nodes'][0]['node']['pointset'] == 'north_field'
+    assert doc.to_dict()['name'] == 'live'
+    assert doc.to_dict()['nodes'][0]['meta']['map'] == 'live'

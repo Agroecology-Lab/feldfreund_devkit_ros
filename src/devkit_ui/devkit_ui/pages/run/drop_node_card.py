@@ -2,7 +2,7 @@ from collections.abc import Callable
 
 from nicegui import ui
 
-from devkit_ui.constants import NAV_ACTION, ROW_ACTION
+from devkit_ui.constants import NAV_ACTION, ROW_ACTION, VISION_ROW_ACTION
 from devkit_ui.view_models.run_view_model import RunViewModel
 
 
@@ -10,7 +10,8 @@ class DropNodeCard(ui.card):
     def __init__(self,
                  state: RunViewModel.DropNode,
                  topo_state: RunViewModel.Topo,
-                 on_drop: Callable[[str, int | None, str], None]):
+                 on_drop: Callable[[str, int | None, str], None],
+                 on_row_action: Callable[[str], None] | None = None):
         """
                  Configure the drop-node card with state bindings and a drop action callback.
 
@@ -65,9 +66,23 @@ class DropNodeCard(ui.card):
                     """
                     has_row = bool(row_id)
                     self.row_hint.style(f'color:{"#0969da" if has_row else "#8c959f"}')
-                    return ROW_ACTION if has_row else NAV_ACTION
+                    return state.row_action if has_row else NAV_ACTION
 
                 self.row_hint.bind_text_from(state, 'row_id', backward=sync_hint)
+
+            with ui.row().classes('items-center gap-2 w-full mt-1'):
+                ui.label('Row driving').classes('text-xs').style('color:#57606a')
+
+                def _row_mode(e):
+                    self.row_hint.set_text(
+                        state.row_action if state.row_id else NAV_ACTION)
+                    if on_row_action:
+                        on_row_action(e.value)
+
+                ui.toggle(
+                    {ROW_ACTION: 'Geometry (no crop)', VISION_ROW_ACTION: 'Vision'},
+                    on_change=_row_mode,
+                ).props('dense').bind_value(state, 'row_action')
 
             with ui.row().classes('items-center gap-2 mt-2'):
                 self.current_node_lbl = ui.label('').classes('text-xs font-mono')

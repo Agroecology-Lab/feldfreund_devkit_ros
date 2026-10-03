@@ -1,4 +1,5 @@
 from dataclasses import dataclass
+from devkit_ui.constants import ROW_ACTION
 
 
 class RunViewModel:
@@ -27,6 +28,7 @@ class RunViewModel:
         row_role: str = 'entry'
         row_hint: str = ''
         status: str = ''
+        row_action: str = ROW_ACTION
 
     @dataclass
     class Topo:
