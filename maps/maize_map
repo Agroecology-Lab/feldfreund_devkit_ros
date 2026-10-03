@@ -36,7 +36,7 @@ definitions:
     \ path=\"{path}\" controller_id=\"FollowPath\"/>\n    </PipelineSequence>\n  </BehaviorTree>\n\
     </root>\n"
 meta:
-  last_updated: 02-10-2026_15-10-05
+  last_updated: 03-10-2026_20-28-38
 metric_map: maize_map
 name: maize_map
 nodes:
@@ -52,7 +52,7 @@ nodes:
     timestamp: 02-10-2026_15-09-42
   node:
     edges:
-    - action: limbic_row_follow
+    - action: row_traversal
       edge_id: F2C_R1_IN_F2C_R1_OUT
       node: F2C_R1_OUT
     - action: navigate_to_pose
@@ -138,7 +138,7 @@ nodes:
     timestamp: 02-10-2026_15-09-42
   node:
     edges:
-    - action: limbic_row_follow
+    - action: row_traversal
       edge_id: F2C_R2_W1_F2C_R2_W2
       node: F2C_R2_W2
     name: F2C_R2_W1
@@ -178,7 +178,7 @@ nodes:
     timestamp: 02-10-2026_15-09-42
   node:
     edges:
-    - action: limbic_row_follow
+    - action: row_traversal
       edge_id: F2C_R2_W2_F2C_R2_W3
       node: F2C_R2_W3
     name: F2C_R2_W2
@@ -218,7 +218,7 @@ nodes:
     timestamp: 02-10-2026_15-09-42
   node:
     edges:
-    - action: limbic_row_follow
+    - action: row_traversal
       edge_id: F2C_R2_W3_F2C_R2_W4
       node: F2C_R2_W4
     name: F2C_R2_W3
@@ -258,7 +258,7 @@ nodes:
     timestamp: 02-10-2026_15-09-42
   node:
     edges:
-    - action: limbic_row_follow
+    - action: row_traversal
       edge_id: F2C_R2_W4_F2C_R2_W5
       node: F2C_R2_W5
     name: F2C_R2_W4
@@ -298,7 +298,7 @@ nodes:
     timestamp: 02-10-2026_15-09-42
   node:
     edges:
-    - action: limbic_row_follow
+    - action: row_traversal
       edge_id: F2C_R2_W5_F2C_R2_W6
       node: F2C_R2_W6
     name: F2C_R2_W5
@@ -338,7 +338,7 @@ nodes:
     timestamp: 02-10-2026_15-09-42
   node:
     edges:
-    - action: limbic_row_follow
+    - action: row_traversal
       edge_id: F2C_R2_W6_F2C_R2_OUT
       node: F2C_R2_OUT
     name: F2C_R2_W6
@@ -378,7 +378,7 @@ nodes:
     timestamp: 02-10-2026_15-09-42
   node:
     edges:
-    - action: limbic_row_follow
+    - action: row_traversal
       edge_id: F2C_R2_IN_F2C_R2_W1
       node: F2C_R2_W1
     - action: navigate_to_pose
@@ -467,7 +467,7 @@ nodes:
     timestamp: 02-10-2026_15-09-42
   node:
     edges:
-    - action: limbic_row_follow
+    - action: row_traversal
       edge_id: F2C_R3_W1_F2C_R3_W2
       node: F2C_R3_W2
     name: F2C_R3_W1
@@ -507,7 +507,7 @@ nodes:
     timestamp: 02-10-2026_15-09-42
   node:
     edges:
-    - action: limbic_row_follow
+    - action: row_traversal
       edge_id: F2C_R3_W2_F2C_R3_W3
       node: F2C_R3_W3
     name: F2C_R3_W2
@@ -547,7 +547,7 @@ nodes:
     timestamp: 02-10-2026_15-09-42
   node:
     edges:
-    - action: limbic_row_follow
+    - action: row_traversal
       edge_id: F2C_R3_W3_F2C_R3_W4
       node: F2C_R3_W4
     name: F2C_R3_W3
@@ -587,7 +587,7 @@ nodes:
     timestamp: 02-10-2026_15-09-42
   node:
     edges:
-    - action: limbic_row_follow
+    - action: row_traversal
       edge_id: F2C_R3_W4_F2C_R3_W5
       node: F2C_R3_W5
     name: F2C_R3_W4
@@ -627,7 +627,7 @@ nodes:
     timestamp: 02-10-2026_15-09-42
   node:
     edges:
-    - action: limbic_row_follow
+    - action: row_traversal
       edge_id: F2C_R3_W5_F2C_R3_W6
       node: F2C_R3_W6
     name: F2C_R3_W5
@@ -667,7 +667,7 @@ nodes:
     timestamp: 02-10-2026_15-09-42
   node:
     edges:
-    - action: limbic_row_follow
+    - action: row_traversal
       edge_id: F2C_R3_W6_F2C_R3_OUT
       node: F2C_R3_OUT
     name: F2C_R3_W6
@@ -707,7 +707,7 @@ nodes:
     timestamp: 02-10-2026_15-09-42
   node:
     edges:
-    - action: limbic_row_follow
+    - action: row_traversal
       edge_id: F2C_R3_IN_F2C_R3_W1
       node: F2C_R3_W1
     - action: navigate_to_pose
@@ -796,7 +796,7 @@ nodes:
     timestamp: 02-10-2026_15-09-42
   node:
     edges:
-    - action: limbic_row_follow
+    - action: row_traversal
       edge_id: F2C_R4_W1_F2C_R4_W2
       node: F2C_R4_W2
     name: F2C_R4_W1
@@ -836,7 +836,7 @@ nodes:
     timestamp: 02-10-2026_15-09-42
   node:
     edges:
-    - action: limbic_row_follow
+    - action: row_traversal
       edge_id: F2C_R4_W2_F2C_R4_W3
       node: F2C_R4_W3
     name: F2C_R4_W2
@@ -876,7 +876,7 @@ nodes:
     timestamp: 02-10-2026_15-09-42
   node:
     edges:
-    - action: limbic_row_follow
+    - action: row_traversal
       edge_id: F2C_R4_W3_F2C_R4_OUT
       node: F2C_R4_OUT
     name: F2C_R4_W3
@@ -916,7 +916,7 @@ nodes:
     timestamp: 02-10-2026_15-09-42
   node:
     edges:
-    - action: limbic_row_follow
+    - action: row_traversal
       edge_id: F2C_R4_IN_F2C_R4_W1
       node: F2C_R4_W1
     - action: navigate_to_pose
@@ -1005,7 +1005,7 @@ nodes:
     timestamp: 02-10-2026_15-09-42
   node:
     edges:
-    - action: limbic_row_follow
+    - action: row_traversal
       edge_id: F2C_R5_IN_F2C_R5_OUT
       node: F2C_R5_OUT
     - action: navigate_to_pose
