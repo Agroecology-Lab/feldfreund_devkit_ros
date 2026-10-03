@@ -156,7 +156,10 @@ class TopoNode:
         self._edges[edge.node] = edge
 
     def set_edge_actions(self, old: set[str], new: str) -> int:
-        """Change the action of every edge whose action is in `old`. Returns the count."""
+        """Change the action of every edge whose action is in `old`. Returns the count.
+
+        Edges already using `new` are excluded from the count.
+        """
         changed = 0
         for key, edge in self._edges.items():
             if edge.action in old and edge.action != new:
@@ -292,7 +295,10 @@ class TopoDoc:
             ))
 
     def set_row_action(self, row_actions: set[str], new: str) -> int:
-        """Switch every row edge in the doc to `new`. Returns the number changed."""
+        """Set edges whose action is in `row_actions` to `new` across all nodes.
+
+        Return the number changed, excluding edges already using `new`.
+        """
         return sum(n.set_edge_actions(row_actions, new) for n in self._nodes.values())
 
     def insert_node(self, node: TopoNode) -> None:

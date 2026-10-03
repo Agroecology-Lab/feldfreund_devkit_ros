@@ -147,7 +147,15 @@ def node(name, map_name, x, y, edges, tol_xy, tol_yaw, vert, extra=''):
 
 
 def generate(csv_path, out_path, name, n_rows, headland, lat, lon, alt):
-    """Write a topology YAML map with row and headland routes from crop CSV data."""
+    """Write a topology YAML map with row and headland routes from crop CSV data.
+
+    Use geometry-based row traversal and overwrite out_path. n_rows must be
+    at least two; headland is the distance beyond the crop ends in meters.
+    lat/lon (degrees) and alt (meters) record the survey origin in the header.
+
+    Raise SystemExit if the CSV has no crop entries. Missing X/Y columns,
+    invalid crop coordinates, and file I/O errors propagate to the caller.
+    """
     crops = load_csv(csv_path)
     orientation, centres, c0, c1, h0, h1 = analyse(crops, n_rows, headland)
     date = datetime.now().strftime('%d-%m-%Y_%H-%M-%S')

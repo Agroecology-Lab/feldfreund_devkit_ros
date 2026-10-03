@@ -896,8 +896,16 @@ class NiceGuiNode(Node):
                        Add a topology node at the current robot position and persist it to the
                        active map.
 
+                       Add the node in memory immediately, then save and reload in a background
+                       thread. Use (0, 0) in simulation if odometry is unavailable. Connect to the
+                       current node, or the selected node as a fallback; save the outgoing edge
+                       only if its target is already on disk. Row nodes use the selected row action.
+                       Validation failures and worker exceptions set drop_node.status; a failed
+                       save does not roll back the initial in-memory addition.
+
                        Parameters:
-                        name (str): Name for the new node.
+                        name (str): Name, stripped and uppercased, with spaces replaced by
+                        underscores and characters outside A-Z, 0-9, and underscore removed.
                         row_id (int | None): Row identifier to associate with the node, or None for
                         a navigation node.
                         row_role (str): Role of the node within its row, such as "entry" or "exit".
@@ -992,9 +1000,10 @@ class NiceGuiNode(Node):
         def _publish_and_persist():
             """Persist the updated topology map and make it available to the navigation system.
 
-            Writes the map to YAML, updates the in-memory topology document, and switches or
-            publishes the map. Reports duplicate nodes, failures, and operation status through
-            the node's view model and logger.
+            Create a missing map with default actions and definitions. Save only the new node
+            and its edges to previously saved targets, without adding reverse edges. A duplicate
+            name on disk skips writing and publishing. After saving, replace the in-memory map
+            and switch or publish it. Worker exceptions become drop_node.status errors.
             """
             try:
                 map_file      = f'/workspace/maps/{map_name}'
@@ -1198,7 +1207,9 @@ class NiceGuiNode(Node):
                              status_attr: str, success_msg: str) -> None:
         """
                              Apply a topology modification, persist the updated map, and make it
-                             live.
+                             live in a background thread. Requires a loaded topology document.
+                             Worker exceptions become status messages; returning does not mean
+                             the map has been saved or reloaded.
 
                              Parameters:
                                  modify_fn (Callable[[TopoDoc], None]): Function that mutates the
@@ -1216,9 +1227,10 @@ class NiceGuiNode(Node):
             """
             Apply a topology modification, persist the updated map, and reload it for live use.
 
-            The map is loaded from the configured file or installed source, with the current
-            topology used as a fallback. Persistence and reload failures are recorded in the
-            provided status owner.
+            Load the map file when present; otherwise copy the current topology and seed default
+            actions and definitions if it has no actions. Modification, persistence, and reload
+            exceptions become status errors. A failed or timed-out switch response falls back
+            to publishing the saved map.
             """
             try:
                 if os.path.exists(map_file):
@@ -1306,6 +1318,10 @@ class NiceGuiNode(Node):
         """
                               Save the most recently planned F2C swaths as rows in the loaded
                               topology map.
+
+                              In-row edges use the selected row action; headland edges use
+                              point-to-point navigation. Persistence runs in the background,
+                              with validation failures and worker errors in f2c_save_status.
 
                               Parameters:
                                   prefix (str): Prefix used to name the generated row nodes.
@@ -1599,6 +1615,10 @@ class NiceGuiNode(Node):
         """
         Rebuild missing in-row and headland connections for existing rows in the loaded topology
         map.
+
+        New in-row connections use the selected row action; existing edge actions are preserved.
+        Update memory immediately and persist in the background, reporting validation failures
+        and worker errors in f2c_save_status. Ignore an unknown connect_to node.
 
         Parameters:
             connect_to (str | None): Optional node name to connect bidirectionally to the first row
@@ -2911,6 +2931,10 @@ class NiceGuiNode(Node):
         Applies to rows added from now on and rewrites the row edges already in
         the map, so the same map can be seeded with row_traversal and then run
         with limbic_row_follow once a crop exists.
+
+        Ignore unsupported or unchanged actions. Update the session selection immediately;
+        if the loaded map has matching edges to change, persist and reload in the background.
+        Worker errors are reported in drop_node.status without reverting the selection.
         """
         if action not in (ROW_ACTION, VISION_ROW_ACTION) or action == self._row_action:
             return
@@ -2938,6 +2962,12 @@ class NiceGuiNode(Node):
         """Save a named copy of the current map to /workspace/maps/<name>.
 
         The live map is left as it is. Refuses to overwrite an existing file.
+        Prefer the persisted map, falling back to memory only if its file is absent.
+        Strip surrounding whitespace from name; require 1-64 ASCII letters, digits,
+        underscores, or hyphens, starting with a letter or digit.
+
+        Return 'saved → <name>' on success or an 'ERROR:' status for a missing or empty
+        map, an invalid or occupied name, or an exception while reading or saving.
         """
         name = (name or '').strip()
         if not self._topo_doc:
@@ -2965,9 +2995,15 @@ class NiceGuiNode(Node):
 
     def archive_and_clear_map(self) -> str:
         """Copy current map file to /workspace/maps/<name>_<N>, then write a
-        fresh empty map doc back to the original path and reload it.
+        fresh empty map doc back to the original path and attempt to publish it.
 
-        Returns a status string (caller displays it).
+        Choose the first unused suffix starting at 1. Archive the persisted map,
+        or the in-memory map if no file exists. Reset actions and definitions to
+        repository defaults and row driving to geometry mode.
+
+        Return an archive status or an 'ERROR:' status for a missing map or a
+        read/write failure. Publishing errors are ignored, and earlier writes
+        are not rolled back if a later step fails.
         """
         if not self._topo_doc:
             return 'ERROR: no map loaded'

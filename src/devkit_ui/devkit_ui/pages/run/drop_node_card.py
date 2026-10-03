@@ -19,6 +19,8 @@ class DropNodeCard(ui.card):
                      state: Drop-node configuration and operation status state.
                      topo_state: Topology state used to display the current node.
                      on_drop: Callback invoked with the node name, row ID, and row role.
+                     on_row_action: Optional callback invoked with the selected action when
+                         the row-driving toggle changes.
                  """
         super().__init__()
 
@@ -62,7 +64,7 @@ class DropNodeCard(ui.card):
                         row_id (str): The row ID used to determine the hint state.
 
                     Returns:
-                        str: `ROW_ACTION` when a row ID is provided, otherwise `NAV_ACTION`.
+                        str: The selected `state.row_action` for a truthy row ID, otherwise `NAV_ACTION`.
                     """
                     has_row = bool(row_id)
                     self.row_hint.style(f'color:{"#0969da" if has_row else "#8c959f"}')
