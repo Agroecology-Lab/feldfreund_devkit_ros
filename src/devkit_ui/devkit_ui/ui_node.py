@@ -1218,8 +1218,9 @@ class NiceGuiNode(Node):
                 if os.path.exists(map_file):
                     file_doc = parse_topo_yaml(map_file)
                 else:
-                    file_doc = self._topo_doc.clone_empty(map_name)
-                    file_doc.seed_actions(default_actions(), default_definitions())
+                    file_doc = copy.deepcopy(self._topo_doc)
+                    if not file_doc.actions:
+                        file_doc.seed_actions(default_actions(), default_definitions())
 
                 modify_fn(file_doc)
 
