@@ -143,6 +143,12 @@ class TopoNode:
         self._meta.setdefault('node', self._name)
         self._meta.setdefault('pointset', map_name)
 
+    def rename_map(self, map_name: str) -> None:
+        """Points the node's pointset and map metadata at ``map_name``."""
+        self._pointset = map_name
+        self._meta['map'] = map_name
+        self._meta['pointset'] = map_name
+
     def add_metadata(self, **kwargs: dict) -> None:
         self._meta.update(**kwargs)
 
@@ -343,13 +349,15 @@ class TopoDoc:
         The topo name and pointset, and each node's pointset and map metadata,
         follow the new name. metric_map is the occupancy map and is kept."""
         doc = copy.deepcopy(self)
-        doc._name = new_name
-        doc._pointset = new_name
-        for node in doc._nodes.values():
-            node._pointset = new_name
-            node._meta['map'] = new_name
-            node._meta['pointset'] = new_name
+        doc.rename(new_name)
         return doc
+
+    def rename(self, new_name: str) -> None:
+        """Renames this document in place; see ``renamed`` for what follows."""
+        self._name = new_name
+        self._pointset = new_name
+        for node in self._nodes.values():
+            node.rename_map(new_name)
 
     def clone_empty(self, map_name: str | None = None) -> 'TopoDoc':
         """Clones the document and returns a new document with no nodes.
