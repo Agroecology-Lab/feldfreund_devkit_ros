@@ -4159,4 +4159,4 @@ ui_run.APP_IMPORT_STRING = f'{__name__}:app'
 # exact line a second time and tries to bind port 80 again while the
 # supervisor still holds it -> EADDRINUSE. Hot-reload also has no use case
 # in a container that gets rebuilt/restarted on code changes anyway.
-ui.run(favicon='🤖', port=80, reload=False, binding_refresh_interval=0.5)
+ui.run(favicon='🤖', port=80, reload=False)
