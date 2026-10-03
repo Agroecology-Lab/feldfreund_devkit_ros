@@ -212,7 +212,7 @@ nicegui.ui = fake_ui
 fake_ui.card = FakeElement
 
 with patch.dict(sys.modules, {'nicegui': nicegui}):
-    from devkit_ui.constants import NAV_ACTION, ROW_ACTION
+    from devkit_ui.constants import NAV_ACTION, ROW_ACTION, VISION_ROW_ACTION
     from devkit_ui.pages.run.drop_node_card import DropNodeCard
     from devkit_ui.pages.run.navigation_sidebar import NavigationSidebar
     from devkit_ui.pages.run.row_discovery_card import RowDiscoveryCard
@@ -252,6 +252,13 @@ class Node:
 
 
 class TestRunViewModel(unittest.TestCase):
+    def test_row_mode_starts_with_geometry_for_each_session(self) -> None:
+        """Verify each new session selects geometry mode independently of earlier sessions."""
+        first = RunViewModel()
+        self.assertEqual(first.drop_node.row_action, ROW_ACTION)
+        first.drop_node.row_action = VISION_ROW_ACTION
+        self.assertEqual(RunViewModel().drop_node.row_action, ROW_ACTION)
+
     def test_defaults_match_idle_run_state(self) -> None:
         state = RunViewModel()
 
@@ -315,6 +322,54 @@ class TestDropNodeCard(unittest.TestCase):
         fake_ui.find('button', 'Drop').on_click()
 
         self.on_drop.assert_called_once_with('ROW_2_OUT', 2, 'exit')
+
+    def test_mode_toggle_binds_state_updates_hint_and_calls_callback(self) -> None:
+        """Verify the bound row toggle refreshes the hint and reports the selected action."""
+        fake_ui.reset()
+        callback = Mock()
+        card = DropNodeCard(self.state, self.topo, self.on_drop, callback)
+        toggle = next(element for element in fake_ui.elements
+                      if element.kind == 'toggle' and element.binding.attribute == 'row_action')
+        self.assertEqual(set(toggle.text), {ROW_ACTION, VISION_ROW_ACTION})
+        self.assertIs(toggle.binding.source, self.state)
+        self.assertEqual(toggle.value, ROW_ACTION)
+        for row_id in (None, 7):
+            for action in (VISION_ROW_ACTION, ROW_ACTION):
+                with self.subTest(row_id=row_id, action=action):
+                    self.state.row_id = row_id
+                    # NOTE: emulate NiceGUI updating the bound state before its callback.
+                    self.state.row_action = action
+                    toggle.kwargs['on_change'](SimpleNamespace(value=action))
+                    self.assertEqual(card.row_hint.text, action if row_id else NAV_ACTION)
+                    callback.assert_called_with(action)
+        self.assertEqual(callback.call_count, 4)
+
+    def test_mode_toggle_without_callback_and_row_id_changes_use_current_mode(self) -> None:
+        """Verify hints follow row selection and mode when no change callback is provided."""
+        toggle = next(element for element in fake_ui.elements
+                      if element.kind == 'toggle' and element.binding.attribute == 'row_action')
+        self.state.row_action = VISION_ROW_ACTION
+        toggle.kwargs['on_change'](SimpleNamespace(value=VISION_ROW_ACTION))
+        self.assertEqual(self.card.row_hint.text, NAV_ACTION)
+        self.state.row_id = 2
+        self.assertEqual(self.card.row_hint.refresh_binding(), VISION_ROW_ACTION)
+        self.state.row_id = None
+        self.assertEqual(self.card.row_hint.refresh_binding(), NAV_ACTION)
+
+    def test_card_created_with_vision_selection_displays_it_without_switching_mode(self) -> None:
+        """Verify card creation shows the existing vision mode without invoking its callback."""
+        fake_ui.reset()
+        self.state.row_action = VISION_ROW_ACTION
+        self.state.row_id = 3
+        callback = Mock()
+
+        card = DropNodeCard(self.state, self.topo, self.on_drop, callback)
+
+        toggle = next(element for element in fake_ui.elements
+                      if element.kind == 'toggle' and element.binding.attribute == 'row_action')
+        self.assertEqual(toggle.value, VISION_ROW_ACTION)
+        self.assertEqual(card.row_hint.text, VISION_ROW_ACTION)
+        callback.assert_not_called()
 
 
 class TestNavigationSidebar(unittest.TestCase):

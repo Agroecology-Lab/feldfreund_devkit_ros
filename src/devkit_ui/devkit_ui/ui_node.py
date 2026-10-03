@@ -72,7 +72,7 @@ from devkit_ui import plan_import
 
 # MISSION: store owns missions.yaml, scheduling, and run recording.
 from devkit_ui.actions import ACTIONS, action_ros_msgs
-from devkit_ui.constants import NAV_ACTION, NODE_NAME, ROW_ACTION
+from devkit_ui.constants import NAV_ACTION, NODE_NAME, ROW_ACTION, VISION_ROW_ACTION
 
 # CONTOUR: terrain-aware reference line, from recon-logged elevation data.
 # See dem.py's module docstring for the recon.csv -> elevation_grid ->
@@ -108,6 +108,7 @@ from devkit_ui.pages.run.node_map_card import NodeMapCard
 from devkit_ui.pages.run.row_discovery_card import RowDiscoveryCard
 from devkit_ui.pages.run.track_card import TrackCard
 from devkit_ui.parse import dump_topo_yaml, parse_topo_json, parse_topo_yaml
+from devkit_ui.topo_defaults import default_actions, default_definitions
 from devkit_ui.utils.topo_renderer import build_robot_svg, build_svg, inject_click_js
 from devkit_ui.view_models.global_view_model import GlobalViewModel
 from devkit_ui.view_models.run_view_model import RunViewModel
@@ -648,6 +649,8 @@ class NiceGuiNode(Node):
             _SENSOR_QOS,
         )
 
+        # Per-session, never persisted: each new map starts on geometry-only rows.
+        self._row_action: str = ROW_ACTION
         self._topo_doc:  TopoDoc | None = _demo_doc()
         self._topo_demo: bool           = False
         self.create_subscription(String, '/topological_map_2', self._on_topo_map, TMAP_QOS)
@@ -893,8 +896,16 @@ class NiceGuiNode(Node):
                        Add a topology node at the current robot position and persist it to the
                        active map.
 
+                       Add the node in memory immediately, then save and reload in a background
+                       thread. Use (0, 0) in simulation if odometry is unavailable. Connect to the
+                       current node, or the selected node as a fallback; save the outgoing edge
+                       only if its target is already on disk. Row nodes use the selected row action.
+                       Validation failures and worker exceptions set drop_node.status; a failed
+                       save does not roll back the initial in-memory addition.
+
                        Parameters:
-                        name (str): Name for the new node.
+                        name (str): Name, stripped and uppercased, with spaces replaced by
+                        underscores and characters outside A-Z, 0-9, and underscore removed.
                         row_id (int | None): Row identifier to associate with the node, or None for
                         a navigation node.
                         row_role (str): Role of the node within its row, such as "entry" or "exit".
@@ -931,7 +942,7 @@ class NiceGuiNode(Node):
         is_row    = row_id is not None
 
         if is_row:
-            edge_action, xy_tol, yaw_tol, vert_r = ROW_ACTION, 0.1, 0.05, 0.5
+            edge_action, xy_tol, yaw_tol, vert_r = self._row_action, 0.1, 0.05, 0.5
         else:
             edge_action, xy_tol, yaw_tol, vert_r = NAV_ACTION, 0.3, 0.1,  1.0
 
@@ -952,7 +963,7 @@ class NiceGuiNode(Node):
                 'row_role': row_role,
             }
 
-        self._topo_doc.add_node(TopoNode(
+        new_node = TopoNode(
             name=name,
             nav_frame=nav_frame,
             x=x,
@@ -976,7 +987,8 @@ class NiceGuiNode(Node):
             edges=[
                 TopoEdge(action=edge_action, edge_id=f'{name}_{connect_to}', node=connect_to),
             ] if connect_to else [],
-        ))
+        )
+        self._topo_doc.add_node(new_node)
 
         conn_str = f' → {connect_to}' if connect_to else ''
         gps_str  = (f' [{gps_meta["gps_lat"]:.5f},{gps_meta["gps_lon"]:.5f}]'
@@ -988,20 +1000,20 @@ class NiceGuiNode(Node):
         def _publish_and_persist():
             """Persist the updated topology map and make it available to the navigation system.
 
-            Writes the map to YAML, updates the in-memory topology document, and switches or
-            publishes the map. Reports duplicate nodes, failures, and operation status through
-            the node's view model and logger.
+            Create a missing map with default actions and definitions. Save only the new node
+            and its edges to previously saved targets, without adding reverse edges. A duplicate
+            name on disk skips writing and publishing. After saving, replace the in-memory map
+            and switch or publish it. Worker exceptions become drop_node.status errors.
             """
             try:
                 map_file      = f'/workspace/maps/{map_name}'
-                installed_src = ('/workspace/install/topological_navigation/share/'
-                                 'topological_navigation/config/mixed_actions_map.yaml')
 
                 if os.path.exists(map_file):
                     file_doc = parse_topo_yaml(map_file)
-                elif os.path.exists(installed_src):
-                    file_doc = parse_topo_yaml(installed_src)
-                    self.get_logger().info('Seeding from installed source')
+                elif self._topo_doc:
+                    file_doc = self._topo_doc.clone_empty(map_name)
+                    file_doc.seed_actions(default_actions(), default_definitions())
+                    self.get_logger().info('Seeding new map from repo defaults')
                 else:
                     file_doc = self._topo_doc
                     self.get_logger().warn('No YAML source — JSON fallback')
@@ -1011,6 +1023,11 @@ class NiceGuiNode(Node):
                     self.get_logger().warn(f'Node {name} already in file — skipping write')
                     return
 
+                saved_node = copy.deepcopy(new_node)
+                saved_node.remove_edges({
+                    edge.node for edge in saved_node.edges if edge.node not in existing_names
+                })
+                file_doc.insert_node(saved_node)
                 dump_topo_yaml(file_doc, map_file)
 
                 self._topo_doc = file_doc
@@ -1190,7 +1207,9 @@ class NiceGuiNode(Node):
                              status_attr: str, success_msg: str) -> None:
         """
                              Apply a topology modification, persist the updated map, and make it
-                             live.
+                             live in a background thread. Requires a loaded topology document.
+                             Worker exceptions become status messages; returning does not mean
+                             the map has been saved or reloaded.
 
                              Parameters:
                                  modify_fn (Callable[[TopoDoc], None]): Function that mutates the
@@ -1203,24 +1222,23 @@ class NiceGuiNode(Node):
                              """
         map_name = self._topo_doc.name
         map_file = f'/workspace/maps/{map_name}'
-        installed_src = ('/workspace/install/topological_navigation/share/'
-                         'topological_navigation/config/mixed_actions_map.yaml')
 
         def _work():
             """
             Apply a topology modification, persist the updated map, and reload it for live use.
 
-            The map is loaded from the configured file or installed source, with the current
-            topology used as a fallback. Persistence and reload failures are recorded in the
-            provided status owner.
+            Load the map file when present; otherwise copy the current topology and seed default
+            actions and definitions if it has no actions. Modification, persistence, and reload
+            exceptions become status errors. A failed or timed-out switch response falls back
+            to publishing the saved map.
             """
             try:
                 if os.path.exists(map_file):
                     file_doc = parse_topo_yaml(map_file)
-                elif os.path.exists(installed_src):
-                    file_doc = parse_topo_yaml(installed_src)
                 else:
                     file_doc = copy.deepcopy(self._topo_doc)
+                    if not file_doc.actions:
+                        file_doc.seed_actions(default_actions(), default_definitions())
 
                 modify_fn(file_doc)
 
@@ -1300,6 +1318,10 @@ class NiceGuiNode(Node):
         """
                               Save the most recently planned F2C swaths as rows in the loaded
                               topology map.
+
+                              In-row edges use the selected row action; headland edges use
+                              point-to-point navigation. Persistence runs in the background,
+                              with validation failures and worker errors in f2c_save_status.
 
                               Parameters:
                                   prefix (str): Prefix used to name the generated row nodes.
@@ -1477,7 +1499,7 @@ class NiceGuiNode(Node):
             # no waypoints this is exactly the old direct in_name -> out_name
             # edge.
             for a_name, b_name in pairwise([in_name, *wp_names, out_name]):
-                new_topo_nodes[a_name].add_edge(b_name, action=ROW_ACTION)
+                new_topo_nodes[a_name].add_edge(b_name, action=self._row_action)
 
             added.append(rid)
             row_names[rid] = (in_name, out_name)
@@ -1594,6 +1616,10 @@ class NiceGuiNode(Node):
         Rebuild missing in-row and headland connections for existing rows in the loaded topology
         map.
 
+        New in-row connections use the selected row action; existing edge actions are preserved.
+        Update memory immediately and persist in the background, reporting validation failures
+        and worker errors in f2c_save_status. Ignore an unknown connect_to node.
+
         Parameters:
             connect_to (str | None): Optional node name to connect bidirectionally to the first row
             entry and last row exit.
@@ -1650,7 +1676,7 @@ class NiceGuiNode(Node):
             if inn and outn and inn != outn:
                 chain = [inn, *wps, outn]
                 for a, b in pairwise(chain):
-                    wanted_edges.append((a, b, ROW_ACTION))
+                    wanted_edges.append((a, b, self._row_action))
 
         # Headland edges: same-end neighbours only, classified by geometry —
         # NOT by entry/exit label (snake ordering flips label vs physical end).
@@ -1894,6 +1920,7 @@ class NiceGuiNode(Node):
                         state=self._run_vm.drop_node,
                         topo_state=self._run_vm.topo,
                         on_drop=self.drop_topo_node,
+                        on_row_action=self.set_row_action,
                     )
 
                     RowDiscoveryCard(
@@ -2898,19 +2925,91 @@ class NiceGuiNode(Node):
 
     # ── Map archive ───────────────────────────────────────────────────────────
 
+    def set_row_action(self, action: str) -> None:
+        """Switch row driving between geometry-only and vision following.
+
+        Applies to rows added from now on and rewrites the row edges already in
+        the map, so the same map can be seeded with row_traversal and then run
+        with limbic_row_follow once a crop exists.
+
+        Ignore unsupported or unchanged actions. Update the session selection immediately;
+        if the loaded map has matching edges to change, persist and reload in the background.
+        Worker errors are reported in drop_node.status without reverting the selection.
+        """
+        if action not in (ROW_ACTION, VISION_ROW_ACTION) or action == self._row_action:
+            return
+        self._row_action = action
+        self._run_vm.drop_node.row_action = action
+        if not self._topo_doc:
+            return
+        n_edges = sum(1 for n in self._topo_doc.nodes for e in n.edges
+                      if e.action in (ROW_ACTION, VISION_ROW_ACTION) and e.action != action)
+        if n_edges == 0:
+            self._run_vm.drop_node.status = f'row action: {action} (no edges to change)'
+            return
+
+        def _modify(doc):
+            """Apply the selected driving action to the document's row edges."""
+            doc.set_row_action({ROW_ACTION, VISION_ROW_ACTION}, action)
+
+        self._persist_and_reload(
+            _modify, self._run_vm.drop_node, 'status',
+            f'row action: {action}, {n_edges} row edges updated')
+
+    _MAP_NAME_RE = re.compile(r'^[A-Za-z0-9][A-Za-z0-9_-]{0,63}$')
+
+    def save_map_as(self, name: str) -> str:
+        """Save a named copy of the current map to /workspace/maps/<name>.
+
+        The live map is left as it is. Refuses to overwrite an existing file.
+        Prefer the persisted map, falling back to memory only if its file is absent.
+        Strip surrounding whitespace from name; require 1-64 ASCII letters, digits,
+        underscores, or hyphens, starting with a letter or digit.
+
+        Return 'saved → <name>' on success or an 'ERROR:' status for a missing or empty
+        map, an invalid or occupied name, or an exception while reading or saving.
+        """
+        name = (name or '').strip()
+        if not self._topo_doc:
+            return 'ERROR: map not loaded'
+        if not self._MAP_NAME_RE.match(name):
+            return 'ERROR: use letters, digits, _ or - (max 64, start with a letter or digit)'
+        if name == self._topo_doc.name:
+            return 'ERROR: that is the live map name'
+        target = f'/workspace/maps/{name}'
+        if os.path.exists(target):
+            return f'ERROR: {name} already exists'
+        live_file = f'/workspace/maps/{self._topo_doc.name}'
+        try:
+            # Save the persisted state, not just memory.
+            src = parse_topo_yaml(live_file) if os.path.exists(live_file) else self._topo_doc
+            if not any(True for _ in src.nodes):
+                return 'ERROR: map has no nodes'
+            os.makedirs('/workspace/maps', exist_ok=True)
+            dump_topo_yaml(src.renamed(name), target)
+            self.get_logger().info(f'save_map_as: saved {target}')
+            return f'saved → {name}'
+        except Exception as e:
+            self.get_logger().error(f'save_map_as failed: {e}')
+            return f'ERROR: {e}'
+
     def archive_and_clear_map(self) -> str:
         """Copy current map file to /workspace/maps/<name>_<N>, then write a
-        fresh empty map doc back to the original path and reload it.
+        fresh empty map doc back to the original path and attempt to publish it.
 
-        Returns a status string (caller displays it).
+        Choose the first unused suffix starting at 1. Archive the persisted map,
+        or the in-memory map if no file exists. Reset actions and definitions to
+        repository defaults and row driving to geometry mode.
+
+        Return an archive status or an 'ERROR:' status for a missing map or a
+        read/write failure. Publishing errors are ignored, and earlier writes
+        are not rolled back if a later step fails.
         """
         if not self._topo_doc:
             return 'ERROR: no map loaded'
 
         map_name = self._topo_doc.name
         map_file = f'/workspace/maps/{map_name}'
-        installed_src = ('/workspace/install/topological_navigation/share/'
-                         'topological_navigation/config/mixed_actions_map.yaml')
 
         # Pick next available archive index
         i = 1
@@ -2927,29 +3026,15 @@ class NiceGuiNode(Node):
 
             dump_topo_yaml(on_disk, archive_path)
 
-            # Build empty map doc preserving header fields.
             empty_doc = self._topo_doc.clone_empty(map_name)
 
-            # clone_empty() only carries over whatever actions/definitions
-            # self._topo_doc already had. If the doc we're archiving was
-            # itself actions-less (e.g. the very first load came from an
-            # authored waypoint map with no 'actions' section), writing
-            # empty_doc back to map_file would permanently shadow the
-            # installed_src seed template for every future _persist_and_reload
-            # call, since that function only falls back to installed_src when
-            # map_file doesn't exist yet. Backfill here instead.
-            if not empty_doc.actions and os.path.exists(installed_src):
-                try:
-                    seed_doc = parse_topo_yaml(installed_src)
-                    empty_doc.seed_actions(seed_doc.actions, seed_doc.definitions)
-                    self.get_logger().info(
-                        'archive_and_clear_map: backfilled actions from installed_src')
-                except Exception as seed_err:
-                    self.get_logger().warning(
-                        f'archive_and_clear_map: could not seed actions: {seed_err}')
+            # A cleared map is a new map: always start from repo defaults.
+            empty_doc.seed_actions(default_actions(), default_definitions())
 
             dump_topo_yaml(empty_doc, map_file)
             self._topo_doc = empty_doc
+            self._row_action = ROW_ACTION
+            self._run_vm.drop_node.row_action = ROW_ACTION
 
             # Republish so topo nav stack sees the cleared map immediately
             try:
@@ -3960,6 +4045,23 @@ class NiceGuiNode(Node):
             ui.label('Map Archive').classes('font-semibold mb-2')
             archive_lbl = ui.label('').classes('text-xs font-mono mt-1').style(
                 'color:#57606a')
+
+            with ui.row().classes('items-center gap-2 w-full mb-2'):
+                save_name = ui.input(
+                    label='Save copy as', placeholder='e.g. north_field_2026',
+                ).props('dense').classes('flex-1')
+
+                def _do_save():
+                    """Save a named map copy, show its status, and clear the name on success."""
+                    status = self.save_map_as(save_name.value)
+                    archive_lbl.set_text(status)
+                    archive_lbl.style(
+                        'color:#cf222e' if status.startswith('ERROR')
+                        else 'color:#1a7f37')
+                    if not status.startswith('ERROR'):
+                        save_name.set_value('')
+
+                ui.button('Save', on_click=_do_save).props('outline no-caps')
 
             async def _do_archive():
                 map_name = self._topo_doc.name if self._topo_doc else '?'

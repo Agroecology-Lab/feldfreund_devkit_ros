@@ -143,6 +143,12 @@ class TopoNode:
         self._meta.setdefault('node', self._name)
         self._meta.setdefault('pointset', map_name)
 
+    def rename_map(self, map_name: str) -> None:
+        """Points the node's pointset and map metadata at ``map_name``."""
+        self._pointset = map_name
+        self._meta['map'] = map_name
+        self._meta['pointset'] = map_name
+
     def add_metadata(self, **kwargs: dict) -> None:
         self._meta.update(**kwargs)
 
@@ -154,6 +160,18 @@ class TopoNode:
             return
 
         self._edges[edge.node] = edge
+
+    def set_edge_actions(self, old: set[str], new: str) -> int:
+        """Change the action of every edge whose action is in `old`. Returns the count.
+
+        Edges already using `new` are excluded from the count.
+        """
+        changed = 0
+        for key, edge in self._edges.items():
+            if edge.action in old and edge.action != new:
+                self._edges[key] = edge._replace(action=new)
+                changed += 1
+        return changed
 
     def remove_edge(self, node_id: NodeID) -> None:
         self.remove_edges({node_id})
@@ -282,6 +300,13 @@ class TopoDoc:
                 node=node.name,
             ))
 
+    def set_row_action(self, row_actions: set[str], new: str) -> int:
+        """Set edges whose action is in `row_actions` to `new` across all nodes.
+
+        Return the number changed, excluding edges already using `new`.
+        """
+        return sum(n.set_edge_actions(row_actions, new) for n in self._nodes.values())
+
     def insert_node(self, node: TopoNode) -> None:
         """Add a node exactly as given, with no reverse-edge backfill.
 
@@ -317,6 +342,22 @@ class TopoDoc:
             'definitions': self._definitions,
             'transformation': self._transformation,
         }
+
+    def renamed(self, new_name: str) -> 'TopoDoc':
+        """Deep copy of this document under a new map name.
+
+        The topo name and pointset, and each node's pointset and map metadata,
+        follow the new name. metric_map is the occupancy map and is kept."""
+        doc = copy.deepcopy(self)
+        doc.rename(new_name)
+        return doc
+
+    def rename(self, new_name: str) -> None:
+        """Renames this document in place; see ``renamed`` for what follows."""
+        self._name = new_name
+        self._pointset = new_name
+        for node in self._nodes.values():
+            node.rename_map(new_name)
 
     def clone_empty(self, map_name: str | None = None) -> 'TopoDoc':
         """Clones the document and returns a new document with no nodes.

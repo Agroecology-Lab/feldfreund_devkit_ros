@@ -64,26 +64,12 @@ def analyse(crops, n_rows, headland):
 
 # ── YAML emission ─────────────────────────────────────────────────────────────
 
-BT_DEFAULT = (
-    r'<root main_tree_to_execute=\"MainTree\">\n'
-    r'  <BehaviorTree ID=\"MainTree\">\n'
-    r'    <PipelineSequence name=\"NavigateWithReplanning\">\n'
-    r'      <ComputePathToPose goal=\"{goal}\" path=\"{path}\" planner_id=\"GridBased\"/>\n'
-    r'      <FollowPath path=\"{path}\" controller_id=\"FollowPath\"/>\n'
-    r'    </PipelineSequence>\n'
-    r'  </BehaviorTree>\n'
-    r'</root>\n'
-)
-BT_THROUGH = (
-    r'<root main_tree_to_execute=\"MainTree\">\n'
-    r'  <BehaviorTree ID=\"MainTree\">\n'
-    r'    <PipelineSequence name=\"NavigateWithReplanning\">\n'
-    r'      <ComputePathThroughPoses goals=\"{goals}\" path=\"{path}\" planner_id=\"GridBased\"/>\n'
-    r'      <FollowPath path=\"{path}\" controller_id=\"FollowPath\"/>\n'
-    r'    </PipelineSequence>\n'
-    r'  </BehaviorTree>\n'
-    r'</root>\n'
-)
+sys.path.insert(0, str(Path(__file__).parent / 'src' / 'devkit_ui'))
+from devkit_ui.topo_defaults import ACTIONS, DEFINITIONS  # noqa: E402
+import yaml  # noqa: E402
+
+BT_AND_ACTIONS = yaml.safe_dump(
+    {'definitions': DEFINITIONS, 'actions': ACTIONS}, sort_keys=False)
 
 
 def header(name, date, csv_path, n_rows, lat, lon, alt):
@@ -114,33 +100,7 @@ transformation:
     y: 0.0
     z: 0.0
 
-definitions:
-  default_bt: "{BT_DEFAULT}"
-  goal_align_bt: "{BT_DEFAULT}"
-  row_traversal_bt: "{BT_THROUGH}"
-
-actions:
-  navigate_to_pose:
-    composable: false
-    action_type: nav2_msgs.action.NavigateToPose
-    action_server: /navigate_to_pose
-    action_goal_template:
-      pose:
-        header:
-          frame_id: ${{node.nav_frame}}
-        pose: ${{node.pose}}
-      behavior_tree: ${{definitions.default_bt}}
-  limbic_row_follow:
-    composable: false
-    action_type: nav2_msgs.action.NavigateToPose
-    action_server: /limbic_row_follow
-    action_goal_template:
-      pose:
-        header:
-          frame_id: ${{node.nav_frame}}
-        pose: ${{node.pose}}
-      behavior_tree: ${{definitions.row_traversal_bt}}
-
+{BT_AND_ACTIONS}
 nodes:
 """
 
@@ -187,6 +147,15 @@ def node(name, map_name, x, y, edges, tol_xy, tol_yaw, vert, extra=''):
 
 
 def generate(csv_path, out_path, name, n_rows, headland, lat, lon, alt):
+    """Write a topology YAML map with row and headland routes from crop CSV data.
+
+    Use geometry-based row traversal and overwrite out_path. n_rows must be
+    at least two; headland is the distance beyond the crop ends in meters.
+    lat/lon (degrees) and alt (meters) record the survey origin in the header.
+
+    Raise SystemExit if the CSV has no crop entries. Missing X/Y columns,
+    invalid crop coordinates, and file I/O errors propagate to the caller.
+    """
     crops = load_csv(csv_path)
     orientation, centres, c0, c1, h0, h1 = analyse(crops, n_rows, headland)
     date = datetime.now().strftime('%d-%m-%Y_%H-%M-%S')
@@ -214,7 +183,7 @@ def generate(csv_path, out_path, name, n_rows, headland, lat, lon, alt):
         for i, cx in enumerate(centres, 1):
             out += f"# Row {i}  x={cx:+.3f}\n"
             out += node(f'R{i}_IN', name, cx, c0,
-                        [(f'R{i}_IN_R{i}_OUT', f'R{i}_OUT', 'limbic_row_follow'),
+                        [(f'R{i}_IN_R{i}_OUT', f'R{i}_OUT', 'row_traversal'),
                          (f'R{i}_IN_HL_S', 'HL_S', 'navigate_to_pose')],
                         0.1, 0.05, 0.5,
                         f"      row_id: {i}\n      row_role: entry\n")
@@ -245,7 +214,7 @@ def generate(csv_path, out_path, name, n_rows, headland, lat, lon, alt):
         for i, cy in enumerate(centres, 1):
             out += f"# Row {i}  y={cy:+.3f}\n"
             out += node(f'R{i}_IN', name, c0, cy,
-                        [(f'R{i}_IN_R{i}_OUT',f'R{i}_OUT','limbic_row_follow'),
+                        [(f'R{i}_IN_R{i}_OUT',f'R{i}_OUT','row_traversal'),
                          (f'R{i}_IN_HL_W','HL_W','navigate_to_pose')],
                         0.1, 0.05, 0.5,
                         f"      row_id: {i}\n      row_role: entry\n")
