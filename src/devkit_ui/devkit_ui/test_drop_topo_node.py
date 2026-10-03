@@ -10,7 +10,7 @@ from tempfile import TemporaryDirectory
 from types import SimpleNamespace
 from unittest.mock import Mock
 
-from devkit_ui.constants import NAV_ACTION, ROW_ACTION
+from devkit_ui.constants import NAV_ACTION, ROW_ACTION, VISION_ROW_ACTION
 from devkit_ui.models import TopoDoc, TopoEdge, TopoNode, TopoProperties, Vector2
 from devkit_ui.parse import dump_topo_yaml, parse_topo_yaml
 from devkit_ui.topo_defaults import default_actions, default_definitions
@@ -140,3 +140,39 @@ class TestDropTopoNode(unittest.TestCase):
         self.assertEqual(self.map_file.read_bytes(), original)
         self.namespace['dump_topo_yaml'].assert_not_called()
         self.node._topo_map_pub.publish.assert_not_called()
+
+    def test_row_drop_persists_selected_mode_without_reverse_edge_backfill(self) -> None:
+        for action in (ROW_ACTION, VISION_ROW_ACTION):
+            with self.subTest(action=action):
+                self.node._topo_doc = TopoDoc(
+                    name='field.yaml', nodes=[TopoNode(name='TARGET', x=0.0, y=0.0)])
+                self.node._row_action = action
+                self.node._run_vm.topo.current_node = 'TARGET'
+                dump_topo_yaml(self.node._topo_doc, self.map_file)
+
+                self.node.drop_topo_node('ROW', 1, 'entry')
+
+                saved = parse_topo_yaml(self.map_file)
+                self.assertEqual(list(saved.get_node('ROW').edges), [
+                    TopoEdge(action=action, edge_id='ROW_TARGET', node='TARGET')])
+                self.assertEqual(list(saved.get_node('TARGET').edges), [])
+
+    def test_standard_drop_uses_navigation_even_in_vision_mode(self) -> None:
+        self.node._row_action = VISION_ROW_ACTION
+        self.node._topo_doc.add_node(TopoNode(name='TARGET', x=0.0, y=0.0))
+        self.node._run_vm.topo.current_node = 'TARGET'
+        dump_topo_yaml(self.node._topo_doc, self.map_file)
+
+        self.node.drop_topo_node('NEW', None)
+
+        self.assertEqual(list(parse_topo_yaml(self.map_file).get_node('NEW').edges), [
+            TopoEdge(action=NAV_ACTION, edge_id='NEW_TARGET', node='TARGET')])
+
+    def test_missing_map_replaces_stale_settings_with_defaults(self) -> None:
+        self.node._topo_doc.seed_actions({'custom': {'composable': True}}, {'old': '<old/>'})
+
+        self.node.drop_topo_node('NEW', None)
+
+        saved = parse_topo_yaml(self.map_file)
+        self.assertEqual(saved.actions, default_actions())
+        self.assertEqual(saved.definitions, default_definitions())

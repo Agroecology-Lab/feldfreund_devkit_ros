@@ -1,9 +1,72 @@
+import copy
 import unittest
 
 from devkit_ui.models import TopoDoc, TopoEdge, TopoNode
 
 
 class TestTopoDoc(unittest.TestCase):
+    def test_switch_counts_edges_across_nodes_and_preserves_edge_identity(self) -> None:
+        a = TopoNode(name='A', edges=[
+            TopoEdge('row_traversal', 'forward', 'B'),
+            TopoEdge('navigate_to_pose', 'headland', 'C'),
+        ])
+        b = TopoNode(name='B', edges=[TopoEdge('row_traversal', 'reverse', 'A')])
+        c = TopoNode(name='C', edges=[TopoEdge('limbic_row_follow', 'vision', 'B')])
+        doc = TopoDoc(name='field', nodes=[a, b, c])
+
+        self.assertEqual(doc.set_row_action({'row_traversal', 'limbic_row_follow'},
+                                          'limbic_row_follow'), 2)
+
+        self.assertEqual(list(a.edges), [TopoEdge('limbic_row_follow', 'forward', 'B'),
+                                         TopoEdge('navigate_to_pose', 'headland', 'C')])
+        self.assertEqual(list(b.edges), [TopoEdge('limbic_row_follow', 'reverse', 'A')])
+        self.assertEqual(list(c.edges), [TopoEdge('limbic_row_follow', 'vision', 'B')])
+
+    def test_switch_empty_or_unmatched_actions_is_a_noop(self) -> None:
+        node = TopoNode(name='A', edges=[TopoEdge('custom', 'A_B', 'B')])
+        original = copy.deepcopy(node.to_dict())
+        for actions in (set(), {'row_traversal'}, {'custom'}):
+            with self.subTest(actions=actions):
+                self.assertEqual(node.set_edge_actions(actions, 'custom'), 0)
+                self.assertEqual(node.to_dict(), original)
+        self.assertEqual(TopoNode(name='empty').set_edge_actions({'custom'}, 'new'), 0)
+        self.assertEqual(TopoDoc(name='empty').set_row_action({'row_traversal'}, 'new'), 0)
+
+    def test_renamed_copy_preserves_payload_and_isolates_nested_mutations(self) -> None:
+        doc = TopoDoc(
+            name='live', metric_map='occupancy', pointset='old',
+            meta={'origin': {'latitude': 51.0}},
+            actions={'custom': {'options': [1]}}, definitions={'bt': '<root/>'},
+            transformation={'translation': {'x': 2.0}},
+            nodes=[TopoNode(name='A', x=1.0, y=2.0, pointset='old',
+                            edges=[TopoEdge('custom', 'edge', 'B')],
+                            meta={'map': 'old', 'pointset': 'old', 'tags': ['crop']}),
+                   TopoNode(name='B', x=3.0, y=4.0)],
+        )
+        original = copy.deepcopy(doc.to_dict())
+        expected = copy.deepcopy(original)
+        expected['name'] = expected['pointset'] = 'copy'
+        for node in expected['nodes']:
+            node['node']['pointset'] = 'copy'
+            node['meta'].update(map='copy', pointset='copy')
+
+        renamed = doc.renamed('copy')
+        self.assertEqual(renamed.to_dict(), expected)
+        renamed.actions['custom']['options'].append(2)
+        renamed.definitions['bt'] = '<changed/>'
+        renamed.transformation['translation']['x'] = 99.0
+        renamed.to_dict()['meta']['origin']['latitude'] = 0.0
+        renamed.get_node('A').meta['tags'].append('changed')
+        renamed.get_node('A').remove_edge('B')
+        self.assertEqual(doc.to_dict(), original)
+
+    def test_renamed_empty_document_preserves_occupancy_map(self) -> None:
+        doc = TopoDoc(name='live', metric_map='occupancy')
+        renamed = doc.renamed('copy').to_dict()
+        self.assertEqual((renamed['name'], renamed['pointset']), ('copy', 'copy'))
+        self.assertEqual(renamed['metric_map'], 'occupancy')
+        self.assertEqual(renamed['nodes'], [])
+
     def test_init_with_list_of_dict_nodes(self) -> None:
         doc = TopoDoc(
             name='test-topo',
@@ -65,7 +128,6 @@ if __name__ == '__main__':
 
 def test_set_row_action_only_touches_row_edges():
     """Verify row-action changes preserve navigation edges and count only changed edges."""
-    from devkit_ui.models import TopoDoc, TopoEdge, TopoNode
     a = TopoNode(name='a', x=0.0, y=0.0, edges=[
         TopoEdge(action='row_traversal', edge_id='a_b', node='b'),
         TopoEdge(action='navigate_to_pose', edge_id='a_c', node='c')])
@@ -82,7 +144,6 @@ def test_set_row_action_only_touches_row_edges():
 
 def test_renamed_copy_follows_new_name_and_leaves_original():
     """Verify a renamed copy updates map metadata without changing the original document."""
-    from devkit_ui.models import TopoDoc, TopoNode
     doc = TopoDoc(name='live', nodes=[TopoNode(name='a', x=0.0, y=0.0)])
     doc.ensure_meta('live')
     new = doc.renamed('north_field')

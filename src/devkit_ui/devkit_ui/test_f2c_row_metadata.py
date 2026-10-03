@@ -39,10 +39,13 @@ def load_f2c_save_harness():
         node for node in tree.body
         if isinstance(node, ast.ClassDef) and node.name == 'NiceGuiNode'
     )
-    method = next(
+    methods = [
         node for node in node_class.body
-        if isinstance(node, ast.FunctionDef) and node.name == 'save_f2c_rows_to_topo'
-    )
+        if isinstance(node, ast.FunctionDef)
+        and node.name in ('save_f2c_rows_to_topo', 'repair_row_connectivity')
+    ]
+    helpers = [node for node in tree.body
+               if isinstance(node, ast.FunctionDef) and node.name == '_headland_neighbour_pairs']
     namespace = {
         'NodeID': NodeID,
         'TopoDoc': TopoDoc,
@@ -63,9 +66,9 @@ def load_f2c_save_harness():
         'pairwise': pairwise,
         're': re,
     }
-    module = ast.Module(body=[method], type_ignores=[])
+    module = ast.Module(body=[*helpers, *methods], type_ignores=[])
     exec(compile(ast.fix_missing_locations(module), source_path, 'exec'), namespace)
-    return type('F2CSaveHarness', (), {'save_f2c_rows_to_topo': namespace['save_f2c_rows_to_topo']})
+    return type('F2CSaveHarness', (), {method.name: namespace[method.name] for method in methods})
 
 
 F2CSaveHarness = load_f2c_save_harness()
@@ -102,6 +105,55 @@ def make_node(swaths, *, contour_used=False):
 
 
 class TestF2CRowMetadata(unittest.TestCase):
+    def test_selected_mode_applies_to_straight_and_contour_chains_only(self) -> None:
+        for action in ('row_traversal', 'limbic_row_follow'):
+            for contour in (False, True):
+                with self.subTest(action=action, contour=contour):
+                    node = make_node([
+                        [(51.0, -2.0), (51.0005, -2.0), (51.001, -2.0)],
+                        [(51.001, -1.999), (51.0005, -1.999), (51.0, -1.999)],
+                    ], contour_used=contour)
+                    node._row_action = action
+                    node.save_f2c_rows_to_topo('crop', row_id_start=1)
+                    row_edges = []
+                    headland_edges = []
+                    for source in node._topo_doc.nodes:
+                        for edge in source.edges:
+                            target = node._topo_doc.get_node(edge.node)
+                            if source.meta['row_id'] == target.meta['row_id']:
+                                row_edges.append(edge)
+                            else:
+                                headland_edges.append(edge)
+                    self.assertEqual(len(row_edges), 4 if contour else 2)
+                    self.assertEqual({edge.action for edge in row_edges}, {action})
+                    self.assertTrue(headland_edges)
+                    self.assertEqual({edge.action for edge in headland_edges}, {NAV_ACTION})
+
+    def test_repair_uses_selected_mode_for_each_waypoint_and_navigation_for_headlands(self):
+        for action in ('row_traversal', 'limbic_row_follow'):
+            with self.subTest(action=action):
+                node = make_node([])
+                node._row_action = action
+                for name, row_id, role, x, y in (
+                    ('R1_IN', 1, 'entry', 0, 0), ('R1_W1', 1, 'waypoint', 0, 5),
+                    ('R1_OUT', 1, 'exit', 0, 10), ('R2_IN', 2, 'entry', 2, 0),
+                    ('R2_OUT', 2, 'exit', 2, 10),
+                ):
+                    node._topo_doc.insert_node(TopoNode(
+                        name=name, x=x, y=y, meta={'row_id': row_id, 'row_role': role}))
+
+                node.repair_row_connectivity()
+
+                actual = {(source.name, edge.node): edge.action
+                          for source in node._topo_doc.nodes for edge in source.edges}
+                self.assertEqual(actual, {
+                    ('R1_IN', 'R1_W1'): action, ('R1_W1', 'R1_OUT'): action,
+                    ('R2_IN', 'R2_OUT'): action,
+                    ('R1_IN', 'R2_IN'): NAV_ACTION, ('R2_IN', 'R1_IN'): NAV_ACTION,
+                    ('R1_OUT', 'R2_OUT'): NAV_ACTION, ('R2_OUT', 'R1_OUT'): NAV_ACTION,
+                })
+                node._persist_and_reload.assert_called_once()
+
     def assert_row_metadata(self, node: TopoNode, row_id: int, row_role: str) -> None:
         self.assertEqual(node.meta['row_id'], row_id)
         self.assertEqual(node.meta['row_role'], row_role)
