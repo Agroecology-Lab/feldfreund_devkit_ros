@@ -57,6 +57,7 @@ def load_drop_harness(map_file):
 
 class TestDropTopoNode(unittest.TestCase):
     def setUp(self) -> None:
+        """Create a drop harness with a temporary map path and simulated robot position."""
         # NOTE: enterContext owns cleanup.
         # pylint: disable-next=consider-using-with
         temp_dir = self.enterContext(TemporaryDirectory())
@@ -74,6 +75,7 @@ class TestDropTopoNode(unittest.TestCase):
         self.node._topo_map_pub = Mock()
 
     def test_missing_map_saves_node_and_defaults(self) -> None:
+        """Verify a first drop saves the node, row metadata, and default navigation settings."""
         self.node.drop_topo_node('new', 7, 'exit')
 
         saved = parse_topo_yaml(self.map_file)
@@ -89,6 +91,7 @@ class TestDropTopoNode(unittest.TestCase):
         self.node._topo_map_pub.publish.assert_called_once()
 
     def test_missing_map_prunes_connection_to_unsaved_target(self) -> None:
+        """Verify a new map omits an edge to a target that exists only in memory."""
         self.node._topo_doc.add_node(TopoNode(name='TARGET', x=0.0, y=0.0))
         self.node._run_vm.topo.current_node = 'TARGET'
         source = self.node._topo_doc
@@ -102,6 +105,7 @@ class TestDropTopoNode(unittest.TestCase):
         self.assertNotIn('ERROR', self.node._run_vm.drop_node.status)
 
     def test_existing_map_keeps_connection_to_saved_target(self) -> None:
+        """Verify a drop preserves its navigation edge to a target already saved on disk."""
         self.node._topo_doc.add_node(TopoNode(name='TARGET', x=0.0, y=0.0))
         self.node._run_vm.topo.selected_node = 'TARGET'
         dump_topo_yaml(self.node._topo_doc, self.map_file)
@@ -114,6 +118,7 @@ class TestDropTopoNode(unittest.TestCase):
             TopoEdge(action=NAV_ACTION, edge_id='NEW_TARGET', node='TARGET')])
 
     def test_existing_map_prunes_connection_to_missing_target(self) -> None:
+        """Verify a drop omits an edge to a target absent from the existing map file."""
         self.node._topo_doc.add_node(TopoNode(name='TARGET', x=0.0, y=0.0))
         self.node._run_vm.topo.current_node = 'TARGET'
         dump_topo_yaml(TopoDoc(name='field.yaml'), self.map_file)
@@ -125,6 +130,7 @@ class TestDropTopoNode(unittest.TestCase):
         self.assertEqual(list(saved.get_node('NEW').edges), [])
 
     def test_disk_duplicate_is_not_overwritten(self) -> None:
+        """Verify a duplicate node on disk prevents both rewriting and publishing the map."""
         disk_doc = TopoDoc(name='field.yaml', nodes=[TopoNode(name='NEW', x=9.0, y=8.0)])
         dump_topo_yaml(disk_doc, self.map_file)
         original = self.map_file.read_bytes()
