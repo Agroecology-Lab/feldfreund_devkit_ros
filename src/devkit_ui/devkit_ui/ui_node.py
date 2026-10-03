@@ -955,7 +955,7 @@ class NiceGuiNode(Node):
                 'row_role': row_role,
             }
 
-        self._topo_doc.add_node(TopoNode(
+        new_node = TopoNode(
             name=name,
             nav_frame=nav_frame,
             x=x,
@@ -979,7 +979,8 @@ class NiceGuiNode(Node):
             edges=[
                 TopoEdge(action=edge_action, edge_id=f'{name}_{connect_to}', node=connect_to),
             ] if connect_to else [],
-        ))
+        )
+        self._topo_doc.add_node(new_node)
 
         conn_str = f' → {connect_to}' if connect_to else ''
         gps_str  = (f' [{gps_meta["gps_lat"]:.5f},{gps_meta["gps_lon"]:.5f}]'
@@ -1013,6 +1014,11 @@ class NiceGuiNode(Node):
                     self.get_logger().warn(f'Node {name} already in file — skipping write')
                     return
 
+                saved_node = copy.deepcopy(new_node)
+                saved_node.remove_edges({
+                    edge.node for edge in saved_node.edges if edge.node not in existing_names
+                })
+                file_doc.insert_node(saved_node)
                 dump_topo_yaml(file_doc, map_file)
 
                 self._topo_doc = file_doc
