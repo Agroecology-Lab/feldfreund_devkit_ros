@@ -159,6 +159,8 @@ def generate_launch_description():
                             executable="parameter_bridge",
                             name="ros_gz_bridge",
                             output="screen",
+                            respawn=True,
+                            respawn_delay=5.0,
                             parameters=[
                                 {"use_sim_time": True},
                                 {"config_file": bridge_config},

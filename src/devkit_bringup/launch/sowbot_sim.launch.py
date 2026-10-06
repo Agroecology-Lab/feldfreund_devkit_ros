@@ -27,7 +27,6 @@ Startup sequence inside this file
                       startup (previously both started in the same
                       TimerAction batch; under load this could leave
                       bt_navigator configured but never activated)
-5. bridge_watchdog  — revives parameter_bridge if it dies (e.g. gz restart)
 
 Nav2 node helpers (_nav2_sim_nodes, _topo_nav_nodes) are kept here so
 that any future callers can import them via importlib if needed.
@@ -264,8 +263,6 @@ def generate_launch_description():
         }.items(),
     )
 
-    bridge_cfg = os.path.join(pkg_agro, 'config', 'ros_gz_bridge.yaml')
-
     # Kill any stale bridge from a previous session before sim_launch starts.
     # Also kills fake_nav2_server (the boot-time /clock+TF stub started by
     # sim_nav.launch.py) — real Nav2, started later in this file, takes over
@@ -314,41 +311,6 @@ def generate_launch_description():
     # two unconnected trees, etc.) is fallout from that, not an independent
     # bug. Gate sim_launch on preflight_pkill's exit so the kill always
     # finishes before Gazebo starts.
-    # Bridge watchdog: revive parameter_bridge if it dies (e.g. gz restart).
-    #
-    # BUG FIXED HERE: this was a top-level action, started at t=0 alongside
-    # preflight_pkill — same race class as the "gz sim" self-kill above, just
-    # on the other side of it. preflight_pkill's `pkill -f "[p]arameter_bridge"`
-    # matches any process whose FULL command line contains that substring —
-    # and this script's own text contains "parameter_bridge" twice (the pgrep
-    # check and the ros2 run invocation), unbracketed, because unlike
-    # preflight_pkill this process doesn't need to avoid self-matching in its
-    # own pkill pattern (it doesn't run pkill). Result: preflight_pkill killed
-    # bridge_watchdog itself, instantly, on every single launch (exit code
-    # -15), before it ever reached its first `sleep 5` — confirmed via
-    # '[bridge_watchdog-2]: process has died ... exit code -15' appearing in
-    # the same instant as 'preflight_pkill-1: process has finished cleanly'.
-    # The real bridge happened to start fine anyway in that run, so this was
-    # silent — no watchdog was ever actually alive for the rest of the
-    # session, so a bridge crash later would never have been revived.
-    # Fix: don't try to out-clever pkill's pattern matching (that's a losing
-    # game — any future edit to this script's text could reintroduce a
-    # matching substring). Just sequence it, the same way sim_launch already
-    # is below: start it only once preflight_pkill has actually exited.
-    bridge_watchdog = ExecuteProcess(
-        cmd=[
-            '/bin/bash', '-c',
-            (
-                'while true; do sleep 5; '
-                'pgrep -f parameter_bridge >/dev/null || '
-                'ros2 run ros_gz_bridge parameter_bridge --ros-args '
-                '-p config_file:=' + bridge_cfg + '; '
-                'done'
-            ),
-        ],
-        name='bridge_watchdog',
-        output='screen',
-    )
 
     # ── World generation (input-keyed, cached) ───────────────────────────────
     # The Gazebo world is derived FROM the topo map by the Forest3D pipeline,
@@ -375,7 +337,7 @@ def generate_launch_description():
     start_sim_after_preflight = RegisterEventHandler(
         OnProcessExit(
             target_action=preflight_pkill,
-            on_exit=[world_gen, bridge_watchdog],
+            on_exit=[world_gen],
         )
     )
 
