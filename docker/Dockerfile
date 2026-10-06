@@ -413,6 +413,7 @@ RUN apt-get update && \
       apt-get install -y --no-install-recommends \
         ros-jazzy-web-video-server \
         xvfb \
+        x11-utils \
         x11vnc \
         websockify \
         novnc \
