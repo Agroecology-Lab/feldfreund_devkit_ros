@@ -17,6 +17,17 @@ The module is organized into the following key directories:
 * **`urdf/`**: Contains the `.xacro` files defining the robot's physical geometry, sensors, and Gazebo plugins.  
 * **`worlds/`**: (Optional) Holds Gazebo world files representing agricultural environments.
 
+## Headless simulation
+
+Run `ros2 launch devkit_simulation sim.launch.py headless:=true` for software rendering on display `:99`.
+This requires `Xvfb`, `xdpyinfo` (`x11-utils` on Ubuntu), and `timeout` (`coreutils`), included in the simulation image.
+The launch reuses a display that accepts connections, or starts Xvfb and waits up to approximately 10 seconds for readiness before starting Gazebo.
+World filenames containing spaces can be passed as a single quoted argument, such as `'world:=my field.world'`.
+
+When `/dev/dri` exists and mount namespaces are permitted, the launch hides hardware render nodes from Gazebo in a private mount namespace.
+Otherwise it runs without a mount namespace using Mesa software-rendering settings and warns if render nodes remain visible.
+On boards whose Mesa EGL driver still selects a broken hardware render node, deploy without exposing `/dev/dri`, or explicitly allow mount namespaces and mounts (`CAP_SYS_ADMIN` plus the container's security policy).
+
 ## **Technical Specifications**
 
 | Feature | Specification |
