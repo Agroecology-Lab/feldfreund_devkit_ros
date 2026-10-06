@@ -51,6 +51,20 @@ def generate_launch_description():
         "GZ_SIM_RESOURCE_PATH": models_dir + ":" + os.environ.get("GZ_SIM_RESOURCE_PATH", ""),
     }
 
+    # Headless on boards whose GPU can't give Ogre2 a GL 3.3 context (e.g.
+    # aarch64 SBCs with Mali): force Mesa llvmpipe on a private Xvfb display.
+    # LIBGL_ALWAYS_SOFTWARE is ignored by Mesa's EGL when the render node is
+    # visible, so the headless command below also hides /dev/dri from gz only.
+    gz_env_headless = {
+        **gz_env,
+        "DISPLAY": ":99",
+        "XAUTHORITY": "",
+        "LIBGL_ALWAYS_SOFTWARE": "1",
+        "GALLIUM_DRIVER": "llvmpipe",
+        "MESA_GL_VERSION_OVERRIDE": "3.3",
+        "MESA_GLSL_VERSION_OVERRIDE": "330",
+    }
+
     # ── 1. Gazebo ─────────────────────────────────────────────────────────────
     # Use an eager world path string + LaunchConfiguration for the filename so
     # the world arg override still works, but the directory is resolved now.
@@ -62,13 +76,26 @@ def generate_launch_description():
         additional_env=gz_env,
         condition=UnlessCondition(LaunchConfiguration("headless")),
     )
-    # Headless: identical except server-only (-s, no GUI) with EGL headless
-    # rendering so camera/lidar sensors still render without an X display.
+    # Headless: server-only (-s, no GUI) rendered in software.
+    #  1. start Xvfb :99 if it isn't already running
+    #  2. unshare -m: private mount namespace, so the tmpfs over /dev/dri hides
+    #     the (broken) hardware render node from gz only, not the host
+    #  3. exec gz sim without --headless-rendering (that flag forces the EGL
+    #     device path, which picks the hardware node and segfaults in Mesa)
     gz_sim_headless = ExecuteProcess(
-        cmd=[GZ_BIN, "sim", "-r", "-s", "--headless-rendering", world_file],
+        cmd=[
+            "unshare", "-m", "bash", "-c",
+            [
+                "pgrep -x Xvfb >/dev/null || "
+                "{ Xvfb :99 -screen 0 1280x720x24 -nolisten tcp >/dev/null 2>&1 & sleep 2; }; "
+                "mount -t tmpfs tmpfs /dev/dri 2>/dev/null; "
+                f"exec {GZ_BIN} sim -r -s ",
+                world_file,
+            ],
+        ],
         name="gz_sim",
         output="screen",
-        additional_env=gz_env,
+        additional_env=gz_env_headless,
         condition=IfCondition(LaunchConfiguration("headless")),
     )
 
