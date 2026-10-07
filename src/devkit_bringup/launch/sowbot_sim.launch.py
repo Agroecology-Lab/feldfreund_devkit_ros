@@ -209,7 +209,22 @@ def _topo_nav_nodes(tmap2_file: str, devkit_launch_pkg: str, use_sim_time: bool 
 # ---------------------------------------------------------------------------
 
 def generate_launch_description():
-    """Build the simulation bringup with world generation, Gazebo, and navigation."""
+    """Build the simulation bringup with world generation, Gazebo, and navigation.
+
+    Return a launch description that cleans up prior simulation processes and
+    runs world generation. Gazebo, navigation, localization, the odometry relay,
+    and the map-to-odom update are scheduled only if world generation exits zero.
+    Bootstrap base TF publishers are stopped only after a matching odom-to-base
+    transform arrives on /tf; a timeout after 240 seconds or a failed wait leaves
+    them running.
+
+    Forward the camera launch arguments to the simulation: ``use_camera``
+    defaults to true, ``camera_width`` and ``camera_height`` to 320 and 240
+    pixels, and ``camera_rate`` to 10 Hz.
+
+    Raise PackageNotFoundError if devkit_simulation or devkit_bringup cannot be
+    found in the ament index.
+    """
     pkg_agro          = get_package_share_directory('devkit_simulation')
     devkit_launch_pkg = get_package_share_directory('devkit_bringup')
 

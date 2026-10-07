@@ -18,7 +18,22 @@ GZ_BIN = "/opt/ros/jazzy/opt/gz_tools_vendor/bin/gz"
 
 
 def generate_launch_description():
-    """Build the Gazebo launch with robot spawning and ROS bridges, optionally headless."""
+    """Build the Gazebo launch with robot spawning and ROS bridges, optionally headless.
+
+    Return a launch description for Gazebo, robot_state_publisher, robot
+    spawning, and a ROS bridge scheduled two seconds after the spawn process
+    exits, regardless of its exit status.
+
+    Pass ``use_camera``, ``camera_width``, ``camera_height``, and ``camera_rate``
+    to both xacro invocations. For the default sowbot_01.xacro, these enable a
+    320-by-240-pixel camera at 10 Hz; ``use_camera:=false`` omits the sensor.
+    Spawn at the coordinates in /workspace/spawn_pose.txt, falling back to
+    (0, 0, 1) meters if the file is absent; the declared x/y/z arguments do not
+    control the spawn position.
+
+    Raise PackageNotFoundError if devkit_simulation cannot be found in the
+    ament index.
+    """
     pkg_name  = "devkit_simulation"
     pkg_share = get_package_share_directory(pkg_name)
 
