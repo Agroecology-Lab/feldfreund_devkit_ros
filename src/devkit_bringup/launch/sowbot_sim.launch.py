@@ -349,6 +349,13 @@ def generate_launch_description():
             ))]
         return [sim_launch]
 
+    def _if_worldgen_ok(actions):
+        # Gate downstream actions on world_gen exiting 0. The failure is
+        # already logged by _launch_sim_if_worldgen_ok.
+        def _handler(event, context):
+            return list(actions) if event.returncode == 0 else []
+        return _handler
+
     start_sim_after_worldgen = RegisterEventHandler(
         OnProcessExit(
             target_action=world_gen,
@@ -377,7 +384,7 @@ def generate_launch_description():
         actions=_nav2_sim_nodes(nav2_params, use_sim_time=True),
     )
     start_nav2_after_worldgen = RegisterEventHandler(
-        OnProcessExit(target_action=world_gen, on_exit=[nav2]),
+        OnProcessExit(target_action=world_gen, on_exit=_if_worldgen_ok([nav2])),
     )
 
     # ── Nav2 lifecycle manager (t+40s after world-gen) ────────────────────────
@@ -396,7 +403,7 @@ def generate_launch_description():
         actions=[_nav2_lifecycle_manager_node(nav2_params, use_sim_time=True)],
     )
     start_nav2_lifecycle_after_worldgen = RegisterEventHandler(
-        OnProcessExit(target_action=world_gen, on_exit=[nav2_lifecycle]),
+        OnProcessExit(target_action=world_gen, on_exit=_if_worldgen_ok([nav2_lifecycle])),
     )
 
     # Kill the wall-time bootstrap TF publishers from sim_nav.launch.py once
@@ -446,9 +453,8 @@ def generate_launch_description():
             'else '
             '  echo "[bootstrap_tf_killer] WARNING: no /odom data after $((SECONDS-start_ts))s, killing statics anyway to avoid wedging forever"; '
             'fi; '
-            'ros2 lifecycle set /odom_to_base_footprint_static shutdown 2>/dev/null; '
-            'pkill -f "static_transform_publishe[r].*odom base_footprint" || true; '
-            'pkill -f "static_transform_publishe[r].*base_footprint base_link" || true; '
+            'pkill -f "static_transform_publishe[r].*__node:=odom_to_base_footprint_static" || true; '
+            'pkill -f "static_transform_publishe[r].*__node:=base_footprint_to_base_link_static" || true; '
             'echo "[bootstrap_tf_killer] killed odom->base_footprint and base_footprint->base_link static publishers ($((SECONDS-start_ts))s elapsed)"',
         ],
         name='kill_bootstrap_tfs',
@@ -495,7 +501,7 @@ def generate_launch_description():
         output='screen',
     )
     start_map_to_odom_fixer_after_worldgen = RegisterEventHandler(
-        OnProcessExit(target_action=world_gen, on_exit=[fix_map_to_odom]),
+        OnProcessExit(target_action=world_gen, on_exit=_if_worldgen_ok([fix_map_to_odom])),
     )
 
     # ── fusioncore (UKF localisation, t+35s) ──────────────────────────────────
@@ -529,7 +535,7 @@ def generate_launch_description():
         fusioncore_configure,
     ])
     start_fusioncore_after_worldgen = RegisterEventHandler(
-        OnProcessExit(target_action=world_gen, on_exit=[fusioncore_bringup]),
+        OnProcessExit(target_action=world_gen, on_exit=_if_worldgen_ok([fusioncore_bringup])),
     )
 
     # /fusion/odom -> /odometry/global (limbic_row_follow subscribes to the
@@ -545,7 +551,7 @@ def generate_launch_description():
         ),
     ])
     start_fusion_to_global_relay_after_worldgen = RegisterEventHandler(
-        OnProcessExit(target_action=world_gen, on_exit=[fusion_to_global_relay]),
+        OnProcessExit(target_action=world_gen, on_exit=_if_worldgen_ok([fusion_to_global_relay])),
     )
 
     return LaunchDescription([
