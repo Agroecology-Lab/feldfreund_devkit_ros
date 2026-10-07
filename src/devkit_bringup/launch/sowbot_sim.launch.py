@@ -209,7 +209,25 @@ def _topo_nav_nodes(tmap2_file: str, devkit_launch_pkg: str, use_sim_time: bool 
 # ---------------------------------------------------------------------------
 
 def generate_launch_description():
-    """Build the simulation bringup with world generation, Gazebo, and navigation."""
+    """Build the simulation bringup with world generation, Gazebo, and navigation.
+
+    Return a launch description that cleans up prior simulation processes and
+    runs world generation. Gazebo, the /clock readiness gate and the map-to-odom
+    update are scheduled only if world generation exits zero. Nav2, its lifecycle
+    manager, fusioncore and the fusion odometry relay are scheduled only if the
+    gate sees /clock within 240 seconds (5 s after for the nodes, 10 s for the
+    lifecycle manager); otherwise none of them starts and the gate logs an error.
+    Bootstrap base TF publishers are stopped only after a matching odom-to-base
+    transform arrives on /tf; a timeout after 240 seconds or a failed wait leaves
+    them running.
+
+    Forward the camera launch arguments to the simulation: ``use_camera``
+    defaults to true, ``camera_width`` and ``camera_height`` to 320 and 240
+    pixels, and ``camera_rate`` to 10 Hz.
+
+    Raise PackageNotFoundError if devkit_simulation or devkit_bringup cannot be
+    found in the ament index.
+    """
     pkg_agro          = get_package_share_directory('devkit_simulation')
     devkit_launch_pkg = get_package_share_directory('devkit_bringup')
 
@@ -228,6 +246,22 @@ def generate_launch_description():
     headless_arg = DeclareLaunchArgument(
         'headless', default_value='false',
         description='true: gz sim server-only, no GUI',
+    )
+    use_camera_arg = DeclareLaunchArgument(
+        'use_camera', default_value='true',
+        description='Enable the simulated camera sensor',
+    )
+    camera_width_arg = DeclareLaunchArgument(
+        'camera_width', default_value='320',
+        description='Simulated camera image width in pixels',
+    )
+    camera_height_arg = DeclareLaunchArgument(
+        'camera_height', default_value='240',
+        description='Simulated camera image height in pixels',
+    )
+    camera_rate_arg = DeclareLaunchArgument(
+        'camera_rate', default_value='10',
+        description='Simulated camera update rate in Hz',
     )
     x_arg = DeclareLaunchArgument('x', default_value='0.0')
     y_arg = DeclareLaunchArgument('y', default_value='0.0')
@@ -257,6 +291,10 @@ def generate_launch_description():
             'world': LaunchConfiguration('world'),
             'urdf':  LaunchConfiguration('urdf'),
             'headless': LaunchConfiguration('headless'),
+            'use_camera': LaunchConfiguration('use_camera'),
+            'camera_width': LaunchConfiguration('camera_width'),
+            'camera_height': LaunchConfiguration('camera_height'),
+            'camera_rate': LaunchConfiguration('camera_rate'),
             'x':     LaunchConfiguration('x'),
             'y':     LaunchConfiguration('y'),
             'z':     LaunchConfiguration('z'),
@@ -342,12 +380,22 @@ def generate_launch_description():
     )
 
     def _launch_sim_if_worldgen_ok(event, context):
+        """Return the simulation launch on world generation success, or log its failure."""
         if event.returncode != 0:
             return [LogInfo(msg=(
                 f'[sowbot_sim] world_gen exited with code {event.returncode} — '
                 'not starting sim_launch (world may be missing/stale)'
             ))]
         return [sim_launch]
+
+    def _if_worldgen_ok(actions):
+        """Create an exit handler that gates actions on successful world generation."""
+        # Gate downstream actions on world_gen exiting 0. The failure is
+        # already logged by _launch_sim_if_worldgen_ok.
+        def _handler(event, context):
+            """Return the gated actions on success, or an empty list on failure."""
+            return list(actions) if event.returncode == 0 else []
+        return _handler
 
     start_sim_after_worldgen = RegisterEventHandler(
         OnProcessExit(
@@ -356,31 +404,58 @@ def generate_launch_description():
         )
     )
 
-    # ── Nav2 (t+35s after world-gen) ─────────────────────────────────────────
-    # 35s gives gz sim time to start, the robot to spawn, and ros_gz_bridge
-    # to come up and start publishing /clock with RELIABLE QoS.  By the time
-    # Nav2 initialises, /clock is live and all TF frames carry Gazebo
-    # sim-time stamps — so use_sim_time=True works correctly from the start.
-    # (Bumped from 15s: logs showed bridge/clock coming up ~t+18s, and spawn
-    # itself taking longer with the heavier xacro. This is a band-aid — the
-    # fixed sleep still races if spawn gets slower again; polling /clock
-    # instead of sleeping is the fix that stops needing retuning.)
+    # ── /clock readiness gate ────────────────────────────────────────────────
+    # Nav2, its lifecycle manager, fusioncore and the fusion relay all need
+    # /clock live (use_sim_time=True) and the robot spawned. They used to start
+    # on fixed timers (35s/40s) after world_gen, which raced on a slow machine
+    # (low RTF) and started the whole nav stack even when gz sim, the spawn or
+    # ros_gz_bridge had failed. ros_gz_bridge is only launched after the spawn
+    # step exits (see sim.launch.py), so /clock appearing means gz is up, the
+    # spawn step has finished and the bridge is forwarding.
     #
-    # NOTE: the timers are anchored on world_gen's exit, not on t=0 of the
-    # launch — world generation now runs inside this file (see world_gen
-    # above) and can take 30-45s, so a t=0 timer would fire long before gz
-    # sim even starts. Anchoring on world_gen's exit keeps the original
-    # "35s after gz sim starts" behaviour.
-    nav2_params = os.path.join(devkit_launch_pkg, 'config', 'nav2_params_sim.yaml')
-    nav2 = TimerAction(
-        period=35.0,
-        actions=_nav2_sim_nodes(nav2_params, use_sim_time=True),
+    # Single `ros2 topic echo --once` with the full timeout: one DDS
+    # participant, not many short-lived ones (see kill_bootstrap_tfs below).
+    # Exit non-zero on timeout so nothing downstream is released.
+    clock_gate = ExecuteProcess(
+        cmd=[
+            '/bin/bash', '-c',
+            'start_ts=$SECONDS; '
+            'if timeout 240 ros2 topic echo /clock --once >/dev/null 2>&1; then '
+            '  echo "[clock_gate] /clock live after $((SECONDS-start_ts))s"; '
+            'else '
+            '  echo "[clock_gate] ERROR: no /clock after $((SECONDS-start_ts))s '
+            '(gz sim, spawn or ros_gz_bridge did not come up) — '
+            'not starting Nav2/fusioncore"; exit 1; '
+            'fi',
+        ],
+        name='clock_gate',
+        output='screen',
     )
-    start_nav2_after_worldgen = RegisterEventHandler(
-        OnProcessExit(target_action=world_gen, on_exit=[nav2]),
+    start_clock_gate_after_worldgen = RegisterEventHandler(
+        OnProcessExit(target_action=world_gen, on_exit=_if_worldgen_ok([clock_gate])),
     )
 
-    # ── Nav2 lifecycle manager (t+40s after world-gen) ────────────────────────
+    # Offsets below are measured from /clock first being seen, not from
+    # world_gen's exit. Same 5s spacing as before: server nodes (and
+    # fusioncore) first, lifecycle manager 5s later.
+    NAV_START_AFTER_CLOCK_S = 5.0
+    NAV_LIFECYCLE_AFTER_CLOCK_S = 10.0
+
+    # ── Nav2 (5s after /clock is live) ───────────────────────────────────────
+    # By the time Nav2 initialises, /clock is live and all TF frames carry
+    # Gazebo sim-time stamps — so use_sim_time=True works correctly from the
+    # start. Anchored on clock_gate's exit (see above), not a fixed sleep that
+    # needs retuning whenever spawn gets slower.
+    nav2_params = os.path.join(devkit_launch_pkg, 'config', 'nav2_params_sim.yaml')
+    nav2 = TimerAction(
+        period=NAV_START_AFTER_CLOCK_S,
+        actions=_nav2_sim_nodes(nav2_params, use_sim_time=True),
+    )
+    start_nav2_after_clock = RegisterEventHandler(
+        OnProcessExit(target_action=clock_gate, on_exit=_if_worldgen_ok([nav2])),
+    )
+
+    # ── Nav2 lifecycle manager (10s after /clock is live) ─────────────────────
     # Started 5s AFTER the Nav2 server nodes above, not in the same batch.
     # Previously this raced controller_server/behavior_server/bt_navigator's
     # process startup, since ros2 launch forks everything in a TimerAction
@@ -392,11 +467,11 @@ def generate_launch_description():
     # plus bond_timeout=15.0 (see _nav2_lifecycle_manager_node) gives every
     # managed node real margin before lifecycle transitions are attempted.
     nav2_lifecycle = TimerAction(
-        period=40.0,
+        period=NAV_LIFECYCLE_AFTER_CLOCK_S,
         actions=[_nav2_lifecycle_manager_node(nav2_params, use_sim_time=True)],
     )
-    start_nav2_lifecycle_after_worldgen = RegisterEventHandler(
-        OnProcessExit(target_action=world_gen, on_exit=[nav2_lifecycle]),
+    start_nav2_lifecycle_after_clock = RegisterEventHandler(
+        OnProcessExit(target_action=clock_gate, on_exit=_if_worldgen_ok([nav2_lifecycle])),
     )
 
     # Kill the wall-time bootstrap TF publishers from sim_nav.launch.py once
@@ -419,10 +494,10 @@ def generate_launch_description():
     #
     # Fix: poll for real /odom data (proof the DiffDrive bridge is actually
     # forwarding gz Odometry, not just that the bridge node/topic exists)
-    # before killing anything. odom->base_footprint is then continuously
-    # covered by the DiffDrive bridge on /tf; base_footprint->base_link is
-    # covered by robot_state_publisher (50 Hz, comes up independently of
-    # spawn timing). map->odom is left alone — it has no dynamic replacement.
+    # before killing anything. [STALE since DiffDrive publish_tf=false: the
+    # trigger is now fusioncore's own TF, see below.] base_footprint->base_link
+    # is covered by robot_state_publisher (fixed base_footprint_joint in the
+    # xacro). map->odom is left alone — it has no dynamic replacement.
     #
     # NOTE: this was previously a loop of `timeout 2 ros2 topic echo /odom
     # --once` retried every 2s for up to 240s. That spawns a brand-new DDS
@@ -437,19 +512,32 @@ def generate_launch_description():
     # node in the graph -- a false negative in the check, not an actual
     # data outage. Fixed by using ONE participant with the full timeout
     # budget instead of 120 short-lived ones.
+    # Trigger: a DYNAMIC odom->base_footprint (or ->base_link) transform on
+    # /tf. The bootstrap statics are on /tf_static (new-style args), so any
+    # /tf message with parent 'odom' can only come from fusioncore, the sole
+    # live source. Waiting on /odom instead (the previous trigger) proves
+    # nothing about fusioncore: /odom is gz ground truth, fusioncore starts on
+    # its own 35s timer and only publishes once it has initialised. Killing on
+    # /odom data therefore left a gap with no odom->base_footprint source.
+    # On timeout the statics are KEPT: killing them with no replacement is the
+    # "two or more unconnected trees" failure described above.
+    odom_tf_filter = (
+        "any(t.header.frame_id=='odom' and "
+        "t.child_frame_id in ('base_footprint','base_link') "
+        "for t in m.transforms)"
+    )
     kill_bootstrap_tfs = ExecuteProcess(
         cmd=[
             '/bin/bash', '-c',
             'start_ts=$SECONDS; timeout_s=240; '
-            'if timeout "$timeout_s" ros2 topic echo /odom --once >/dev/null 2>&1; then '
-            '  echo "[bootstrap_tf_killer] real /odom data confirmed after $((SECONDS-start_ts))s"; '
+            f'if timeout "$timeout_s" ros2 topic echo /tf --once --filter "{odom_tf_filter}" >/dev/null 2>&1; then '
+            '  echo "[bootstrap_tf_killer] dynamic odom TF (fusioncore) live after $((SECONDS-start_ts))s"; '
+            '  pkill -f "static_transform_publishe[r].*__node:=odom_to_base_footprint_static" || true; '
+            '  pkill -f "static_transform_publishe[r].*__node:=base_footprint_to_base_link_static" || true; '
+            '  echo "[bootstrap_tf_killer] killed odom->base_footprint and base_footprint->base_link static publishers ($((SECONDS-start_ts))s elapsed)"; '
             'else '
-            '  echo "[bootstrap_tf_killer] WARNING: no /odom data after $((SECONDS-start_ts))s, killing statics anyway to avoid wedging forever"; '
-            'fi; '
-            'ros2 lifecycle set /odom_to_base_footprint_static shutdown 2>/dev/null; '
-            'pkill -f "static_transform_publishe[r].*odom base_footprint" || true; '
-            'pkill -f "static_transform_publishe[r].*base_footprint base_link" || true; '
-            'echo "[bootstrap_tf_killer] killed odom->base_footprint and base_footprint->base_link static publishers ($((SECONDS-start_ts))s elapsed)"',
+            '  echo "[bootstrap_tf_killer] WARNING: no dynamic odom TF on /tf after $((SECONDS-start_ts))s — keeping bootstrap statics (fusioncore not publishing?)"; '
+            'fi',
         ],
         name='kill_bootstrap_tfs',
         output='screen',
@@ -495,10 +583,10 @@ def generate_launch_description():
         output='screen',
     )
     start_map_to_odom_fixer_after_worldgen = RegisterEventHandler(
-        OnProcessExit(target_action=world_gen, on_exit=[fix_map_to_odom]),
+        OnProcessExit(target_action=world_gen, on_exit=_if_worldgen_ok([fix_map_to_odom])),
     )
 
-    # ── fusioncore (UKF localisation, t+35s) ──────────────────────────────────
+    # ── fusioncore (UKF localisation, 5s after /clock is live) ────────────────
     # MOVED here from sim_nav.launch.py. fusioncore consumes sim-time-stamped
     # sensors (/gnss/fix, /imu/data bridged from Gazebo, /odom/wheels relayed
     # from ground-truth /odom) and is the sole publisher of odom->base_footprint.
@@ -506,8 +594,8 @@ def generate_launch_description():
     # like Nav2 above. Started on wall time it stamped its TF and /fusion/odom
     # with wall-clock time while the sim-time stack rejected them as ~1.7e9 s in
     # the future ("Extrapolation Error"), which sent the robot off the world.
-    # t=35s matches the Nav2 timer: gz sim + spawn + ros_gz_bridge are up and
-    # /clock is publishing by then. autostart (fusioncore >= 0.3.1) activates the
+    # Started on clock_gate's exit, same as Nav2: gz sim + spawn + ros_gz_bridge
+    # are up and /clock is publishing by then. autostart (fusioncore >= 0.3.1) activates the
     # node ~200ms after configure, so a lone CONFIGURE event is enough.
     fusioncore_params = PathJoinSubstitution(
         [FindPackageShare('devkit_bringup'), 'config', 'fusioncore_sim.yaml']
@@ -524,17 +612,17 @@ def generate_launch_description():
         lifecycle_node_matcher=matches_action(fusioncore_node),
         transition_id=Transition.TRANSITION_CONFIGURE,
     ))
-    fusioncore_bringup = TimerAction(period=35.0, actions=[
+    fusioncore_bringup = TimerAction(period=NAV_START_AFTER_CLOCK_S, actions=[
         fusioncore_node,
         fusioncore_configure,
     ])
-    start_fusioncore_after_worldgen = RegisterEventHandler(
-        OnProcessExit(target_action=world_gen, on_exit=[fusioncore_bringup]),
+    start_fusioncore_after_clock = RegisterEventHandler(
+        OnProcessExit(target_action=clock_gate, on_exit=_if_worldgen_ok([fusioncore_bringup])),
     )
 
     # /fusion/odom -> /odometry/global (limbic_row_follow subscribes to the
     # latter; same nav_msgs/Odometry type both ends).
-    fusion_to_global_relay = TimerAction(period=35.0, actions=[
+    fusion_to_global_relay = TimerAction(period=NAV_START_AFTER_CLOCK_S, actions=[
         Node(
             package='topic_tools',
             executable='relay',
@@ -544,8 +632,8 @@ def generate_launch_description():
             output='screen',
         ),
     ])
-    start_fusion_to_global_relay_after_worldgen = RegisterEventHandler(
-        OnProcessExit(target_action=world_gen, on_exit=[fusion_to_global_relay]),
+    start_fusion_to_global_relay_after_clock = RegisterEventHandler(
+        OnProcessExit(target_action=clock_gate, on_exit=_if_worldgen_ok([fusion_to_global_relay])),
     )
 
     return LaunchDescription([
@@ -554,16 +642,21 @@ def generate_launch_description():
         world_arg,
         headless_arg,
         urdf_arg,
+        use_camera_arg,
+        camera_width_arg,
+        camera_height_arg,
+        camera_rate_arg,
         x_arg,
         y_arg,
         z_arg,
         preflight_pkill,
         start_sim_after_preflight,
         start_sim_after_worldgen,
-        start_nav2_after_worldgen,
-        start_nav2_lifecycle_after_worldgen,
-        start_fusioncore_after_worldgen,
-        start_fusion_to_global_relay_after_worldgen,
+        start_clock_gate_after_worldgen,
+        start_nav2_after_clock,
+        start_nav2_lifecycle_after_clock,
+        start_fusioncore_after_clock,
+        start_fusion_to_global_relay_after_clock,
         start_map_to_odom_fixer_after_worldgen,
         kill_bootstrap_tfs,
     ])
