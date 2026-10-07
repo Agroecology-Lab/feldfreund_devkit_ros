@@ -153,8 +153,8 @@ def generate_launch_description():
         parameters=[{
             "robot_description": ParameterValue(
                 Command([
-                    'xacro ', xacro_file,
-                    ' use_camera:=', LaunchConfiguration('use_camera'),
+                    'xacro "', xacro_file,
+                    '" use_camera:=', LaunchConfiguration('use_camera'),
                     ' camera_width:=', LaunchConfiguration('camera_width'),
                     ' camera_height:=', LaunchConfiguration('camera_height'),
                     ' camera_rate:=', LaunchConfiguration('camera_rate'),

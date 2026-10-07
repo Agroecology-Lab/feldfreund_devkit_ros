@@ -45,16 +45,20 @@ def test_bringup_forwards_camera_configuration(launch_file, launch_helpers, over
 
 
 @pytest.mark.parametrize('overrides', OVERRIDES)
-def test_state_publisher_xacro_receives_camera_settings(launch_file, launch_helpers, overrides):
+def test_state_publisher_xacro_receives_camera_settings(
+    launch_file, launch_helpers, tmp_path, overrides,
+):
     actions = launch_file('devkit_simulation', 'sim.launch.py')
     configuration = launch_helpers.defaults(actions) | overrides
     publisher = launch_helpers.named(actions, 'robot_state_publisher')
     description = publisher.kwargs['parameters'][0]['robot_description']
     assert description.kwargs['value_type'] is str
     command = launch_helpers.resolve(description.args[0], configuration)
-    # NOTE: Package share paths deliberately contain spaces; inspect the mapping suffix.
-    mappings = shlex.split(command[command.index(' use_camera:='):])
-    assert mappings == [f'{name}:={configuration[name]}' for name in CAMERA_DEFAULTS]
+    xacro_path = tmp_path / 'package shares' / 'devkit_simulation' / 'urdf' / configuration['urdf']
+    assert shlex.split(command) == [
+        'xacro', str(xacro_path),
+        *[f'{name}:={configuration[name]}' for name in CAMERA_DEFAULTS],
+    ]
 
 
 @pytest.mark.parametrize('overrides', OVERRIDES)
