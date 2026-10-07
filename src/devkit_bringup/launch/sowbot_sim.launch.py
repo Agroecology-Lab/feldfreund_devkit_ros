@@ -362,6 +362,7 @@ def generate_launch_description():
     )
 
     def _launch_sim_if_worldgen_ok(event, context):
+        """Return the simulation launch on world generation success, or log its failure."""
         if event.returncode != 0:
             return [LogInfo(msg=(
                 f'[sowbot_sim] world_gen exited with code {event.returncode} — '
@@ -370,9 +371,11 @@ def generate_launch_description():
         return [sim_launch]
 
     def _if_worldgen_ok(actions):
+        """Create an exit handler that gates actions on successful world generation."""
         # Gate downstream actions on world_gen exiting 0. The failure is
         # already logged by _launch_sim_if_worldgen_ok.
         def _handler(event, context):
+            """Return the gated actions on success, or an empty list on failure."""
             return list(actions) if event.returncode == 0 else []
         return _handler
 
