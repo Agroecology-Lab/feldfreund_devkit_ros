@@ -229,6 +229,22 @@ def generate_launch_description():
         'headless', default_value='false',
         description='true: gz sim server-only, no GUI',
     )
+    use_camera_arg = DeclareLaunchArgument(
+        'use_camera', default_value='true',
+        description='Enable the simulated camera sensor',
+    )
+    camera_width_arg = DeclareLaunchArgument(
+        'camera_width', default_value='320',
+        description='Simulated camera image width in pixels',
+    )
+    camera_height_arg = DeclareLaunchArgument(
+        'camera_height', default_value='240',
+        description='Simulated camera image height in pixels',
+    )
+    camera_rate_arg = DeclareLaunchArgument(
+        'camera_rate', default_value='10',
+        description='Simulated camera update rate in Hz',
+    )
     x_arg = DeclareLaunchArgument('x', default_value='0.0')
     y_arg = DeclareLaunchArgument('y', default_value='0.0')
     z_arg = DeclareLaunchArgument('z', default_value='0.3')
@@ -257,6 +273,10 @@ def generate_launch_description():
             'world': LaunchConfiguration('world'),
             'urdf':  LaunchConfiguration('urdf'),
             'headless': LaunchConfiguration('headless'),
+            'use_camera': LaunchConfiguration('use_camera'),
+            'camera_width': LaunchConfiguration('camera_width'),
+            'camera_height': LaunchConfiguration('camera_height'),
+            'camera_rate': LaunchConfiguration('camera_rate'),
             'x':     LaunchConfiguration('x'),
             'y':     LaunchConfiguration('y'),
             'z':     LaunchConfiguration('z'),
@@ -560,6 +580,10 @@ def generate_launch_description():
         world_arg,
         headless_arg,
         urdf_arg,
+        use_camera_arg,
+        camera_width_arg,
+        camera_height_arg,
+        camera_rate_arg,
         x_arg,
         y_arg,
         z_arg,

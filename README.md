@@ -227,6 +227,15 @@ The primary entry point for the system. While it runs the full stack by default,
 
 ### One-command sim launch (TMuLE)
 
+The simulation launch accepts `use_camera:=false` to disable the simulated camera:
+
+```bash
+ros2 launch devkit_bringup sowbot_sim.launch.py use_camera:=false
+```
+
+Use `camera_width`, `camera_height`, and `camera_rate` to override the default 320×240 image at 10 Hz.
+These arguments also work with `ros2 launch devkit_simulation sim.launch.py`.
+
 Whilst you can launch Gazebo and other tools from the webui, some may prefer the terminal, this makes terminal use a bit easier.
 
 [TMuLE](https://github.com/marc-hanheide/TMuLE) brings the whole row-following sim up in a single `tmux` session — one window per process — instead of running the three launch steps by hand in separate terminals:

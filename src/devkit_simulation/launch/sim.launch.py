@@ -43,6 +43,22 @@ def generate_launch_description():
         "urdf", default_value="sowbot_01.xacro",
         description="URDF/xacro filename inside devkit_simulation/urdf/",
     )
+    use_camera_arg = DeclareLaunchArgument(
+        'use_camera', default_value='true',
+        description='Enable the simulated camera sensor',
+    )
+    camera_width_arg = DeclareLaunchArgument(
+        'camera_width', default_value='320',
+        description='Simulated camera image width in pixels',
+    )
+    camera_height_arg = DeclareLaunchArgument(
+        'camera_height', default_value='240',
+        description='Simulated camera image height in pixels',
+    )
+    camera_rate_arg = DeclareLaunchArgument(
+        'camera_rate', default_value='10',
+        description='Simulated camera update rate in Hz',
+    )
 
     # ── Environment ───────────────────────────────────────────────────────────
     gz_env = {
@@ -121,7 +137,13 @@ def generate_launch_description():
         output="screen",
         parameters=[{
             "robot_description": ParameterValue(
-                Command(["xacro ", xacro_file]), value_type=str
+                Command([
+                    'xacro ', xacro_file,
+                    ' use_camera:=', LaunchConfiguration('use_camera'),
+                    ' camera_width:=', LaunchConfiguration('camera_width'),
+                    ' camera_height:=', LaunchConfiguration('camera_height'),
+                    ' camera_rate:=', LaunchConfiguration('camera_rate'),
+                ]), value_type=str
             ),
             "use_sim_time": True,
             # Republish fixed joints on /tf at 50 Hz instead of one-shot
@@ -173,12 +195,19 @@ def generate_launch_description():
                 'SPAWN_X=0.0; SPAWN_Y=0.0; SPAWN_Z=1.0; '
                 'echo "[spawn] WARNING: $SPAWN_FILE not found — falling back to (0,0,1.0), robot will drop onto terrain"; '
                 'fi; '
-                f'URDF=$(xacro {urdf_dir}/$_URDF) && '
+                f'URDF=$(xacro "{urdf_dir}/$_URDF" '
+                '"use_camera:=$1" "camera_width:=$2" '
+                '"camera_height:=$3" "camera_rate:=$4") && '
                 'ros2 run ros_gz_sim create'
                 ' -name agro_robot'
                 ' -string "$URDF"'
                 ' -x "$SPAWN_X" -y "$SPAWN_Y" -z "$SPAWN_Z"'  # base_footprint on ground; base_link raised by wheel_radius via base_footprint_joint
             ),
+            'spawn_robot',
+            LaunchConfiguration('use_camera'),
+            LaunchConfiguration('camera_width'),
+            LaunchConfiguration('camera_height'),
+            LaunchConfiguration('camera_rate'),
         ],
         name="spawn_robot",
         output="screen",
@@ -214,6 +243,7 @@ def generate_launch_description():
     return LaunchDescription([
         x_arg, y_arg, z_arg,
         world_arg, urdf_arg, headless_arg,
+        use_camera_arg, camera_width_arg, camera_height_arg, camera_rate_arg,
         gz_sim,
         gz_sim_headless,
         robot_state_publisher,
