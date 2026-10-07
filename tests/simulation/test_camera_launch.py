@@ -22,6 +22,7 @@ OVERRIDES = [
     ('devkit_bringup', 'sowbot_sim.launch.py'),
 ])
 def test_camera_defaults_at_both_entry_points(launch_file, launch_helpers, package, filename):
+    """Verify both launch entry points declare the same lean camera defaults."""
     actions = launch_file(package, filename)
     defaults = launch_helpers.defaults(actions)
     assert {key: defaults[key] for key in CAMERA_DEFAULTS} == CAMERA_DEFAULTS
@@ -29,6 +30,7 @@ def test_camera_defaults_at_both_entry_points(launch_file, launch_helpers, packa
 
 @pytest.mark.parametrize('overrides', OVERRIDES)
 def test_bringup_forwards_camera_configuration(launch_file, launch_helpers, overrides):
+    """Verify bringup forwards camera defaults and overrides to the simulation launch."""
     actions = launch_file('devkit_bringup', 'sowbot_sim.launch.py')
     configuration = launch_helpers.defaults(actions) | overrides
     started = [
@@ -48,6 +50,7 @@ def test_bringup_forwards_camera_configuration(launch_file, launch_helpers, over
 def test_state_publisher_xacro_receives_camera_settings(
     launch_file, launch_helpers, tmp_path, overrides,
 ):
+    """Verify state publisher xacro arguments preserve camera settings and paths with spaces."""
     actions = launch_file('devkit_simulation', 'sim.launch.py')
     configuration = launch_helpers.defaults(actions) | overrides
     publisher = launch_helpers.named(actions, 'robot_state_publisher')
@@ -65,6 +68,7 @@ def test_state_publisher_xacro_receives_camera_settings(
 def test_spawn_xacro_receives_camera_settings(
     launch_file, launch_helpers, run_shell, tmp_path, overrides,
 ):
+    """Verify spawning expands the selected model with camera settings and passes its XML to ROS."""
     actions = launch_file('devkit_simulation', 'sim.launch.py')
     configuration = launch_helpers.defaults(actions) | overrides
     spawn = launch_helpers.named(actions, 'spawn_robot')
@@ -80,6 +84,7 @@ def test_spawn_xacro_receives_camera_settings(
 
 
 def test_failed_xacro_does_not_spawn_robot(launch_file, launch_helpers, tmp_path, run_shell):
+    """Verify xacro failure preserves its exit status and prevents robot creation."""
     actions = launch_file('devkit_simulation', 'sim.launch.py')
     configuration = launch_helpers.defaults(actions)
     command = [
@@ -107,4 +112,5 @@ ros2() { printf '%s\0' "$@" > ros2.args; }
 
 
 def read_arguments(path):
+    """Decode the NUL-separated arguments captured by a fake shell command."""
     return path.read_bytes().decode().rstrip('\0').split('\0')

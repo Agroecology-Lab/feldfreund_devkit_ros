@@ -26,6 +26,7 @@ MODEL = Path(__file__).resolve().parents[2] / 'src/devkit_simulation/urdf/sowbot
     ({'camera_rate': '5'}, '320', '240', '5'),
 ])
 def test_camera_dimensions_and_rate(mappings, width, height, rate):
+    """Verify camera defaults and overrides expand into the expected sensor configuration."""
     robot = expand(mappings)
     sensors = robot.findall(".//sensor[@type='camera']")
     assert len(sensors) == 1
@@ -41,6 +42,7 @@ def test_camera_dimensions_and_rate(mappings, width, height, rate):
 
 @pytest.mark.parametrize('disabled', ['false', '0'])
 def test_camera_disabled_preserves_robot_and_other_sensors(disabled):
+    """Verify disabling the camera preserves robot links, joints, and other sensors."""
     enabled = expand({})
     robot = expand({
         'use_camera': disabled, 'camera_width': '800', 'camera_height': '600', 'camera_rate': '30',
@@ -58,6 +60,7 @@ def test_camera_disabled_preserves_robot_and_other_sensors(disabled):
 
 
 def test_disabling_camera_does_not_leak_into_next_expansion():
+    """Verify a disabled camera in one expansion does not change subsequent defaults."""
     assert expand({'use_camera': 'false'}).find(".//sensor[@type='camera']") is None
     camera = expand({}).find(".//sensor[@type='camera']")
     assert camera is not None
@@ -65,4 +68,5 @@ def test_disabling_camera_does_not_leak_into_next_expansion():
 
 
 def expand(mappings):
+    """Expand the robot xacro with the supplied arguments and return its XML root."""
     return ElementTree.fromstring(xacro.process_file(str(MODEL), mappings=mappings).toxml())

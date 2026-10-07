@@ -10,6 +10,7 @@ import pytest
 def test_worldgen_failure_blocks_all_downstream_actions(
     launch_file, launch_helpers, returncode,
 ):
+    """Verify failed world generation logs its status and releases no dependents."""
     actions = launch_file('devkit_bringup', 'sowbot_sim.launch.py')
     handlers = launch_helpers.worldgen_handlers(actions)
     assert len(handlers) == 3
@@ -27,6 +28,7 @@ def test_worldgen_failure_blocks_all_downstream_actions(
 
 
 def test_worldgen_success_releases_sim_gate_and_fixer(launch_file, launch_helpers):
+    """Verify successful world generation releases only the simulation, gate, and fixer."""
     actions = launch_file('devkit_bringup', 'sowbot_sim.launch.py')
     handlers = launch_helpers.worldgen_handlers(actions)
     assert len(handlers) == 3
@@ -48,6 +50,7 @@ def test_worldgen_success_releases_sim_gate_and_fixer(launch_file, launch_helper
 
 @pytest.mark.parametrize('returncode', [1, 124, 127, -9])
 def test_clock_gate_failure_releases_nothing(launch_file, launch_helpers, returncode):
+    """Verify a failed clock gate leaves all dependent actions blocked."""
     actions = launch_file('devkit_bringup', 'sowbot_sim.launch.py')
     gate = launch_helpers.named(
         [a for a in actions if a.kind == 'ExecuteProcess'] + [
@@ -68,6 +71,7 @@ def test_clock_gate_failure_releases_nothing(launch_file, launch_helpers, return
 
 
 def test_clock_gate_success_releases_nav_and_fusioncore_timers(launch_file, launch_helpers):
+    """Verify clock readiness schedules navigation and fusion nodes at the expected delays."""
     actions = launch_file('devkit_bringup', 'sowbot_sim.launch.py')
     gate = launch_helpers.named(
         [r for h in launch_helpers.worldgen_handlers(actions)
@@ -101,6 +105,7 @@ def test_clock_gate_success_releases_nav_and_fusioncore_timers(launch_file, laun
 def test_clock_gate_command_only_succeeds_when_clock_is_seen(
     launch_file, launch_helpers, run_shell, tmp_path, wait_status,
 ):
+    """Verify the gate waits for /clock and succeeds only when that wait succeeds."""
     actions = launch_file('devkit_bringup', 'sowbot_sim.launch.py')
     gate = launch_helpers.named(
         [r for h in launch_helpers.worldgen_handlers(actions)
@@ -123,6 +128,7 @@ def test_clock_gate_command_only_succeeds_when_clock_is_seen(
 def test_bootstrap_cleanup_requires_successful_dynamic_tf_wait(
     launch_file, launch_helpers, run_shell, tmp_path, wait_status, kill_status,
 ):
+    """Verify cleanup targets only bootstrap base transforms after a successful TF wait."""
     actions = launch_file('devkit_bringup', 'sowbot_sim.launch.py')
     cleanup = launch_helpers.named(actions, 'kill_bootstrap_tfs')
     result = run_shell(
@@ -169,6 +175,7 @@ def test_bootstrap_cleanup_requires_successful_dynamic_tf_wait(
 def test_tf_filter_requires_matching_parent_and_child_in_same_transform(
     launch_file, launch_helpers, run_shell, tmp_path, frames, expected,
 ):
+    """Verify the TF filter accepts only an odom-to-base pair within one transform."""
     actions = launch_file('devkit_bringup', 'sowbot_sim.launch.py')
     cleanup = launch_helpers.named(actions, 'kill_bootstrap_tfs')
     run_shell(cleanup.kwargs['cmd'], TF_COMMANDS, WAIT_STATUS='124', KILL_STATUS='0')
