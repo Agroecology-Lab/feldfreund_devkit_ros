@@ -67,7 +67,7 @@ def launch_file(monkeypatch, tmp_path):
 @pytest.fixture
 def run_shell(tmp_path):
     """Run generated Bash with only explicitly supplied fake external commands."""
-    def run(command, functions, **environment):
+    def run(command, functions, expected_returncode=0, **environment):
         result = subprocess.run(
             [command[0], command[1], functions + '\n' + command[2], *command[3:]],
             cwd=tmp_path,
@@ -77,7 +77,7 @@ def run_shell(tmp_path):
             timeout=5,
             check=False,
         )
-        assert result.returncode == 0, result.stderr
+        assert result.returncode == expected_returncode, result.stderr
         return result
 
     return run
@@ -118,13 +118,17 @@ def launch_helpers():
         assert len(matches) == 1, (name, matches)
         return matches[0]
 
-    def worldgen_handlers(actions):
+    def handlers_for(actions, target_name):
         return [
             action.args[0] for action in actions
             if action.kind == 'RegisterEventHandler'
-            and action.args[0].kwargs['target_action'].kwargs.get('name') == 'world_gen'
+            and action.args[0].kwargs['target_action'].kwargs.get('name') == target_name
         ]
 
+    def worldgen_handlers(actions):
+        return handlers_for(actions, 'world_gen')
+
     return types.SimpleNamespace(
-        defaults=defaults, named=named, worldgen_handlers=worldgen_handlers, resolve=resolve,
+        defaults=defaults, named=named, worldgen_handlers=worldgen_handlers,
+        handlers_for=handlers_for, resolve=resolve,
     )

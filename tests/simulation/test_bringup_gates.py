@@ -12,7 +12,7 @@ def test_worldgen_failure_blocks_all_downstream_actions(
 ):
     actions = launch_file('devkit_bringup', 'sowbot_sim.launch.py')
     handlers = launch_helpers.worldgen_handlers(actions)
-    assert len(handlers) == 6
+    assert len(handlers) == 3
     returned = [
         action
         for handler in handlers
@@ -22,13 +22,14 @@ def test_worldgen_failure_blocks_all_downstream_actions(
     assert returned[0].kind == 'LogInfo'
     assert str(returncode) in returned[0].kwargs['msg']
     assert not any(action.kind in ('TimerAction', 'IncludeLaunchDescription') for action in actions)
-    assert not any(action.kwargs.get('name') == 'map_to_odom_fixer' for action in actions)
+    assert not any(action.kwargs.get('name') in ('map_to_odom_fixer', 'clock_gate')
+                   for action in actions)
 
 
-def test_worldgen_success_releases_each_dependent_action(launch_file, launch_helpers):
+def test_worldgen_success_releases_sim_gate_and_fixer(launch_file, launch_helpers):
     actions = launch_file('devkit_bringup', 'sowbot_sim.launch.py')
     handlers = launch_helpers.worldgen_handlers(actions)
-    assert len(handlers) == 6
+    assert len(handlers) == 3
     targets = [handler.kwargs['target_action'] for handler in handlers]
     assert all(target is targets[0] for target in targets)
     returned = [
@@ -36,21 +37,86 @@ def test_worldgen_success_releases_each_dependent_action(launch_file, launch_hel
     ]
     assert all(len(result) == 1 for result in returned)
     released = [result[0] for result in returned]
-    includes = [action for action in released if action.kind == 'IncludeLaunchDescription']
-    assert len(includes) == 1
-    timers = [action for action in released if action.kind == 'TimerAction']
-    assert len(timers) == 4
-    nodes = [node for timer in timers for node in timer.kwargs['actions']]
+    assert sum(action.kind == 'IncludeLaunchDescription' for action in released) == 1
+    # Nav2/fusioncore are NOT released by world_gen any more: only by the /clock gate.
+    assert not any(action.kind == 'TimerAction' for action in released)
+    assert launch_helpers.named(released, 'clock_gate').kind == 'ExecuteProcess'
+    assert launch_helpers.named(released, 'map_to_odom_fixer').kind == 'ExecuteProcess'
+    # NOTE: Every downstream action must remain gated, with no top-level duplicate.
+    assert all(action not in actions for action in released)
+
+
+@pytest.mark.parametrize('returncode', [1, 124, 127, -9])
+def test_clock_gate_failure_releases_nothing(launch_file, launch_helpers, returncode):
+    actions = launch_file('devkit_bringup', 'sowbot_sim.launch.py')
+    gate = launch_helpers.named(
+        [a for a in actions if a.kind == 'ExecuteProcess'] + [
+            r for h in launch_helpers.worldgen_handlers(actions)
+            for r in h.kwargs['on_exit'](SimpleNamespace(returncode=0), None)
+        ],
+        'clock_gate',
+    )
+    handlers = [
+        a.args[0] for a in actions
+        if a.kind == 'RegisterEventHandler' and a.args[0].kwargs['target_action'] is gate
+    ]
+    assert len(handlers) == 4
+    assert all(
+        handler.kwargs['on_exit'](SimpleNamespace(returncode=returncode), None) == []
+        for handler in handlers
+    )
+
+
+def test_clock_gate_success_releases_nav_and_fusioncore_timers(launch_file, launch_helpers):
+    actions = launch_file('devkit_bringup', 'sowbot_sim.launch.py')
+    gate = launch_helpers.named(
+        [r for h in launch_helpers.worldgen_handlers(actions)
+         for r in h.kwargs['on_exit'](SimpleNamespace(returncode=0), None)],
+        'clock_gate',
+    )
+    handlers = [
+        a.args[0] for a in actions
+        if a.kind == 'RegisterEventHandler' and a.args[0].kwargs['target_action'] is gate
+    ]
+    assert len(handlers) == 4
+    released = [
+        action
+        for handler in handlers
+        for action in handler.kwargs['on_exit'](SimpleNamespace(returncode=0), None)
+    ]
+    assert len(released) == 4 and all(action.kind == 'TimerAction' for action in released)
+    # Offsets are from /clock first seen: nodes and fusioncore at 5 s, lifecycle manager at 10 s.
+    assert sorted(action.kwargs['period'] for action in released) == [5.0, 5.0, 5.0, 10.0]
+    nodes = [node for timer in released for node in timer.kwargs['actions']]
     expected = {
         'controller_server', 'smoother_server', 'planner_server', 'behavior_server',
         'bt_navigator', 'waypoint_follower', 'lifecycle_manager_navigation',
         'fusioncore', 'fusion_odom_global_relay',
     }
     assert {node.kwargs['name'] for node in nodes if 'name' in node.kwargs} == expected
-    fixer = launch_helpers.named(released, 'map_to_odom_fixer')
-    assert fixer.kind == 'ExecuteProcess'
-    # NOTE: Every downstream action must remain gated, with no top-level duplicate.
     assert all(action not in actions for action in released)
+
+
+@pytest.mark.parametrize('wait_status', [0, 1, 124, 127])
+def test_clock_gate_command_only_succeeds_when_clock_is_seen(
+    launch_file, launch_helpers, run_shell, tmp_path, wait_status,
+):
+    actions = launch_file('devkit_bringup', 'sowbot_sim.launch.py')
+    gate = launch_helpers.named(
+        [r for h in launch_helpers.worldgen_handlers(actions)
+         for r in h.kwargs['on_exit'](SimpleNamespace(returncode=0), None)],
+        'clock_gate',
+    )
+    result = run_shell(
+        gate.kwargs['cmd'], TF_COMMANDS, expected_returncode=0 if wait_status == 0 else 1,
+        WAIT_STATUS=str(wait_status), KILL_STATUS='0',
+    )
+    args = (tmp_path / 'wait.args').read_bytes().decode().rstrip('\0').split('\0')
+    assert args == ['240', 'ros2', 'topic', 'echo', '/clock', '--once']
+    if wait_status == 0:
+        assert '/clock live' in result.stdout
+    else:
+        assert 'not starting Nav2/fusioncore' in result.stdout
 
 
 @pytest.mark.parametrize('wait_status,kill_status', [(0, 0), (0, 1), (1, 0), (124, 0), (127, 0)])
