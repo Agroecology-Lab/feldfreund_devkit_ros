@@ -446,10 +446,10 @@ def generate_launch_description():
     #
     # Fix: poll for real /odom data (proof the DiffDrive bridge is actually
     # forwarding gz Odometry, not just that the bridge node/topic exists)
-    # before killing anything. odom->base_footprint is then continuously
-    # covered by the DiffDrive bridge on /tf; base_footprint->base_link is
-    # covered by robot_state_publisher (50 Hz, comes up independently of
-    # spawn timing). map->odom is left alone — it has no dynamic replacement.
+    # before killing anything. [STALE since DiffDrive publish_tf=false: the
+    # trigger is now fusioncore's own TF, see below.] base_footprint->base_link
+    # is covered by robot_state_publisher (fixed base_footprint_joint in the
+    # xacro). map->odom is left alone — it has no dynamic replacement.
     #
     # NOTE: this was previously a loop of `timeout 2 ros2 topic echo /odom
     # --once` retried every 2s for up to 240s. That spawns a brand-new DDS
@@ -464,18 +464,32 @@ def generate_launch_description():
     # node in the graph -- a false negative in the check, not an actual
     # data outage. Fixed by using ONE participant with the full timeout
     # budget instead of 120 short-lived ones.
+    # Trigger: a DYNAMIC odom->base_footprint (or ->base_link) transform on
+    # /tf. The bootstrap statics are on /tf_static (new-style args), so any
+    # /tf message with parent 'odom' can only come from fusioncore, the sole
+    # live source. Waiting on /odom instead (the previous trigger) proves
+    # nothing about fusioncore: /odom is gz ground truth, fusioncore starts on
+    # its own 35s timer and only publishes once it has initialised. Killing on
+    # /odom data therefore left a gap with no odom->base_footprint source.
+    # On timeout the statics are KEPT: killing them with no replacement is the
+    # "two or more unconnected trees" failure described above.
+    odom_tf_filter = (
+        "any(t.header.frame_id=='odom' and "
+        "t.child_frame_id in ('base_footprint','base_link') "
+        "for t in m.transforms)"
+    )
     kill_bootstrap_tfs = ExecuteProcess(
         cmd=[
             '/bin/bash', '-c',
             'start_ts=$SECONDS; timeout_s=240; '
-            'if timeout "$timeout_s" ros2 topic echo /odom --once >/dev/null 2>&1; then '
-            '  echo "[bootstrap_tf_killer] real /odom data confirmed after $((SECONDS-start_ts))s"; '
+            f'if timeout "$timeout_s" ros2 topic echo /tf --once --filter "{odom_tf_filter}" >/dev/null 2>&1; then '
+            '  echo "[bootstrap_tf_killer] dynamic odom TF (fusioncore) live after $((SECONDS-start_ts))s"; '
+            '  pkill -f "static_transform_publishe[r].*__node:=odom_to_base_footprint_static" || true; '
+            '  pkill -f "static_transform_publishe[r].*__node:=base_footprint_to_base_link_static" || true; '
+            '  echo "[bootstrap_tf_killer] killed odom->base_footprint and base_footprint->base_link static publishers ($((SECONDS-start_ts))s elapsed)"; '
             'else '
-            '  echo "[bootstrap_tf_killer] WARNING: no /odom data after $((SECONDS-start_ts))s, killing statics anyway to avoid wedging forever"; '
-            'fi; '
-            'pkill -f "static_transform_publishe[r].*__node:=odom_to_base_footprint_static" || true; '
-            'pkill -f "static_transform_publishe[r].*__node:=base_footprint_to_base_link_static" || true; '
-            'echo "[bootstrap_tf_killer] killed odom->base_footprint and base_footprint->base_link static publishers ($((SECONDS-start_ts))s elapsed)"',
+            '  echo "[bootstrap_tf_killer] WARNING: no dynamic odom TF on /tf after $((SECONDS-start_ts))s — keeping bootstrap statics (fusioncore not publishing?)"; '
+            'fi',
         ],
         name='kill_bootstrap_tfs',
         output='screen',
