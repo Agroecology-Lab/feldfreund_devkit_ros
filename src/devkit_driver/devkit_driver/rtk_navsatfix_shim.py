@@ -48,6 +48,8 @@ Publications
   /gnss/fix                     sensor_msgs/NavSatFix   corrected status
 """
 
+from collections import deque
+
 import rclpy
 from rclpy.node import Node
 from rclpy.qos import DurabilityPolicy, QoSProfile, ReliabilityPolicy
@@ -84,6 +86,11 @@ def _coerce_carr_soln(value) -> int:
 # so fusioncore sees something rather than nothing on a slow-starting receiver.
 _PVT_TIMEOUT_S = 5.0
 
+# Upper bound on fixes buffered while waiting for the first PVT. 100 covers the
+# 5 s wait at 20 Hz, so normal use drops nothing, but the buffer can never grow
+# without limit.
+_MAX_HELD_FIXES = 100
+
 _SENSOR_QOS = QoSProfile(
     depth=10,
     reliability=ReliabilityPolicy.BEST_EFFORT,
@@ -105,12 +112,19 @@ _PUB_QOS = QoSProfile(
 
 class RtkNavSatFixShim(Node):
     def __init__(self):
+        """Subscribe to rover fixes and PVT and publish corrected fixes on /gnss/fix.
+
+        Start a five-second timer for the first PVT, retaining at most the
+        newest 100 fixes while waiting, and a periodic statistics timer.
+        """
         super().__init__('rtk_navsatfix_shim')
 
         self._carr_soln: int = _CARR_SOLN_NONE
         self._pvt_received: bool = False
+        self._pvt_timed_out: bool = False
         self._pub_count: int = 0
-        self._held_fixes: list = []   # fixes buffered while waiting for first PVT
+        # fixes buffered while waiting for first PVT (bounded)
+        self._held_fixes: deque = deque(maxlen=_MAX_HELD_FIXES)
 
         self._pub = self.create_publisher(NavSatFix, '/gnss/fix', _PUB_QOS)
 
@@ -147,27 +161,47 @@ class RtkNavSatFixShim(Node):
             self._held_fixes.clear()
 
     def _pvt_timeout_cb(self) -> None:
-        """PVT never arrived within timeout — flush held fixes with NO_FIX status."""
+        """Cancel the timeout timer and handle a missing first PVT.
+
+        If PVT has arrived, do nothing further. Otherwise, publish and clear
+        held fixes with NO_FIX status and forward later fixes with that status
+        until the first PVT arrives.
+        """
         self._pvt_timeout_timer.cancel()
         if self._pvt_received:
             return
+        # From here on _fix_cb forwards fixes as NO_FIX instead of buffering
+        # them, until the first PVT arrives.
+        self._pvt_timed_out = True
         self.get_logger().warn(
             f'No UBXNavPVT received within {_PVT_TIMEOUT_S}s — '
-            f'forwarding {len(self._held_fixes)} held fix(es) as NO_FIX. '
+            f'forwarding {len(self._held_fixes)} held fix(es) as NO_FIX, and '
+            f'all later fixes too until PVT arrives. '
             f'carr_soln correction inactive until PVT stream starts.')
         for held in self._held_fixes:
-            # Emit with NO_FIX so fusioncore knows quality is unknown
-            out = self._copy_fix(held)
-            out.status.status = NavSatStatus.STATUS_NO_FIX
-            self._pub.publish(out)
-            self._pub_count += 1
+            self._publish_no_fix(held)
         self._held_fixes.clear()
 
     def _fix_cb(self, msg: NavSatFix) -> None:
-        if not self._pvt_received:
+        """Publish using the latest PVT status, or NO_FIX after the startup timeout.
+
+        Before either event, retain the fix, dropping the oldest when the
+        100-fix buffer is full. Once PVT has arrived, use its latest carr_soln
+        regardless of its age.
+        """
+        if self._pvt_received:
+            self._publish_corrected(msg)
+        elif self._pvt_timed_out:
+            self._publish_no_fix(msg)
+        else:
             self._held_fixes.append(msg)
-            return
-        self._publish_corrected(msg)
+
+    def _publish_no_fix(self, msg: NavSatFix) -> None:
+        """Forward a fix with NO_FIX status: carr_soln is unknown, so quality is too."""
+        out = self._copy_fix(msg)
+        out.status.status = NavSatStatus.STATUS_NO_FIX
+        self._pub.publish(out)
+        self._pub_count += 1
 
     def _publish_corrected(self, msg: NavSatFix) -> None:
         out = self._copy_fix(msg)

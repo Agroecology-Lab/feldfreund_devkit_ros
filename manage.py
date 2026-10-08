@@ -315,7 +315,21 @@ class DevkitManager:
         )
 
     def run(self, extra_args: list[str]):
-        """Runs the limbic ROS 2 stack within Docker."""
+        """Run the limbic ROS 2 stack within Docker, waiting for it to exit.
+
+        Arguments beginning with --sim, or FORCE_SIM=1 in .env or the process
+        environment, select simulation even with detected hardware. Otherwise,
+        simulation is selected only when both rover and MCU ports are 'virtual'.
+        Forward extra_args to ros2 launch after removing --sim-prefixed entries.
+
+        Hardware detection may regenerate .env and rebind USB interfaces even
+        when simulation is forced. Simulation prepares the world and topology;
+        hardware mode attempts to reset the receiver and wake an available MCU.
+
+        Errors reading .env or starting Docker propagate. A failed fixusb.py
+        invocation raises CalledProcessError. A nonzero Docker exit status does
+        not raise or become a return value.
+        """
         env_file = self.root_dir / '.env'
         usb_devices_path = Path('/sys/bus/usb/devices')
         has_usb_hardware = usb_devices_path.exists()
@@ -365,6 +379,11 @@ class DevkitManager:
             or cfg.get('FORCE_SIM') == '1' \
             or os.environ.get('FORCE_SIM') == '1'
         is_sim = 'true' if (force_sim or (r_port == 'virtual' and mcu_port == 'virtual')) else 'false'
+        if force_sim and (r_port != 'virtual' or mcu_port != 'virtual'):
+            self._log(
+                f"FORCE_SIM/--sim is active: detected hardware (rover={r_port}, "
+                f"mcu={mcu_port}) will be IGNORED and the stack starts in sim. "
+                "Remove FORCE_SIM from .env to drive the real robot.", "WARN")
 
         # Survey origin for the topo map datum. In real-GPS runs this MUST match
         # fusioncore's GNSS reference origin, or the field frame and base_link
