@@ -1690,15 +1690,6 @@ class NiceGuiNode(Node):
                 'repair: row nodes lack x/y coords — cannot classify headland '
                 'ends; skipping headland edges (in-row edges still restored)')
 
-        if connect_to:
-            first_in = rows[sorted_rids[0]].get('entry')
-            last_out = rows[sorted_rids[-1]].get('exit')
-            for tgt in (first_in, last_out):
-                if not tgt or tgt == connect_to:
-                    continue
-                wanted_edges.append((connect_to, tgt, NAV_ACTION))
-                wanted_edges.append((tgt, connect_to, NAV_ACTION))
-
         new_topo_nodes = {node.name: node for node in self._topo_doc.nodes}
         added_count = 0
         for src, tgt, _action in wanted_edges:
