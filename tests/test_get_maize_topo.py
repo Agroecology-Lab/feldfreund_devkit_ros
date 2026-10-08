@@ -3,6 +3,7 @@ import io
 import unittest
 from pathlib import Path
 from tempfile import TemporaryDirectory
+from unittest.mock import patch
 from xml.etree import ElementTree
 
 import yaml
@@ -52,6 +53,28 @@ class TestMaizeTopologyDefaults(unittest.TestCase):
 
 
 class TestMaizeTopologyRowCount(unittest.TestCase):
+    def test_single_cluster_handles_singletons_negative_and_repeated_values(self) -> None:
+        """One cluster uses every sample, including duplicates, without changing the input."""
+        for values, expected in (([-7.5], -7.5), ([-9.0, 3.0, -9.0], -5.0), ([6.0] * 4, 6.0)):
+            with self.subTest(values=values):
+                original = values.copy()
+                self.assertEqual(kmeans_1d(values, 1), [expected])
+                self.assertEqual(values, original)
+
+    def test_invalid_rows_rejected_before_reading_or_overwriting(self) -> None:
+        """Invalid counts must preserve an existing map, even when the CSV is unavailable."""
+        for rows in (0, -1):
+            with self.subTest(rows=rows), TemporaryDirectory() as directory:
+                output = Path(directory) / 'map.yaml'
+                original = b'# operator map\nname: surveyed-field\n'
+                output.write_bytes(original)
+                with patch('get_maize_topo.load_csv') as load_csv:
+                    with self.assertRaisesRegex(SystemExit, f'--rows must be at least 1, got {rows}'):
+                        generate(Path(directory) / 'missing.csv', output, 'field', rows,
+                                 1.5, 51.0, -2.0, 10.0)
+                    load_csv.assert_not_called()
+                self.assertEqual(output.read_bytes(), original)
+
     def test_single_cluster_centroid_is_the_mean(self) -> None:
         """Verify k=1 returns the mean instead of dividing by zero."""
         self.assertEqual(kmeans_1d([0.0, 1.0, 5.0], 1), [2.0])
@@ -88,6 +111,21 @@ class TestMaizeTopologyRowCount(unittest.TestCase):
                 row_pos = next(e['node'] for e in doc['nodes'] if e['node']['name'] == 'R1_IN')
                 axis = 'x' if orientation == 'NS' else 'y'
                 self.assertAlmostEqual(row_pos['pose']['position'][axis], 0.1, places=3)
+                nodes = {entry['node']['name']: entry['node'] for entry in doc['nodes']}
+                opposite_hub = 'HL_N' if orientation == 'NS' else 'HL_E'
+                travel_axis = 'y' if orientation == 'NS' else 'x'
+                self.assertEqual(set(nodes), {'HOME', hub, opposite_hub, 'R1_IN', 'R1_OUT'})
+                for node_name, coordinate in ((hub, -1.5), ('R1_IN', 0),
+                                              ('R1_OUT', 10), (opposite_hub, 11.5)):
+                    self.assertAlmostEqual(
+                        nodes[node_name]['pose']['position'][travel_axis], coordinate)
+                row_edges = [edge for edge in nodes['R1_IN']['edges']
+                             if edge['action'] == 'row_traversal']
+                self.assertEqual([edge['node'] for edge in row_edges], ['R1_OUT'])
+                self.assertEqual([edge['node'] for edge in nodes['R1_OUT']['edges']], [opposite_hub])
+                for node in nodes.values():
+                    for edge in node['edges']:
+                        self.assertIn(edge['node'], nodes)
 
     def test_zero_or_negative_rows_exit_cleanly_without_writing(self) -> None:
         """Verify --rows below one exits with a message and leaves no output file."""

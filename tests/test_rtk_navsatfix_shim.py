@@ -186,3 +186,76 @@ def test_held_buffer_is_bounded(shim):
     _fire_pvt_timeout(shim.node)
     published = shim.node.publishers[0].published
     assert [msg.latitude for msg in published] == [float(i) for i in range(limit * 2, limit * 3)]
+
+
+@pytest.mark.parametrize('fix_count', [0, 1, 100, 101])
+@pytest.mark.parametrize('release', ['timeout', 'pvt'])
+def test_buffer_boundary_flushes_once_in_arrival_order(shim, fix_count, release):
+    """Retain exactly the newest 100 fixes on either cold-start release path."""
+    node = shim.node
+    for index in range(fix_count):
+        node.callbacks['/rover/fix'](shim.fix(latitude=float(index)))
+    assert node.publishers[0].published == []
+    if release == 'timeout':
+        _fire_pvt_timeout(node)
+        expected_status = _NavSatStatus.STATUS_NO_FIX
+    else:
+        node.callbacks['/rover/ubx_nav_pvt'](_pvt(1))
+        expected_status = _NavSatStatus.STATUS_SBAS_FIX
+    published = node.publishers[0].published
+    retained = list(range(max(0, fix_count - 100), fix_count))
+    assert [msg.latitude for msg in published] == retained
+    assert _statuses(node) == [expected_status] * len(retained)
+    assert not node._held_fixes
+
+    node.callbacks['/rover/ubx_nav_pvt'](_pvt(2))
+    _fire_pvt_timeout(node)
+    node.callbacks['/rover/fix'](shim.fix(latitude=-1.0))
+    assert [msg.latitude for msg in published] == [*retained, -1.0]
+    assert _statuses(node) == [expected_status] * len(retained) + [2]
+    assert node._pub_count == len(retained) + 1
+    assert not node._held_fixes
+
+
+@pytest.mark.parametrize('held_before_timeout', [True, False])
+def test_no_fix_forwarding_preserves_payload_without_mutating_input(shim, held_before_timeout):
+    """Only status changes when a held or newly received fix is forwarded after timeout."""
+    node = shim.node
+    fix = shim.fix(latitude=51.5)
+    fix.header = types.SimpleNamespace(frame_id='gps', stamp=123)
+    fix.longitude = -2.5
+    fix.altitude = 42.0
+    fix.position_covariance = [4.0, 0.1, 0.2, 0.1, 5.0, 0.3, 0.2, 0.3, 6.0]
+    fix.position_covariance_type = 3
+    fix.status.service = 5
+    if held_before_timeout:
+        node.callbacks['/rover/fix'](fix)
+    _fire_pvt_timeout(node)
+    if not held_before_timeout:
+        node.callbacks['/rover/fix'](fix)
+
+    published, = node.publishers[0].published
+    assert published is not fix
+    assert published.status is not fix.status
+    assert published.status.status == _NavSatStatus.STATUS_NO_FIX
+    assert fix.status.status == _NavSatStatus.STATUS_GBAS_FIX
+    assert published.status.service == fix.status.service
+    for field in (
+        'header', 'latitude', 'longitude', 'altitude',
+        'position_covariance', 'position_covariance_type',
+    ):
+        assert getattr(published, field) == getattr(fix, field)
+    assert node._pub_count == 1
+    assert not node._held_fixes
+
+
+@pytest.mark.parametrize(('carr_soln', 'expected_status'), [(0, 0), (1, 1), (2, 2)])
+def test_late_wrapped_pvt_restores_receiver_quality(shim, carr_soln, expected_status):
+    """Recovery after timeout supports every PVT quality and the driver's wrapped enum."""
+    node = shim.node
+    _fire_pvt_timeout(node)
+    node.callbacks['/rover/fix'](shim.fix())
+    node.callbacks['/rover/ubx_nav_pvt'](_pvt(types.SimpleNamespace(carr_soln=carr_soln)))
+    node.callbacks['/rover/fix'](shim.fix(status=_NavSatStatus.STATUS_FIX))
+    assert _statuses(node) == [-1, expected_status]
+    assert not node._held_fixes

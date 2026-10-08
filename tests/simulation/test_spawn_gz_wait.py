@@ -1,5 +1,7 @@
 """The spawn command must stop waiting for Gazebo after a deadline."""
 
+from types import SimpleNamespace
+
 import pytest
 
 # `sleep` advances bash's SECONDS so the deadline passes without real waiting.
@@ -57,6 +59,42 @@ def test_world_already_up_does_not_wait_or_time_out(
     assert (tmp_path / 'ros2.called').exists()
 
 
+@pytest.mark.parametrize(('timeout', 'poll_sleeps'), [('0', 0), ('1', 1), ('3', 2), ('', 90)])
+def test_timeout_boundaries_skip_robot_creation(
+    launch_file, launch_helpers, run_shell, tmp_path, timeout, poll_sleeps,
+):
+    """Zero expires immediately, odd deadlines are bounded, and empty values use the default."""
+    command = _spawn_command(launch_file, launch_helpers)
+    result = run_shell(
+        command, FAKES + WORLD_NEVER, expected_returncode=1, SPAWN_GZ_TIMEOUT_S=timeout,
+    )
+    assert f'no world within {timeout or "180"}s' in result.stderr
+    assert _sleeps(tmp_path) == ['2'] * poll_sleeps
+    assert not (tmp_path / 'ros2.called').exists()
+
+
+def test_ready_world_with_zero_timeout_still_spawns(
+    launch_file, launch_helpers, run_shell, tmp_path,
+):
+    """A zero wait budget does not reject an already available world."""
+    command = _spawn_command(launch_file, launch_helpers)
+    run_shell(command, FAKES + WORLD_UP, SPAWN_GZ_TIMEOUT_S='0')
+    assert _sleeps(tmp_path) == ['30']
+    assert (tmp_path / 'ros2.called').exists()
+
+
+def test_failed_gz_query_obeys_deadline(launch_file, launch_helpers, run_shell, tmp_path):
+    """A failed service query must time out without reaching robot creation."""
+    command = _spawn_command(launch_file, launch_helpers)
+    result = run_shell(
+        command, FAKES + 'gz() { return 127; }\n',
+        expected_returncode=1, SPAWN_GZ_TIMEOUT_S='2',
+    )
+    assert 'no world within 2s' in result.stderr
+    assert _sleeps(tmp_path) == ['2']
+    assert not (tmp_path / 'ros2.called').exists()
+
+
 @pytest.mark.parametrize('ready_after', [1, 5])
 def test_world_appearing_before_deadline_spawns(
     launch_file, launch_helpers, run_shell, tmp_path, ready_after,
@@ -71,3 +109,30 @@ def test_world_appearing_before_deadline_spawns(
     run_shell(command, FAKES + flaky_gz, expected_returncode=0)
     assert _sleeps(tmp_path)[:ready_after] == ['2'] * ready_after
     assert (tmp_path / 'ros2.called').exists()
+
+
+@pytest.mark.parametrize(('failure', 'returncode'), [
+    ('timeout', 1), ('xacro', 3), ('create', 7),
+])
+def test_spawn_command_failures_keep_bridge_closed(
+    launch_file, launch_helpers, run_shell, tmp_path, failure, returncode,
+):
+    """Feed actual shell failures to the registered handler to verify the complete gate."""
+    command = _spawn_command(launch_file, launch_helpers)
+    functions = FAKES + (WORLD_NEVER if failure == 'timeout' else WORLD_UP)
+    if failure == 'xacro':
+        functions += 'xacro() { return 3; }\n'
+    elif failure == 'create':
+        functions += 'ros2() { echo called > ros2.called; return 7; }\n'
+    result = run_shell(
+        command, functions, expected_returncode=returncode, SPAWN_GZ_TIMEOUT_S='0',
+    )
+
+    actions = launch_file('devkit_simulation', 'sim.launch.py')
+    handlers = launch_helpers.handlers_for(actions, 'spawn_robot')
+    released = handlers[0].kwargs['on_exit'](SimpleNamespace(returncode=result.returncode), None)
+
+    assert [action.kind for action in released] == ['LogInfo']
+    assert f'code {returncode}' in released[0].kwargs['msg']
+    assert not any(action.kwargs.get('package') == 'ros_gz_bridge' for action in actions)
+    assert (tmp_path / 'ros2.called').exists() == (failure == 'create')
