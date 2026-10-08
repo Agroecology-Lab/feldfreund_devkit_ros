@@ -13,29 +13,36 @@ SHIM = (Path(__file__).parents[1] / 'src' / 'devkit_driver' / 'devkit_driver'
 
 class _Timer:
     def __init__(self, callback):
+        """Store a callback for manual invocation and track cancellation."""
         self.callback = callback
         self.cancelled = False
 
     def cancel(self):
+        """Record cancellation without scheduling or invoking the callback."""
         self.cancelled = True
 
 
 class _Logger:
     def __init__(self):
+        """Initialize an ordered record of log levels and messages."""
         self.messages = []
 
     def info(self, msg):
+        """Record an informational message for later assertions."""
         self.messages.append(('info', msg))
 
     def warn(self, msg):
+        """Record a warning message for later assertions."""
         self.messages.append(('warn', msg))
 
 
 class _Publisher:
     def __init__(self):
+        """Initialize the collection of published message references."""
         self.published = []
 
     def publish(self, msg):
+        """Retain the message reference in publication order without copying it."""
         self.published.append(msg)
 
 
@@ -43,25 +50,30 @@ class _Node:
     """Minimal rclpy.node.Node double that records timers, publishers and callbacks."""
 
     def __init__(self, name):
+        """Initialize passive ROS API doubles without creating a real node."""
         self.timers = []
         self.publishers = []
         self.callbacks = {}
         self.logger = _Logger()
 
     def create_publisher(self, msg_type, topic, qos):
+        """Return and record a publisher double, ignoring ROS metadata."""
         publisher = _Publisher()
         self.publishers.append(publisher)
         return publisher
 
     def create_subscription(self, msg_type, topic, callback, qos):
+        """Store the callback by topic for direct invocation in tests."""
         self.callbacks[topic] = callback
 
     def create_timer(self, period, callback):
+        """Return and record a timer double without scheduling its callback."""
         timer = _Timer(callback)
         self.timers.append(timer)
         return timer
 
     def get_logger(self):
+        """Return the node's shared log recorder."""
         return self.logger
 
 
@@ -72,12 +84,14 @@ class _NavSatStatus:
     STATUS_GBAS_FIX = 2
 
     def __init__(self):
+        """Initialize fix-status and service fields to zero."""
         self.status = 0
         self.service = 0
 
 
 class _NavSatFix:
     def __init__(self, status=_NavSatStatus.STATUS_GBAS_FIX, latitude=0.0):
+        """Build a fix double with configurable status and latitude."""
         self.header = None
         self.latitude = latitude
         self.longitude = 0.0
@@ -128,10 +142,12 @@ def _fire_pvt_timeout(node):
 
 
 def _statuses(node):
+    """Return status codes from the first publisher in publication order."""
     return [msg.status.status for msg in node.publishers[0].published]
 
 
 def _pvt(carr_soln):
+    """Wrap a carrier solution value in a minimal PVT message double."""
     return types.SimpleNamespace(carr_soln=carr_soln)
 
 
