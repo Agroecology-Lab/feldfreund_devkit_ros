@@ -95,8 +95,14 @@ def load_topo(path):
         gps_lat = props.get('gps_lat', meta.get('gps_lat'))
         gps_lon = props.get('gps_lon', meta.get('gps_lon'))
         nodes[name] = {
+            'name': name,
             'x': float(pos['x']),
             'y': float(pos['y']),
+            # Outgoing edge targets, in file order. extract_rows() follows the
+            # entry -> waypoint -> exit chain through these to recover the
+            # real (possibly curved) row geometry.
+            'edges': [e.get('node') for e in (n.get('edges') or [])
+                      if isinstance(e, dict) and e.get('node')],
             'row_id': row_id,
             'row_role': (row_role or '').lower() if row_role else None,
             'gps_lat': float(gps_lat) if gps_lat else None,
@@ -123,9 +129,53 @@ def find_spawn_node(nodes, rows):
     return 0.0, 0.0
 
 
+def _order_row_chain(members, in_nd, out_nd):
+    """Return the row's nodes ordered entry -> waypoints -> exit.
+
+    Prefers the authored edge chain (entry -> W1 -> ... -> exit, as written by
+    the UI's contour/F2C row saver). If that chain is broken or skips any
+    waypoint, falls back to the waypoints' trailing number (R2_W3 -> 3), then
+    to their projection onto the entry->exit chord.
+    """
+    by_name = {nd['name']: nd for nd in members}
+    waypoints = [nd for nd in members
+                 if nd is not in_nd and nd is not out_nd]
+
+    chain, seen, cur = [in_nd], {in_nd['name']}, in_nd
+    while cur is not out_nd:
+        nxt = next((by_name[t] for t in cur['edges']
+                    if t in by_name and t not in seen), None)
+        if nxt is None:
+            break
+        chain.append(nxt)
+        seen.add(nxt['name'])
+        cur = nxt
+    if cur is out_nd and len(chain) == len(waypoints) + 2:
+        return chain
+
+    def trailing_int(nd):
+        m = re.search(r'(\d+)$', nd['name'])
+        return int(m.group(1)) if m else None
+
+    if waypoints and all(trailing_int(w) is not None for w in waypoints):
+        waypoints.sort(key=trailing_int)
+    else:
+        cx, cy = out_nd['x'] - in_nd['x'], out_nd['y'] - in_nd['y']
+        waypoints.sort(key=lambda w: (w['x'] - in_nd['x']) * cx
+                       + (w['y'] - in_nd['y']) * cy)
+    return [in_nd, *waypoints, out_nd]
+
+
 def extract_rows(nodes):
-    """Group topology nodes by row_id into ordered row segments, tolerating mixed int/str ids."""
+    """Group topology nodes by row_id into rows, tolerating mixed int/str ids.
+
+    Each row dict carries 'a'/'b' (entry/exit XY, kept for spawn and legacy
+    callers) and 'path': the full ordered polyline entry -> waypoints -> exit.
+    Curved contour rows therefore keep their shape instead of collapsing to
+    the straight entry-exit chord.
+    """
     by_rid = {}
+    members_by_rid = {}
     for name, nd in nodes.items():
         rid = nd['row_id']
         if rid is None:
@@ -144,6 +194,7 @@ def extract_rows(nodes):
         except (TypeError, ValueError):
             pass
         by_rid.setdefault(rid, {})[nd['row_role'] or name] = nd
+        members_by_rid.setdefault(rid, []).append(nd)
 
     rows = []
     for rid, ends in sorted(by_rid.items(), key=lambda item: (
@@ -158,6 +209,7 @@ def extract_rows(nodes):
         if in_nd is None or out_nd is None:
             print(f"  skip row {rid}: need both IN and OUT", file=sys.stderr)
             continue
+        chain = _order_row_chain(members_by_rid[rid], in_nd, out_nd)
         # The GPS fix goes with whatever node had one; later we back-solve the
         # lat/lon of topo-frame (0, 0) from that (lat, lon) <-> (x, y) pair.
         if in_nd.get('gps_lat') is not None:
@@ -172,6 +224,7 @@ def extract_rows(nodes):
             'rid': rid,
             'a': (in_nd['x'], in_nd['y']),
             'b': (out_nd['x'], out_nd['y']),
+            'path': [(nd['x'], nd['y']) for nd in chain],
             'gps_lat': gps_lat,
             'gps_lon': gps_lon,
             'gps_x': gps_x,
@@ -243,80 +296,122 @@ def read_ground_mesh_extent():
     return None
 
 
+def row_path(row):
+    """Return a row's ordered polyline, falling back to the entry-exit chord."""
+    return row.get('path') or [row['a'], row['b']]
+
+
+def path_length(path):
+    """Total arc length of a polyline in metres."""
+    return sum(math.hypot(q[0] - p[0], q[1] - p[1])
+               for p, q in zip(path, path[1:]))
+
+
+def resample_path(path, spacing):
+    """Return (x, y, tangent_yaw) samples every ~spacing m along a polyline.
+
+    Samples always include both end points, with the interval stretched
+    slightly so it divides the length evenly. A zero-length path gives one
+    sample. This is what puts plants ON the authored row line, whatever its
+    bearing or curvature.
+    """
+    total = path_length(path)
+    n = max(1, int(round(total / spacing)) + 1) if total > 0 else 1
+    if n == 1:
+        yaw = (math.atan2(path[-1][1] - path[0][1], path[-1][0] - path[0][0])
+               if len(path) > 1 else 0.0)
+        return [(path[0][0], path[0][1], yaw)]
+    targets = [total * i / (n - 1) for i in range(n)]
+    out, seg, seg_start = [], 0, 0.0
+    for tgt in targets:
+        while (seg < len(path) - 2 and
+               seg_start + math.hypot(path[seg + 1][0] - path[seg][0],
+                                      path[seg + 1][1] - path[seg][1]) < tgt):
+            seg_start += math.hypot(path[seg + 1][0] - path[seg][0],
+                                    path[seg + 1][1] - path[seg][1])
+            seg += 1
+        p, q = path[seg], path[seg + 1]
+        seg_len = math.hypot(q[0] - p[0], q[1] - p[1])
+        u = 0.0 if seg_len == 0 else min(1.0, max(0.0, (tgt - seg_start) / seg_len))
+        out.append((p[0] + u * (q[0] - p[0]), p[1] + u * (q[1] - p[1]),
+                    math.atan2(q[1] - p[1], q[0] - p[0])))
+    return out
+
+
+def order_rows_across(rows):
+    """Sort rows by position across the field, whatever its orientation.
+
+    Projects each row's centroid onto the normal of the mean row direction, so
+    "middle N rows" means the spatially central strip even for rows at an
+    arbitrary bearing (a fixed X/Y axis choice breaks as soon as rows tilt).
+    """
+    ref = None
+    sx = sy = 0.0
+    for r in rows:
+        dx, dy = r['b'][0] - r['a'][0], r['b'][1] - r['a'][1]
+        if ref is None and (dx or dy):
+            ref = (dx, dy)
+        if ref and dx * ref[0] + dy * ref[1] < 0:  # align IN->OUT sense
+            dx, dy = -dx, -dy
+        sx += dx
+        sy += dy
+    norm = math.hypot(sx, sy) or 1.0
+    nx, ny = -sy / norm, sx / norm
+
+    def centroid_offset(r):
+        pts = row_path(r)
+        return (sum(p[0] for p in pts) * nx + sum(p[1] for p in pts) * ny) / len(pts)
+
+    return sorted(rows, key=centroid_offset)
+
+
 def compute_field_params(rows, headland_width, default_row_width, plant_spacing,
                           min_furrow_width=0.1, ground_extent=None):
-    """Derive field dimensions, row axis, and spacing parameters from extracted rows."""
+    """Derive terrain size, GPS origin and terrain offset from the row paths.
+
+    Plants are placed directly along each row's polyline by
+    place_plants_along_rows(), so Forest3D is only asked for a ground mesh.
+    That mesh is a rectangle covering every path point plus the headland; it
+    is centred on the origin by Forest3D, so the offset that moves it onto the
+    paths is simply the path bounding-box centre. No row-axis, spacing or
+    orientation assumptions are made.
+    """
     if len(rows) < 1:
         sys.exit("ERROR: need at least 1 row")
 
-    # Direction: the axis each IN→OUT segment actually extends along (its mean
-    # magnitude). Spread-based detection fails when rows are parallel.
-    mean_dx = sum(abs(r['b'][0] - r['a'][0]) for r in rows) / len(rows)
-    mean_dy = sum(abs(r['b'][1] - r['a'][1]) for r in rows) / len(rows)
-    if mean_dx >= mean_dy:
-        row_axis, cross_axis = 0, 1
-    else:
-        row_axis, cross_axis = 1, 0
+    pts = [p for r in rows for p in row_path(r)]
+    min_x, max_x = min(p[0] for p in pts), max(p[0] for p in pts)
+    min_y, max_y = min(p[1] for p in pts), max(p[1] for p in pts)
+    path_w, path_h = max_x - min_x, max_y - min_y
+    centre_x, centre_y = (min_x + max_x) / 2.0, (min_y + max_y) / 2.0
 
-    # Row centres along the cross-axis.
-    centres = [(r['a'][cross_axis] + r['b'][cross_axis]) / 2 for r in rows]
-    centres.sort()
+    # Furrow/row widths only describe the (essentially flat, 1.5 mm) bed
+    # Forest3D still builds; the visible plants no longer depend on them.
+    row_width = max(default_row_width, 0.2)
+    furrow_width = max(min_furrow_width, 0.1)
 
-    num_rows = len(rows)
-
-    # Average spacing between adjacent row centres.
-    spacing = 0.0
-    if num_rows > 1:
-        gaps = [centres[i+1] - centres[i] for i in range(num_rows - 1)]
-        spacing = sum(gaps) / len(gaps)
-
-# min_furrow_width is the caller's tolerance for how narrow a furrow to
-    # accept before overriding their row_width. Forest3D also enforces a hard
-    # 0.1 m floor (see clamp below) — the two are separate.
-    row_width = default_row_width
-    if spacing > 0:
-        furrow_width = spacing - row_width
-        if furrow_width < min_furrow_width:
-            furrow_width = spacing * 0.4
-            row_width = spacing - furrow_width
-    else:
-        # Single row (or no measurable spacing): fall back to sane defaults.
-        furrow_width = max(min_furrow_width, 0.1)
-
-    # Clamp to Forest3D's crop_rows schema minimums so an unusual map never
-    # emits a config the generator rejects (row_width >= 0.2, furrow >= 0.1).
-    row_width = max(row_width, 0.2)
-    furrow_width = max(furrow_width, 0.1)
-
-    # Field extent: when a custom ground mesh is restaged, its bounding box is
-    # the true field — crops should cover it. Without one, fall back to the
-    # topo node bbox + headland margin. Length runs along the rows (row_axis);
-    # width runs across them (cross_axis).
-    along = [r['a'][row_axis] for r in rows] + [r['b'][row_axis] for r in rows]
-    across = [r['a'][cross_axis] for r in rows] + [r['b'][cross_axis] for r in rows]
+    headland = max(headland_width, 0.0)
     if ground_extent is not None:
         g_min_x, g_max_x, g_min_y, g_max_y = ground_extent
-        if row_axis == 0:
-            g_along, g_cross = (g_max_x - g_min_x, g_max_y - g_min_y)
-        else:
-            g_along, g_cross = (g_max_y - g_min_y, g_max_x - g_min_x)
-        row_length = g_along
-        field_length = row_length
-        field_width = g_cross
-        # Plant exactly the map's rows (num_rows stays len(rows)): the topo map
-        # is the source of truth. The headland + world offset below align the
-        # grid row centres to the map's row centres on the custom mesh.
+        field_length, field_width = g_max_x - g_min_x, g_max_y - g_min_y
+        if path_w > field_length or path_h > field_width:
+            sys.exit(
+                f"ERROR: uploaded ground mesh is {field_length:.2f} x "
+                f"{field_width:.2f}m but the topo rows span "
+                f"{path_w:.2f} x {path_h:.2f}m — the mesh cannot contain "
+                "this row layout. Upload a larger mesh or trim the map.")
+        # Move the mesh's own centre onto the rows' centre.
+        shift_x = centre_x - (g_min_x + g_max_x) / 2.0
+        shift_y = centre_y - (g_min_y + g_max_y) / 2.0
     else:
-        row_length = max(along) - min(along)
-        field_length = row_length + 2 * headland_width
-        field_width = max(across) - min(across) + 2 * headland_width
+        field_length = path_w + 2 * headland
+        field_width = path_h + 2 * headland
+        shift_x, shift_y = centre_x, centre_y
 
-    # Plants per row mirrors Forest3D's RowPlacement.place():
-    #   n_plants = max(1, int(row_length / plant_spacing))
-    # where row_length is the planted span between headlands (the bbox extent
-    # along the rows, before the headland margin is added on each end).
-    plants_per_row = max(1, int(row_length / plant_spacing))
-    derived_density = num_rows * plants_per_row
+    # Plant count for the density / visual-clip decisions below.
+    plants = [len(resample_path(row_path(r), plant_spacing)) for r in rows]
+    plants_per_row = max(1, round(sum(plants) / len(plants)))
+    derived_density = sum(plants)
 
     # GPS origin: the lat/lon of topo-frame local (0, 0). A GPS tag on a node
     # is the fix recorded at THAT node's (x, y), which is generally not (0,0);
@@ -338,71 +433,27 @@ def compute_field_params(rows, headland_width, default_row_width, plant_spacing,
         # own (0, 0) default. See DEFAULT_FIELD_LAT/LON above.
         gps_lat, gps_lon = DEFAULT_FIELD_LAT, DEFAULT_FIELD_LON
 
-    # Resolution must be fine enough that the row profile covers >= 1 cell on
-    # each side of the row centre: half_row = row_width/2, so resolution must
-    # be <= row_width/2 (row_width/2.5 for a coarser, faster mesh).
-    resolution = max(0.1, min(0.25, row_width / 2.5))
-
-    # Terrain pose offset: shift the Forest3D world (terrain + all crop
-    # models) so raised-bed row centres land on the topo node positions.
-    # Forest3D places row i at local cross: min_y + headland + row_width/2 +
-    # i*spacing (min_y = -field_width/2 in Forest3D-local coords). With a
-    # ground-driven layout the rows must land exactly on the topo rows, so
-    # solve the offset that puts grid row 0 on topo row 0: offset =
-    # topo_row_0 - (min_y + headland + row_width/2). With the grid spacing
-    # equal to the map spacing, every row then coincides with its map row.
-    topo_along_centre = (max(along) + min(along)) / 2.0
-    topo_cross_centre = (max(across) + min(across)) / 2.0
-    if ground_extent is not None:
-        # Headland: keep the 5.0 m default only if it still leaves the planted
-        # band inside the field. The 4 topo rows span (num_rows-1)*spacing +
-        # row_width across a field_width mesh, so the margin must be at most
-        # (field_width - band) / 2 on each side.
-        row_band = (num_rows - 1) * spacing + row_width
-        if row_band > field_width:
-            sys.exit(
-                f"ERROR: uploaded ground mesh is {field_width:.2f}m wide but "
-                f"the topo map's {num_rows} rows need {row_band:.2f}m — the "
-                "mesh cannot contain this row layout. Upload a wider mesh or "
-                "use a topo map with fewer/closer rows.")
-        headland = max(headland_width, 0.0)
-        max_headland = max(0.0, (field_width - row_band) / 2.0)
-        if headland > max_headland:
-            print(f"WARNING: headland {headland:.2f}m too large for "
-                  f"{field_width:.1f}m-wide field with {num_rows} rows "
-                  f"(band {row_band:.1f}m) — reducing to {max_headland:.2f}m",
-                  file=sys.stderr)
-            headland = max_headland
-        terrain_offset_cross = round(
-            min(centres) - (-field_width / 2.0 + headland + row_width / 2.0),
-            4)
-    else:
-        # Bbox-driven layout (no custom mesh): the old centroid approach. The
-        # centroid of all N rows is ~row_width/2 (not 0), so the needed offset
-        # is topo_cross_centre - row_width/2.
-        headland = headland_width
-        terrain_offset_cross = round(topo_cross_centre - row_width / 2.0, 4)
-    terrain_offset_along = round(topo_along_centre, 4)
-    if row_axis == 0:    # rows run along X, cross is Y
-        topo_x_centre, topo_y_centre = terrain_offset_along, terrain_offset_cross
-    else:                # rows run along Y, cross is X
-        topo_x_centre, topo_y_centre = terrain_offset_cross, terrain_offset_along
+    # Forest3D builds int(extent / resolution) cells per side with Python
+    # loops, so keep very large fields to a bounded grid.
+    resolution = max(0.1, min(0.25, row_width / 2.5),
+                     max(field_length, field_width) / 400.0)
 
     return {
         'field_length': round(max(field_length, 5.0), 2),
         'field_width': round(max(field_width, 5.0), 2),
-        'num_rows': num_rows,
+        # Forest3D must build >= 1 bed; plants are placed by us, not by it.
+        'num_rows': 1,
         'row_width': round(row_width, 3),
         'furrow_width': round(furrow_width, 3),
-        'headland_width': headland,
+        'headland_width': headland if ground_extent is None else 0.0,
         'row_height': 0.0015,
         'row_profile': 'rounded',
         'plant_spacing': plant_spacing,
         'stagger': 0.0,
         'resolution': resolution,
     }, gps_lat, gps_lon, plants_per_row, derived_density, (
-        round(topo_x_centre, 4),
-        round(topo_y_centre, 4),
+        round(shift_x, 4),
+        round(shift_y, 4),
     )
 
 
@@ -799,62 +850,91 @@ def snap_plants_to_terrain(world_path, mesh_path):
           f"(mesh {mesh_path.name}, origin {tx:.3f},{ty:.3f})")
 
 
-def cull_crops_outside_field(world_path, rows, tol):
-    """Delete crop models outside their row's authored IN->OUT span.
+def _model_variants(models_path, category, fallback):
+    """Return model directory names under models/<category>/ (or [fallback])."""
+    if models_path:
+        root = Path(models_path) / category
+        if root.is_dir():
+            found = sorted(d.name for d in root.iterdir()
+                           if (d / 'model.sdf').exists())
+            if found:
+                return found
+    return [fallback]
 
-    Forest3D plants every row the full rectangular field_length (no per-row
-    length support), so on irregular real fields it fabricates crops past the
-    span. Snap each crop to the nearest row by cross-axis, drop it if its
-    along-axis coord is outside [min(IN,OUT), max(IN,OUT)] +/- tol.
+
+def place_plants_along_rows(world_path, rows, plant_spacing, crop_model,
+                            weed_pct, models_path=None, seed=0, jitter=0.02,
+                            weed_radius=0.8):
+    """Write crop and weed <include>s straight along the topo row polylines.
+
+    Forest3D's own row placement can only draw straight, evenly spaced rows
+    along X, so it cannot follow rows a farmer authored in the field (any
+    bearing, uneven spacing, curves). Instead: drop whatever crops/weeds
+    Forest3D put in the world, resample each row's entry -> waypoints -> exit
+    polyline every ~plant_spacing m, and write one crop per sample in topo
+    (world) coordinates. Must run AFTER patch_world_model_poses (which shifts
+    every include) so these poses are not moved a second time.
+
+    Weeds scatter around random crops: weed_pct is a percentage of the crop
+    count times WEEDS_PER_CROP, as before. Seeded, so the same inputs always
+    give the same world (worldgen.sh caches on its inputs).
     """
+    import random
     import xml.etree.ElementTree as _ET
 
     world_path = Path(world_path)
     if not world_path.exists():
-        print(f"WARNING: {world_path} not found — skipping crop cull",
+        print(f"WARNING: {world_path} not found — no plants placed",
               file=sys.stderr)
-        return
-
-    mean_dx = sum(abs(r['b'][0] - r['a'][0]) for r in rows) / len(rows)
-    mean_dy = sum(abs(r['b'][1] - r['a'][1]) for r in rows) / len(rows)
-    row_axis, cross_axis = (0, 1) if mean_dx >= mean_dy else (1, 0)
-
-    bands = [((r['a'][cross_axis] + r['b'][cross_axis]) / 2.0,
-              min(r['a'][row_axis], r['b'][row_axis]),
-              max(r['a'][row_axis], r['b'][row_axis])) for r in rows]
-
+        return 0
     try:
-        root = _ET.parse(world_path).getroot()
+        tree = _ET.parse(world_path)
     except _ET.ParseError as exc:
-        print(f"WARNING: cannot parse {world_path} — skipping cull: {exc}",
+        print(f"WARNING: cannot parse {world_path} — no plants placed: {exc}",
               file=sys.stderr)
-        return
+        return 0
+    root = tree.getroot()
+    world_elem = root.find("world")
+    if world_elem is None:
+        world_elem = root
 
-    world_elem = root.find("world") or root
-    crops = removed = 0
     for include in list(world_elem.findall("include")):
-        if not (include.findtext("uri") or "").startswith("model://crop/"):
-            continue
-        crops += 1
-        parts = (include.findtext("pose") or "").split()
-        if len(parts) < 2:
-            continue
-        pos = (float(parts[0]), float(parts[1]))
-        along, cross = pos[row_axis], pos[cross_axis]
-        _, lo, hi = min(bands, key=lambda b: abs(b[0] - cross))
-        if along < lo - tol or along > hi + tol:
+        uri = include.findtext("uri") or ""
+        if uri.startswith(("model://crop/", "model://weed/")):
             world_elem.remove(include)
-            removed += 1
 
-    if crops == 0:
-        print(f"WARNING: no model://crop/ includes in {world_path} — nothing "
-              "culled; verify crop category. ", file=sys.stderr)
-        return
+    rng = random.Random(seed)
+
+    def add(category, variant, idx, x, y, yaw):
+        inc = _ET.SubElement(world_elem, "include")
+        _ET.SubElement(inc, "uri").text = f"model://{category}/{variant}"
+        _ET.SubElement(inc, "name").text = f"{category}_{idx}"
+        _ET.SubElement(inc, "pose").text = (
+            f"{x:.4f} {y:.4f} 0.0000 0.0000 0.0000 {yaw:.4f}")
+
+    crops = []
+    for row in rows:
+        for x, y, _tangent in resample_path(row_path(row), plant_spacing):
+            crops.append((x + rng.uniform(-jitter, jitter),
+                          y + rng.uniform(-jitter, jitter)))
+    for i, (x, y) in enumerate(crops):
+        add("crop", crop_model, i, x, y, rng.uniform(0.0, 2 * math.pi))
+
+    n_weeds = int(len(crops) * WEEDS_PER_CROP * weed_pct / 100.0) if crops else 0
+    weed_variants = _model_variants(models_path, 'weed', 'weed1')
+    for i in range(n_weeds):
+        cx, cy = crops[rng.randrange(len(crops))]
+        r = rng.uniform(0.2, max(0.3, weed_radius))
+        a = rng.uniform(0.0, 2 * math.pi)
+        add("weed", rng.choice(weed_variants), i,
+            cx + r * math.cos(a), cy + r * math.sin(a),
+            rng.uniform(0.0, 2 * math.pi))
 
     world_path.write_text('<?xml version="1.0" ?>\n'
                           + _ET.tostring(root, encoding="unicode"))
-    print(f"Culled {removed}/{crops} crop(s) outside authored row spans "
-          f"(tol={tol:.2f}m)")
+    print(f"Placed {len(crops)} crop(s) and {n_weeds} weed(s) along "
+          f"{len(rows)} topo row path(s)")
+    return len(crops)
 
 
 def patch_crop_model_uri(world_path, model_name):
@@ -1080,9 +1160,9 @@ if __name__ == '__main__':
                          'Must be a subdirectory under models/crop/ containing '
                          'a valid Gazebo model (model.config + model.sdf).')
     ap.add_argument('--density', type=int, default=None,
-                    help='Global cap on crop models to place. Defaults to '
-                         'num_rows x plants_per_row derived from the map so the '
-                         'cap never clips the geometry; pass a value to override.')
+                    help='Only used to cap the crop count that scales the weed '
+                         'count; crops are placed one per --plant-spacing '
+                         'along every row path regardless.')
     ap.add_argument('--models-path', type=str, default=None,
                     help='Path to Forest3D models directory')
     ap.add_argument('--weed-density', type=int, default=None,
@@ -1152,16 +1232,11 @@ if __name__ == '__main__':
         max_by_density = max(1, FOREST3D_MAX_DENSITY // max(plants_per_row, 1))
         max_visual_rows = min(
             len(rows), VISUAL_TARGET_ROWS, FOREST3D_MAX_ROWS, max_by_density)
-        # Same row_axis/cross_axis heuristic compute_field_params() uses
-        # internally, so the visual subset lines up with the SAME cross-axis
-        # centres it derived from nav_rows above — take a contiguous middle
-        # strip (by cross-axis centre) rather than list order, which has no
-        # spatial meaning and would scatter the visible rows.
-        mean_dx = sum(abs(r['b'][0] - r['a'][0]) for r in rows) / len(rows)
-        mean_dy = sum(abs(r['b'][1] - r['a'][1]) for r in rows) / len(rows)
-        cross_axis = 1 if mean_dx >= mean_dy else 0
-        rows_by_centre = sorted(
-            rows, key=lambda r: (r['a'][cross_axis] + r['b'][cross_axis]) / 2)
+        # Order rows by position ACROSS the field at any bearing (a fixed
+        # X/Y axis choice mis-sorts tilted rows), and take the contiguous
+        # middle strip. Plants are written per row below, so the rows drawn
+        # are exactly these ones, not whichever Forest3D starts counting from.
+        rows_by_centre = order_rows_across(rows)
         start = (len(rows_by_centre) - max_visual_rows) // 2
         rows = rows_by_centre[start:start + max_visual_rows]
         print(f"  NOTE: field has {len(nav_rows)} real rows (density "
@@ -1171,7 +1246,6 @@ if __name__ == '__main__':
               f"(maps/maize_map) keeps all {len(nav_rows)} rows, and the "
               f"generated terrain still spans the full field — this only "
               f"limits how many rows get a visual crop model.")
-        params['num_rows'] = len(rows)
 
     # Robot spawn point: the topo map's HOME node (or first row's IN node as
     # fallback), shifted by the same terrain_offset that's about to be baked
@@ -1195,17 +1269,15 @@ if __name__ == '__main__':
     # actual south edge — i.e. off the mesh into open space.
     spawn_world_x, spawn_world_y = round(spawn_topo_x, 4), round(spawn_topo_y, 4)
 
-    # density is only a global ceiling in Forest3D's placement loop. Default it
-    # to the (possibly visual-subset-clipped) row count so it never truncates
-    # the rows actually being rendered, and never exceeds FOREST3D_MAX_DENSITY
-    # via the untouched full-field derived_density; honour an explicit
-    # --density override when given.
-    density = args.density if args.density is not None else \
-        params['num_rows'] * plants_per_row
-    print(f"  Plants/row: {plants_per_row}  ->  density cap: {density}")
+    # Crops actually drawn: one per ~plant_spacing along every drawn row path.
+    # (Forest3D itself is only asked for the ground mesh, so this number is
+    # informational and feeds the weed count; it is never given to Forest3D.)
+    density = sum(len(resample_path(row_path(r), args.plant_spacing))
+                  for r in rows)
+    if args.density is not None:
+        density = min(density, args.density)
+    print(f"  Crops: {density} along {len(rows)} row path(s)")
 
-    # Weeds cluster near crops, several per plant in a weedy field:
-    # --weed-density is a % of crop count times WEEDS_PER_CROP; default 10.
     weed_density = (int(density * WEEDS_PER_CROP * (args.weed_density / 100))
                     if args.weed_density is not None
                     else int(density * 0.10 * WEEDS_PER_CROP))
@@ -1213,8 +1285,8 @@ if __name__ == '__main__':
           f"({args.weed_density if args.weed_density is not None else 10}% of "
           f"{density} crops at {WEEDS_PER_CROP}x)")
 
-    write_forest3d_yaml(params, gps_lat, gps_lon, args.out, density,
-                        args.models_path, weed_density,
+    write_forest3d_yaml(params, gps_lat, gps_lon, args.out, 1,
+                        args.models_path, 0,
                         settings={
                             'plant_spacing': args.plant_spacing,
                             'row_width': args.row_width,
@@ -1258,9 +1330,13 @@ if __name__ == '__main__':
         # Step 2: Place crop + weed models. Weeds go via -d, NOT the yaml:
         # Forest3D's Density schema has no 'weed' field, so yaml weed counts
         # are dropped and its default (50) used; -d accepts arbitrary keys.
+        # Forest3D is used for the ground mesh only: its row placement can
+        # only draw straight X-aligned rows. Ask for a single crop and no
+        # weeds; place_plants_along_rows() below removes it and writes the
+        # real plants along the topo row paths.
         gen_cmd = [*base_cmd, 'generate', '-t', 'crop_rows',
                    '-b', str(base_dir),
-                   '-d', json.dumps({'crop': density, 'weed': weed_density})]
+                   '-d', json.dumps({'crop': 1, 'weed': 0})]
         if args.world_out:
             gen_cmd += ['-o', args.world_out]
         print(f"Running: {' '.join(gen_cmd)}")
@@ -1280,18 +1356,22 @@ if __name__ == '__main__':
         if args.world_out:
             patch_world_model_poses(args.world_out, terrain_offset)
 
-        # Step 4.5: Snap every plant onto the terrain surface (custom mesh).
+        # Step 4.5: Write the plants along the topo row paths, in topo (world)
+        # coordinates. After the pose shift above (which moves every include)
+        # and before the terrain snap below.
+        if args.world_out:
+            place_plants_along_rows(
+                args.world_out, rows, args.plant_spacing,
+                args.crop_model or 'plant',
+                args.weed_density if args.weed_density is not None else 10,
+                models_path=args.models_path,
+                weed_radius=max(args.row_width, 0.3))
+
+        # Step 4.6: Snap every plant onto the terrain surface (custom mesh).
         if args.world_out:
             snap_plants_to_terrain(
                 args.world_out,
                 Path(args.models_path) / 'ground' / 'mesh' / 'terrain.stl')
-
-        # Step 5: Trim crops to each row's real IN->OUT span (irregular
-        # fields). Skipped when the layout is ground-driven — crops span the
-        # whole custom mesh on purpose; re-culling them to the tiny topo spans
-        # would strip the field the user asked for.
-        if args.world_out and ground_extent is None:
-            cull_crops_outside_field(args.world_out, rows, args.plant_spacing / 2)
 
         # Step 6: replace model://crop/ URIs to point at the user-selected model.
         if args.world_out and args.crop_model:
