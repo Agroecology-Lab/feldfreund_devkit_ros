@@ -1,13 +1,15 @@
 """Regression tests for topo_to_forest3d.py: plants follow the topo row paths."""
+import json
 import math
 import sys
 import xml.etree.ElementTree as ET
+from itertools import pairwise
 from pathlib import Path
 
 import pytest
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
-import topo_to_forest3d as t  # noqa: E402
+import topo_to_forest3d as t
 
 
 def _node(name, x, y, rid, role, edges=()):
@@ -31,7 +33,7 @@ def _rot(p, deg):
 def _dist_to_path(p, path):
     """Return the shortest distance from a 2D point to the polyline's segments."""
     best = float('inf')
-    for a, b in zip(path, path[1:]):
+    for a, b in pairwise(path):
         dx, dy = b[0] - a[0], b[1] - a[1]
         length2 = dx * dx + dy * dy
         u = 0 if length2 == 0 else max(0, min(1, (
@@ -125,3 +127,73 @@ def test_place_plants_is_deterministic(tmp_path):
                                   'plant', weed_pct=50)
         out.append(w.read_text())
     assert out[0] == out[1]
+
+
+@pytest.mark.parametrize('wrapped', [False, True])
+def test_load_topo_preserves_names_and_valid_edges_in_file_order(tmp_path, wrapped):
+    node = {
+        'name': 'R1_IN', 'pose': {'position': {'x': '2.5', 'y': -3}},
+        'properties': {'row_id': 1, 'row_role': 'ENTRY'},
+        'edges': [None, 'R1_W9', {}, {'node': ''}, {'node': 'R1_W2'}, {'node': 'R1_W1'}],
+    }
+    path = tmp_path / 'topo.json'
+    path.write_text(json.dumps({'nodes': [{'node': node} if wrapped else node]}))
+
+    loaded = t.load_topo(path)['R1_IN']
+
+    assert loaded['name'] == 'R1_IN'
+    assert loaded['edges'] == ['R1_W2', 'R1_W1']
+    assert (loaded['x'], loaded['y']) == (2.5, -3.0)
+    assert loaded['row_role'] == 'entry'
+
+
+@pytest.mark.parametrize('edges', [None, []])
+def test_load_topo_accepts_nodes_without_outgoing_edges(tmp_path, edges):
+    path = tmp_path / 'topo.json'
+    path.write_text(json.dumps({'nodes': [{
+        'name': 'R1_OUT', 'pose': {'position': {'x': 0, 'y': 0}}, 'edges': edges,
+    }]}))
+    assert t.load_topo(path)['R1_OUT']['edges'] == []
+
+
+def test_extract_rows_prefers_authored_edges_over_waypoint_numbers():
+    nodes = {n['name']: n for n in [
+        _node('R1_IN', 0, 0, 1, 'entry', ['unknown', 'R2_OUT', 'R1_W10']),
+        _node('R1_W2', 4, 1, '1', 'waypoint', ['R1_OUT']),
+        _node('R1_W10', 2, 3, 1, 'waypoint', ['R1_IN', 'R1_W2']),
+        _node('R1_OUT', 6, 0, '1', 'exit'),
+        _node('R2_OUT', 99, 99, 2, 'exit'),
+    ]}
+
+    (row,) = t.extract_rows(nodes)
+
+    assert row['rid'] == 1
+    assert row['path'] == [(0, 0), (2, 3), (4, 1), (6, 0)]
+    assert (row['a'], row['b']) == ((0, 0), (6, 0))
+
+
+@pytest.mark.parametrize('entry_edges,waypoint_edges', [
+    (['R1_OUT'], []),
+    (['R1_W2'], ['R1_IN']),
+    (['R1_W2'], ['missing']),
+], ids=['skipped-waypoints', 'cycle', 'dangling-edge'])
+def test_extract_rows_recovers_every_waypoint_from_incomplete_chains(entry_edges, waypoint_edges):
+    nodes = {n['name']: n for n in [
+        _node('R1_W10', 10, 3, 1, 'waypoint'),
+        _node('R1_OUT', 12, 0, 1, 'exit'),
+        _node('R1_IN', 0, 0, 1, 'entry', entry_edges),
+        _node('R1_W2', 2, 1, 1, 'waypoint', waypoint_edges),
+    ]}
+    (row,) = t.extract_rows(nodes)
+    assert row['path'] == [(0, 0), (2, 1), (10, 3), (12, 0)]
+
+
+def test_extract_rows_projects_unnumbered_waypoints_along_reversed_chord():
+    nodes = {n['name']: n for n in [
+        _node('R1_IN', 10, 10, 1, 'entry'),
+        _node('bend_a', 2, 3, 1, 'waypoint'),
+        _node('bend_z', 8, 7, 1, 'waypoint'),
+        _node('R1_OUT', 0, 0, 1, 'exit'),
+    ]}
+    (row,) = t.extract_rows(nodes)
+    assert row['path'] == [(10, 10), (8, 7), (2, 3), (0, 0)]
