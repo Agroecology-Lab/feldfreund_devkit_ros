@@ -315,7 +315,21 @@ class DevkitManager:
         )
 
     def run(self, extra_args: list[str]):
-        """Runs the limbic ROS 2 stack within Docker."""
+        """Run the limbic ROS 2 stack within Docker, waiting for it to exit.
+
+        Arguments beginning with --sim, or FORCE_SIM=1 in .env or the process
+        environment, select simulation even with detected hardware. Otherwise,
+        simulation is selected only when both rover and MCU ports are 'virtual'.
+        Forward extra_args to ros2 launch after removing --sim-prefixed entries.
+
+        Hardware detection may regenerate .env and rebind USB interfaces even
+        when simulation is forced. Simulation prepares the world and topology;
+        hardware mode attempts to reset the receiver and wake an available MCU.
+
+        Errors reading .env or starting Docker propagate. A failed fixusb.py
+        invocation raises CalledProcessError. A nonzero Docker exit status does
+        not raise or become a return value.
+        """
         env_file = self.root_dir / '.env'
         usb_devices_path = Path('/sys/bus/usb/devices')
         has_usb_hardware = usb_devices_path.exists()

@@ -23,7 +23,15 @@ def load_csv(path):
 
 
 def kmeans_1d(values, k, iterations=100):
-    """1-D k-means. Returns list of k centroid values."""
+    """Return k sorted centroid values from 1-D k-means on nonempty values.
+
+    Run at most iterations updates, stopping when centroids are unchanged;
+    empty clusters retain their previous centroids. Nonpositive iterations
+    return the initial centroids. With k=1 and at least one update, return the
+    arithmetic mean.
+
+    Raise ValueError for k below one and IndexError for empty values.
+    """
     if k < 1:
         raise ValueError(f"k must be at least 1, got {k}")
     vals = sorted(values)

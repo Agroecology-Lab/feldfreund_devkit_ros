@@ -112,6 +112,11 @@ _PUB_QOS = QoSProfile(
 
 class RtkNavSatFixShim(Node):
     def __init__(self):
+        """Subscribe to rover fixes and PVT and publish corrected fixes on /gnss/fix.
+
+        Start a five-second timer for the first PVT, retaining at most the
+        newest 100 fixes while waiting, and a periodic statistics timer.
+        """
         super().__init__('rtk_navsatfix_shim')
 
         self._carr_soln: int = _CARR_SOLN_NONE
@@ -156,7 +161,12 @@ class RtkNavSatFixShim(Node):
             self._held_fixes.clear()
 
     def _pvt_timeout_cb(self) -> None:
-        """PVT never arrived within timeout — flush held fixes with NO_FIX status."""
+        """Cancel the timeout timer and handle a missing first PVT.
+
+        If PVT has arrived, do nothing further. Otherwise, publish and clear
+        held fixes with NO_FIX status and forward later fixes with that status
+        until the first PVT arrives.
+        """
         self._pvt_timeout_timer.cancel()
         if self._pvt_received:
             return
@@ -173,6 +183,12 @@ class RtkNavSatFixShim(Node):
         self._held_fixes.clear()
 
     def _fix_cb(self, msg: NavSatFix) -> None:
+        """Publish using the latest PVT status, or NO_FIX after the startup timeout.
+
+        Before either event, retain the fix, dropping the oldest when the
+        100-fix buffer is full. Once PVT has arrived, use its latest carr_soln
+        regardless of its age.
+        """
         if self._pvt_received:
             self._publish_corrected(msg)
         elif self._pvt_timed_out:

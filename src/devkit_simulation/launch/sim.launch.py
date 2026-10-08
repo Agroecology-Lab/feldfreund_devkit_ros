@@ -24,15 +24,18 @@ def generate_launch_description():
     Return a launch description for Gazebo, robot_state_publisher, robot
     spawning, and a ROS bridge scheduled two seconds after the spawn process
     exits with status 0. A non-zero spawn status logs the failure and starts no
-    bridge, so /clock never appears and downstream gates stay closed.
+    bridge from this launch description.
 
     Pass ``use_camera``, ``camera_width``, ``camera_height``, and ``camera_rate``
     to both xacro invocations. For the default sowbot_01.xacro, these enable a
     320-by-240-pixel camera at 10 Hz; ``use_camera:=false`` omits the sensor.
     Spawn at the coordinates in /workspace/spawn_pose.txt, falling back to
     (0, 0, 1) meters if the file is absent; the declared x/y/z arguments do not
-    control the spawn position. The spawn waits up to SPAWN_GZ_TIMEOUT_S seconds
-    (default 180) for Gazebo to report a world, then exits with status 1.
+    control the spawn position. While Gazebo reports no world, the spawn
+    process checks the SPAWN_GZ_TIMEOUT_S deadline (default 180 seconds) between
+    two-second polling sleeps and exits with status 1 on timeout. After a world
+    is reported, it waits another 30 seconds before spawning; the deadline does
+    not bound that delay or the spawn command.
 
     Raise PackageNotFoundError if devkit_simulation cannot be found in the
     ament index.
