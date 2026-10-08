@@ -17,6 +17,7 @@ def _node(name, x, y, rid, role, edges=()):
 
 
 def _row(rid, path):
+    """Build a row dict from its ID and ordered path, without GPS metadata."""
     return {'rid': rid, 'a': path[0], 'b': path[-1], 'path': path,
             'gps_lat': None, 'gps_lon': None, 'gps_x': None, 'gps_y': None}
 
@@ -28,6 +29,7 @@ def _rot(p, deg):
 
 
 def _dist_to_path(p, path):
+    """Return the shortest distance from a 2D point to the polyline's segments."""
     best = float('inf')
     for a, b in zip(path, path[1:]):
         dx, dy = b[0] - a[0], b[1] - a[1]
