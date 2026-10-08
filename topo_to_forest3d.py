@@ -64,6 +64,18 @@ DEFAULT_FIELD_LAT = 48.0046000
 DEFAULT_FIELD_LON = 3.6644000
 
 def load_topo(path):
+    """Read a YAML or JSON topo map into a dictionary keyed by node name.
+
+    Return nodes with XY coordinates in meters, outgoing edge targets in
+    file order, row metadata, and optional GPS coordinates in degrees.
+    Skip entries missing a name or either XY coordinate; the last entry
+    wins for duplicate names. Node properties take precedence over metadata.
+
+    YAML parsing failures fall back to JSON. Raise SystemExit if neither
+    parser succeeds, the node list is empty, or no usable nodes remain.
+    File read errors propagate, as do AttributeError, TypeError, and
+    ValueError from invalid document structure or field values.
+    """
     text = Path(path).read_text()
     doc = None
     if yaml:
@@ -154,6 +166,7 @@ def _order_row_chain(members, in_nd, out_nd):
         return chain
 
     def trailing_int(nd):
+        """Return the trailing number in a node name, or None if absent."""
         m = re.search(r'(\d+)$', nd['name'])
         return int(m.group(1)) if m else None
 
@@ -173,6 +186,12 @@ def extract_rows(nodes):
     callers) and 'path': the full ordered polyline entry -> waypoints -> exit.
     Curved contour rows therefore keep their shape instead of collapsing to
     the straight entry-exit chord.
+
+    Skip nodes without row IDs and rows missing either endpoint. Return
+    integer-convertible IDs in numeric order, then other IDs in string order.
+    Each row also carries 'rid' and GPS coordinates with their associated
+    XY position, preferring the entry's GPS tag over the exit's; these GPS
+    fields are None when neither endpoint has a latitude tag.
     """
     by_rid = {}
     members_by_rid = {}
@@ -310,10 +329,16 @@ def path_length(path):
 def resample_path(path, spacing):
     """Return (x, y, tangent_yaw) samples every ~spacing m along a polyline.
 
-    Samples always include both end points, with the interval stretched
-    slightly so it divides the length evenly. A zero-length path gives one
-    sample. This is what puts plants ON the authored row line, whatever its
-    bearing or curvature.
+    Expect a nonempty XY path in meters and positive spacing in meters.
+    Intervals are adjusted to divide the arc length evenly. Both endpoints
+    are included when multiple samples are returned; a path of length at
+    most half the spacing returns only its first point. Yaw is in radians,
+    along the sampled segment (the incoming segment at a corner), or along
+    the endpoint chord for a single sample, with zero for a single point.
+
+    An empty path raises IndexError. Zero spacing raises ZeroDivisionError
+    for a positive-length path; a zero-length path returns one sample
+    without using spacing.
     """
     total = path_length(path)
     n = max(1, int(round(total / spacing)) + 1) if total > 0 else 1
@@ -359,6 +384,7 @@ def order_rows_across(rows):
     nx, ny = -sy / norm, sx / norm
 
     def centroid_offset(r):
+        """Return the mean path-point offset along the field's cross direction."""
         pts = row_path(r)
         return (sum(p[0] for p in pts) * nx + sum(p[1] for p in pts) * ny) / len(pts)
 
@@ -371,10 +397,22 @@ def compute_field_params(rows, headland_width, default_row_width, plant_spacing,
 
     Plants are placed directly along each row's polyline by
     place_plants_along_rows(), so Forest3D is only asked for a ground mesh.
-    That mesh is a rectangle covering every path point plus the headland; it
-    is centred on the origin by Forest3D, so the offset that moves it onto the
-    paths is simply the path bounding-box centre. No row-axis, spacing or
-    orientation assumptions are made.
+    Without ground_extent, use the path bounding box plus a nonnegative
+    headland margin on each side, with its center as the terrain offset.
+    ground_extent is (min_x, max_x, min_y, max_y) for a custom mesh: use its
+    dimensions, omit the headland, and shift its center to the path center.
+    Dimensions, widths, offsets, and plant_spacing are in meters. Returned
+    field dimensions are at least 5 m, row width at least 0.2 m, and furrow
+    width at least 0.1 m. plant_spacing follows resample_path's contract.
+
+    Return (terrain_params, gps_lat, gps_lon, plants_per_row, derived_density,
+    terrain_offset). Counts are the rounded mean and total samples across
+    all rows. The GPS origin is in degrees, estimated from the first tagged
+    row using a flat-earth approximation, or DEFAULT_FIELD_LAT/LON if none
+    is tagged. terrain_offset is the XY translation into the topo frame.
+
+    Raise SystemExit for no rows or custom mesh dimensions smaller than the
+    path bounds. Sampling errors from resample_path propagate.
     """
     if len(rows) < 1:
         sys.exit("ERROR: need at least 1 row")
@@ -851,7 +889,11 @@ def snap_plants_to_terrain(world_path, mesh_path):
 
 
 def _model_variants(models_path, category, fallback):
-    """Return model directory names under models/<category>/ (or [fallback])."""
+    """Return sorted names under models_path/category containing model.sdf.
+
+    Return [fallback] if models_path is unset, the category directory is
+    missing, or no matching models exist. Directory listing errors propagate.
+    """
     if models_path:
         root = Path(models_path) / category
         if root.is_dir():
@@ -865,7 +907,7 @@ def _model_variants(models_path, category, fallback):
 def place_plants_along_rows(world_path, rows, plant_spacing, crop_model,
                             weed_pct, models_path=None, seed=0, jitter=0.02,
                             weed_radius=0.8):
-    """Write crop and weed <include>s straight along the topo row polylines.
+    """Replace crop and weed <include>s with plants near the topo row paths.
 
     Forest3D's own row placement can only draw straight, evenly spaced rows
     along X, so it cannot follow rows a farmer authored in the field (any
@@ -876,8 +918,20 @@ def place_plants_along_rows(world_path, rows, plant_spacing, crop_model,
     every include) so these poses are not moved a second time.
 
     Weeds scatter around random crops: weed_pct is a percentage of the crop
-    count times WEEDS_PER_CROP, as before. Seeded, so the same inputs always
-    give the same world (worldgen.sh caches on its inputs).
+    count times WEEDS_PER_CROP, truncated to an integer; nonpositive counts
+    place no weeds. A fixed seed makes placement repeatable for the same
+    inputs and available model variants (worldgen.sh caches on its inputs).
+
+    jitter bounds independent XY offsets from crop samples in meters. Weeds
+    are placed 0.2 to max(0.3, weed_radius) meters from a selected crop.
+    crop_model names a variant under models/crop; weed variants come from
+    models_path/weed, falling back to weed1. New poses have zero height and
+    random yaw; call snap_plants_to_terrain afterward for terrain elevation.
+
+    Rewrite world_path and return the crop count, including zero for empty
+    rows after removing existing plants. A missing world or malformed XML
+    returns zero without writing. Other file errors, model listing errors,
+    and sampling errors from resample_path propagate.
     """
     import random
     import xml.etree.ElementTree as _ET
@@ -906,6 +960,7 @@ def place_plants_along_rows(world_path, rows, plant_spacing, crop_model,
     rng = random.Random(seed)
 
     def add(category, variant, idx, x, y, yaw):
+        """Append a named model include at XY in meters, with yaw in radians."""
         inc = _ET.SubElement(world_elem, "include")
         _ET.SubElement(inc, "uri").text = f"model://{category}/{variant}"
         _ET.SubElement(inc, "name").text = f"{category}_{idx}"
