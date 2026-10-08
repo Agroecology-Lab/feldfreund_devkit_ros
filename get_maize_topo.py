@@ -24,10 +24,16 @@ def load_csv(path):
 
 def kmeans_1d(values, k, iterations=100):
     """1-D k-means. Returns list of k centroid values."""
+    if k < 1:
+        raise ValueError(f"k must be at least 1, got {k}")
     vals = sorted(values)
-    # Init: evenly spaced across range
+    # Init: evenly spaced across range. A single cluster starts at the midpoint
+    # (the spacing formula divides by k - 1) and converges to the mean.
     lo, hi = vals[0], vals[-1]
-    centroids = [lo + (hi - lo) * i / (k - 1) for i in range(k)]
+    if k == 1:
+        centroids = [(lo + hi) / 2]
+    else:
+        centroids = [lo + (hi - lo) * i / (k - 1) for i in range(k)]
     for _ in range(iterations):
         clusters = [[] for _ in range(k)]
         for v in vals:
@@ -150,12 +156,15 @@ def generate(csv_path, out_path, name, n_rows, headland, lat, lon, alt):
     """Write a topology YAML map with row and headland routes from crop CSV data.
 
     Use geometry-based row traversal and overwrite out_path. n_rows must be
-    at least two; headland is the distance beyond the crop ends in meters.
+    at least one; headland is the distance beyond the crop ends in meters.
     lat/lon (degrees) and alt (meters) record the survey origin in the header.
 
-    Raise SystemExit if the CSV has no crop entries. Missing X/Y columns,
-    invalid crop coordinates, and file I/O errors propagate to the caller.
+    Raise SystemExit if n_rows is below one or the CSV has no crop entries.
+    Missing X/Y columns, invalid crop coordinates, and file I/O errors
+    propagate to the caller.
     """
+    if n_rows < 1:
+        sys.exit(f"ERROR: --rows must be at least 1, got {n_rows}")
     crops = load_csv(csv_path)
     orientation, centres, c0, c1, h0, h1 = analyse(crops, n_rows, headland)
     date = datetime.now().strftime('%d-%m-%Y_%H-%M-%S')

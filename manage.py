@@ -365,6 +365,11 @@ class DevkitManager:
             or cfg.get('FORCE_SIM') == '1' \
             or os.environ.get('FORCE_SIM') == '1'
         is_sim = 'true' if (force_sim or (r_port == 'virtual' and mcu_port == 'virtual')) else 'false'
+        if force_sim and (r_port != 'virtual' or mcu_port != 'virtual'):
+            self._log(
+                f"FORCE_SIM/--sim is active: detected hardware (rover={r_port}, "
+                f"mcu={mcu_port}) will be IGNORED and the stack starts in sim. "
+                "Remove FORCE_SIM from .env to drive the real robot.", "WARN")
 
         # Survey origin for the topo map datum. In real-GPS runs this MUST match
         # fusioncore's GNSS reference origin, or the field frame and base_link

@@ -5,6 +5,7 @@ from launch import LaunchDescription
 from launch.actions import (
     DeclareLaunchArgument,
     ExecuteProcess,
+    LogInfo,
     RegisterEventHandler,
     TimerAction,
 )
@@ -22,14 +23,16 @@ def generate_launch_description():
 
     Return a launch description for Gazebo, robot_state_publisher, robot
     spawning, and a ROS bridge scheduled two seconds after the spawn process
-    exits, regardless of its exit status.
+    exits with status 0. A non-zero spawn status logs the failure and starts no
+    bridge, so /clock never appears and downstream gates stay closed.
 
     Pass ``use_camera``, ``camera_width``, ``camera_height``, and ``camera_rate``
     to both xacro invocations. For the default sowbot_01.xacro, these enable a
     320-by-240-pixel camera at 10 Hz; ``use_camera:=false`` omits the sensor.
     Spawn at the coordinates in /workspace/spawn_pose.txt, falling back to
     (0, 0, 1) meters if the file is absent; the declared x/y/z arguments do not
-    control the spawn position.
+    control the spawn position. The spawn waits up to SPAWN_GZ_TIMEOUT_S seconds
+    (default 180) for Gazebo to report a world, then exits with status 1.
 
     Raise PackageNotFoundError if devkit_simulation cannot be found in the
     ament index.
@@ -183,7 +186,17 @@ def generate_launch_description():
             "/bin/bash", "-c",
             (
                 'echo "[spawn] waiting for gz sim..."; '
-                f'until {GZ_BIN} service -l 2>/dev/null | grep -q "/world/"; do sleep 2; done; '
+                # Bounded wait: without a deadline a gz that never comes up
+                # leaves this process looping forever, so the spawn never exits
+                # and nothing downstream is released or reported. Exiting
+                # non-zero lets the bridge gate below fail closed.
+                'GZ_WAIT_S="${SPAWN_GZ_TIMEOUT_S:-180}"; '
+                'deadline=$((SECONDS + GZ_WAIT_S)); '
+                f'until {GZ_BIN} service -l 2>/dev/null | grep -q "/world/"; do '
+                'if (( SECONDS >= deadline )); then '
+                'echo "[spawn] gz sim reported no world within ${GZ_WAIT_S}s" >&2; '
+                'exit 1; fi; '
+                'sleep 2; done; '
                 'echo "[spawn] gz service ready — waiting 30s for GUI to finish init..."; '
                 'sleep 30; '
                 'echo "[spawn] spawning agro_robot"; '
@@ -228,31 +241,41 @@ def generate_launch_description():
         output="screen",
     )
 
-    # ── 4. Bridge (2 s after spawn exits) ────────────────────────────────────
+    # ── 4. Bridge (2 s after a successful spawn) ─────────────────────────────
+    # on_exit must be a callable, not a static list: a static list starts the
+    # bridge whatever the spawn status, which publishes /clock for a world with
+    # no robot and releases the Nav2/fusioncore clock gate.
     bridge_config = os.path.join(pkg_share, "config", "ros_gz_bridge.yaml")
+
+    def _bridge_if_spawn_ok(event, context):
+        """Return the delayed bridge on spawn success, or a failure log otherwise."""
+        if event.returncode != 0:
+            return [LogInfo(msg=(
+                f"[sim] spawn_robot exited with code {event.returncode}: "
+                "not starting ros_gz_bridge"
+            ))]
+        return [
+            TimerAction(
+                period=2.0,
+                actions=[
+                    Node(
+                        package="ros_gz_bridge",
+                        executable="parameter_bridge",
+                        name="ros_gz_bridge",
+                        output="screen",
+                        respawn=True,
+                        respawn_delay=5.0,
+                        parameters=[
+                            {"use_sim_time": True},
+                            {"config_file": bridge_config},
+                        ],
+                    )
+                ],
+            )
+        ]
+
     ros_gz_bridge = RegisterEventHandler(
-        OnProcessExit(
-            target_action=spawn_entity,
-            on_exit=[
-                TimerAction(
-                    period=2.0,
-                    actions=[
-                        Node(
-                            package="ros_gz_bridge",
-                            executable="parameter_bridge",
-                            name="ros_gz_bridge",
-                            output="screen",
-                            respawn=True,
-                            respawn_delay=5.0,
-                            parameters=[
-                                {"use_sim_time": True},
-                                {"config_file": bridge_config},
-                            ],
-                        )
-                    ],
-                )
-            ],
-        )
+        OnProcessExit(target_action=spawn_entity, on_exit=_bridge_if_spawn_ok)
     )
 
     return LaunchDescription([
