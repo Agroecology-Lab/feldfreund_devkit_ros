@@ -107,8 +107,8 @@ NavigationHarness = load_navigation_harness()
 
 def make_node(action_client=None):
     node = NavigationHarness()
-    node._run_vm = RunViewModel()
-    node._global_vm = GlobalViewModel()
+    node._run_vm = RunViewModel(Mock())
+    node._global_vm = GlobalViewModel(Mock())
     node._nav_ac = action_client or ActionClient(complete=False)
     node._nav_goal_handle = None
     node._mission_cancel = False

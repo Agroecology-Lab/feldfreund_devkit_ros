@@ -15,6 +15,7 @@ from devkit_ui.constants import ROW_ACTION, VISION_ROW_ACTION
 from devkit_ui.models import TopoDoc, TopoNode
 from devkit_ui.parse import dump_topo_yaml, parse_topo_yaml
 from devkit_ui.topo_defaults import default_actions, default_definitions
+from devkit_ui.topo_test_fakes import attach_topology
 from devkit_ui.view_models.run_view_model import RunViewModel
 
 
@@ -41,7 +42,7 @@ def load_map_harness(directory):
         'copy': copy, 're': re, 'traceback': traceback, 'Callable': Callable, 'TopoDoc': TopoDoc,
         'ROW_ACTION': ROW_ACTION, 'VISION_ROW_ACTION': VISION_ROW_ACTION,
         'default_actions': default_actions, 'default_definitions': default_definitions,
-        '_TOPO_SRV_OK': False, '_topo_to_msg': lambda doc: doc.to_dict(),
+        '_TOPO_SRV_OK': False,
         'os': SimpleNamespace(
             path=SimpleNamespace(exists=lambda path: local_path(path).exists(),
                                  basename=os.path.basename),
@@ -56,9 +57,9 @@ def load_map_harness(directory):
     exec(compile(module, source_path, 'exec'), namespace)
     node = namespace['MapHarness']()
     node._topo_doc = TopoDoc(name='live', nodes=[TopoNode(name='A', x=1.0, y=2.0)])
-    node._run_vm = RunViewModel()
+    node._run_vm = RunViewModel(Mock())
     node._row_action = ROW_ACTION
-    node._topo_map_pub = Mock()
+    attach_topology(node)
     node.get_logger = Mock(return_value=Mock())
     return node, namespace
 
