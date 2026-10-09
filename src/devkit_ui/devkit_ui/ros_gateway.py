@@ -32,6 +32,9 @@ class RosGateway:
         """Create a subscription on the wrapped node with the supplied callback and QoS."""
         return self._node.create_subscription(msg_type, topic, callback, qos)
 
+    def create_client(self, srv_type, name: str):
+        return self._node.create_client(srv_type, name)
+
     def get_logger(self):
         """Return the wrapped node's logger."""
         return self._node.get_logger()

@@ -3,7 +3,6 @@
 ui_node.py — Sowbot web cockpit on :80
 """
 
-import copy
 import io
 import math
 import os
@@ -111,18 +110,13 @@ from devkit_ui.pages.run.navigation_sidebar import NavigationSidebar
 from devkit_ui.pages.run.node_map_card import NodeMapCard
 from devkit_ui.pages.run.row_discovery_card import RowDiscoveryCard
 from devkit_ui.pages.run.track_card import TrackCard
-from devkit_ui.parse import dump_topo_yaml, parse_topo_yaml
 from devkit_ui.ros_gateway import RosGateway
-from devkit_ui.topo_defaults import default_actions, default_definitions
 from devkit_ui.view_models.global_view_model import GlobalViewModel
 from devkit_ui.view_models.run_view_model import RunViewModel
 from devkit_ui.view_models.topology_view_model import TopologyViewModel
 
-_TOPO_SRV_OK = False
 try:
     from topological_navigation_msgs.action import GotoNode
-    from topological_navigation_msgs.srv import WriteTopologicalMap
-    _TOPO_SRV_OK = True
 except ImportError:
     pass
 
@@ -647,12 +641,6 @@ class NiceGuiNode(Node):
         # Per-session, never persisted: each new map starts on geometry-only rows.
         self._row_action: str = ROW_ACTION
 
-        if _TOPO_SRV_OK:
-            self._write_map_cli  = self.create_client(WriteTopologicalMap,
-                '/topological_map_manager2/write_topological_map')
-            self._switch_map_cli = self.create_client(WriteTopologicalMap,
-                '/topological_map_manager2/switch_topological_map')
-
         if _ACTION_OK:
             self._nav_ac = ActionClient(self, GotoNode, 'topological_navigation')
 
@@ -988,76 +976,29 @@ class NiceGuiNode(Node):
             f'{name}{conn_str} at ({x}, {y}){row_str}{gps_str} — writing…')
 
         def _publish_and_persist():
-            """Persist the updated topology map and make it available to the navigation system.
+            """Save the dropped node and make the updated map available to navigation.
 
-            Create a missing map with default actions and definitions. Save only the new node
-            and its edges to previously saved targets, without adding reverse edges. A duplicate
-            name on disk skips writing and publishing. After saving, replace the in-memory map
-            and switch or publish it. Worker exceptions become drop_node.status errors.
+            The service creates a missing map from defaults, saves only edges to nodes
+            already on disk and adds no reverse edges. A duplicate name on disk skips
+            writing. Worker exceptions become drop_node.status errors.
             """
             try:
-                map_file      = f'/workspace/maps/{map_name}'
+                base = f'{name}{conn_str} at ({x},{y}){row_str}{gps_str}'
 
-                if os.path.exists(map_file):
-                    file_doc = parse_topo_yaml(map_file)
-                elif self._topo_doc:
-                    file_doc = self._topo_doc.clone_empty(map_name)
-                    file_doc.seed_actions(default_actions(), default_definitions())
-                    self.get_logger().info('Seeding new map from repo defaults')
-                else:
-                    file_doc = self._topo_doc
-                    self.get_logger().warn('No YAML source — JSON fallback')
+                def _saved() -> None:
+                    self._run_vm.drop_node.status = f'{base} — reloading…'
 
-                existing_names = {e.name for e in file_doc.nodes}
-                if name in existing_names:
+                result = self._topo_app_service.drop_node(new_node, on_saved=_saved)
+                if result.kind == 'skipped':
                     self.get_logger().warn(f'Node {name} already in file — skipping write')
                     return
-
-                saved_node = copy.deepcopy(new_node)
-                saved_node.remove_edges({
-                    edge.node for edge in saved_node.edges if edge.node not in existing_names
-                })
-                file_doc.insert_node(saved_node)
-                dump_topo_yaml(file_doc, map_file)
-                self._topo_app_service.set_doc(file_doc)
-
-                self._run_vm.drop_node.status = (
-                    f'{name}{conn_str} at ({x}, {y})'
-                    f'{row_str}{gps_str} — reloading…'
-                )
-
-                def _call(client, req, timeout=5.0):
-                    ev = threading.Event()
-                    res = [None]
-                    def _cb(f):
-                        res[0] = f.result()
-                        ev.set()
-                    client.call_async(req).add_done_callback(_cb)
-                    ev.wait(timeout=timeout)
-                    return res[0]
-
-                if _TOPO_SRV_OK:
-                    sw = WriteTopologicalMap.Request()
-                    sw.filename = f'/workspace/maps/{map_name}'
-                    sw.no_alias = True
-                    sr = _call(self._switch_map_cli, sw)
-                    if sr and sr.success:
-                        self._run_vm.drop_node.status = (
-                            f'{name}{conn_str} at ({x},{y})'
-                            f'{row_str}{gps_str} — live'
-                        )
-                    else:
-                        self._topo_app_service.publish()
-                        err = sr.message if sr else 'timeout'
-                        self._run_vm.drop_node.status = (
-                            f'{name}{conn_str} saved (switch failed: {err})')
-                        self.get_logger().warn(f'switch_topological_map failed ({err})')
-                else:
-                    self._topo_app_service.publish()
+                if result.kind == 'switch_failed':
                     self._run_vm.drop_node.status = (
-                        f'{name}{conn_str} at ({x},{y})'
-                        f'{row_str}{gps_str} — live (no srv)'
-                    )
+                        f'{name}{conn_str} saved (switch failed: {result.detail})')
+                    self.get_logger().warn(
+                        f'switch_topological_map failed ({result.detail})')
+                else:
+                    self._run_vm.drop_node.status = result.describe(base)
                 self.get_logger().info(
                     f'Node dropped: {name} at ({x:.3f},{y:.3f}){conn_str}{row_str}{gps_str}')
             except Exception as e:
@@ -1209,63 +1150,11 @@ class NiceGuiNode(Node):
                                  success_msg (str): Message reported after the map is persisted
                                  successfully.
                              """
-        map_name = self._topo_doc.name
-        map_file = f'/workspace/maps/{map_name}'
-
         def _work():
-            """
-            Apply a topology modification, persist the updated map, and reload it for live use.
-
-            Load the map file when present; otherwise copy the current topology and seed default
-            actions and definitions if it has no actions. Modification, persistence, and reload
-            exceptions become status errors. A failed or timed-out switch response falls back
-            to publishing the saved map.
-            """
+            """Run the service's persist-and-reload and report the outcome as a status."""
             try:
-                if os.path.exists(map_file):
-                    file_doc = parse_topo_yaml(map_file)
-                else:
-                    file_doc = copy.deepcopy(self._topo_doc)
-                    if not file_doc.actions:
-                        file_doc.seed_actions(default_actions(), default_definitions())
-
-                modify_fn(file_doc)
-
-                # Backfill missing per-node entry meta (hand-written nodes,
-                # and anything modify_fn() just added — e.g. F2C row saves
-                # set meta.map/meta.node but not meta.pointset, which the
-                # tmap schema requires). Must run after modify_fn(), not
-                # before, or newly-added nodes never get backfilled.
-                file_doc.ensure_meta(map_name)
-
-                dump_topo_yaml(file_doc, map_file)
-                self._topo_app_service.set_doc(file_doc)
-
-                def _call(client, req, timeout=5.0):
-                    ev = threading.Event()
-                    res = [None]
-                    def _cb(f):
-                        res[0] = f.result()
-                        ev.set()
-                    client.call_async(req).add_done_callback(_cb)
-                    ev.wait(timeout=timeout)
-                    return res[0]
-
-                if _TOPO_SRV_OK:
-                    sw = WriteTopologicalMap.Request()
-                    sw.filename = map_file
-                    sw.no_alias = True
-                    sr = _call(self._switch_map_cli, sw)
-                    if sr and sr.success:
-                        setattr(status_owner, status_attr, f'{success_msg} — live')
-                    else:
-                        self._topo_app_service.publish()
-                        err = sr.message if sr else 'timeout'
-                        setattr(status_owner, status_attr,
-                                f'{success_msg} (switch failed: {err})')
-                else:
-                    self._topo_app_service.publish()
-                    setattr(status_owner, status_attr, f'{success_msg} — live (no srv)')
+                result = self._topo_app_service.persist_and_reload(modify_fn)
+                setattr(status_owner, status_attr, result.describe(success_msg))
                 self.get_logger().info(f'_persist_and_reload: {success_msg}')
             except Exception as e:
                 setattr(status_owner, status_attr, f'ERROR: {e}')
@@ -1829,19 +1718,9 @@ class NiceGuiNode(Node):
     # ── existing helpers below ───────────────────────────────────────────────
 
     def _patch_node_role(self, node_name: str, role: str) -> None:
-        if not self._topo_doc:
-            return
-        map_name = self._topo_doc.name
-        map_file = f'/workspace/maps/{map_name}'
         def _write():
             try:
-                if not os.path.exists(map_file):
-                    return
-                doc = parse_topo_yaml(map_file)
-                if doc.has_node(node_name):
-                    node = doc.get_node(node_name)
-                    node.patch_role(role)
-                dump_topo_yaml(doc, map_file)
+                self._topo_app_service.patch_node_role(node_name, role)
             except Exception as e:
                 self.get_logger().error(f'_patch_node_role failed: {e}')
         threading.Thread(target=_write, daemon=True).start()
@@ -2921,100 +2800,28 @@ class NiceGuiNode(Node):
             _modify, self._run_vm.drop_node, 'status',
             f'row action: {action}, {n_edges} row edges updated')
 
-    _MAP_NAME_RE = re.compile(r'^[A-Za-z0-9][A-Za-z0-9_-]{0,63}$')
-
     def save_map_as(self, name: str) -> str:
-        """Save a named copy of the current map to /workspace/maps/<name>.
-
-        The live map is left as it is. Refuses to overwrite an existing file.
-        Prefer the persisted map, falling back to memory only if its file is absent.
-        Strip surrounding whitespace from name; require 1-64 ASCII letters, digits,
-        underscores, or hyphens, starting with a letter or digit.
-
-        Return 'saved → <name>' on success or an 'ERROR:' status for a missing or empty
-        map, an invalid or occupied name, or an exception while reading or saving.
-        """
-        name = (name or '').strip()
-        if not self._topo_doc:
-            return 'ERROR: map not loaded'
-        if not self._MAP_NAME_RE.match(name):
-            return 'ERROR: use letters, digits, _ or - (max 64, start with a letter or digit)'
-        if name == self._topo_doc.name:
-            return 'ERROR: that is the live map name'
-        target = f'/workspace/maps/{name}'
-        if os.path.exists(target):
-            return f'ERROR: {name} already exists'
-        live_file = f'/workspace/maps/{self._topo_doc.name}'
-        try:
-            # Save the persisted state, not just memory.
-            src = parse_topo_yaml(live_file) if os.path.exists(live_file) else self._topo_doc
-            if not any(True for _ in src.nodes):
-                return 'ERROR: map has no nodes'
-            os.makedirs('/workspace/maps', exist_ok=True)
-            dump_topo_yaml(src.renamed(name), target)
-            self.get_logger().info(f'save_map_as: saved {target}')
-            return f'saved → {name}'
-        except Exception as e:
-            self.get_logger().error(f'save_map_as failed: {e}')
-            return f'ERROR: {e}'
+        """Save a named copy of the current map. See TopologyApplicationService.save_map_as."""
+        return self._topo_app_service.save_map_as(name)
 
     def archive_and_clear_map(self) -> str:
-        """Copy current map file to /workspace/maps/<name>_<N>, then write a
-        fresh empty map doc back to the original path and attempt to publish it.
+        """Archive the saved map as <name>_<N> and replace it with an empty default map.
 
-        Choose the first unused suffix starting at 1. Archive the persisted map,
-        or the in-memory map if no file exists. Reset actions and definitions to
-        repository defaults and row driving to geometry mode.
-
-        Return an archive status or an 'ERROR:' status for a missing map or a
-        read/write failure. Publishing errors are ignored, and earlier writes
-        are not rolled back if a later step fails.
+        Reset row driving to geometry mode on success. Return an archive status, or an
+        'ERROR:' status for a missing map or a read/write failure; the row mode is left
+        alone in that case.
         """
         if not self._topo_doc:
             return 'ERROR: no map loaded'
-
-        map_name = self._topo_doc.name
-        map_file = f'/workspace/maps/{map_name}'
-
-        # Pick next available archive index
-        i = 1
-        while os.path.exists(f'{map_file}_{i}'):
-            i += 1
-        archive_path = f'{map_file}_{i}'
-
         try:
-            # Read from disk so we archive the persisted state, not just memory
-            if os.path.exists(map_file):
-                on_disk = parse_topo_yaml(map_file)
-            else:
-                on_disk = copy.deepcopy(self._topo_doc)
-
-            dump_topo_yaml(on_disk, archive_path)
-
-            empty_doc = self._topo_doc.clone_empty(map_name)
-
-            # A cleared map is a new map: always start from repo defaults.
-            empty_doc.seed_actions(default_actions(), default_definitions())
-
-            dump_topo_yaml(empty_doc, map_file)
-            self._row_action = ROW_ACTION
-            self._run_vm.drop_node.row_action = ROW_ACTION
-
-            # Replace the document and republish so the topo nav stack sees the cleared map
-            # immediately.
-            self._topo_app_service.set_doc(empty_doc)
-            try:
-                self._topo_app_service.publish()
-            except Exception:
-                pass
-
-            self.get_logger().info(
-                f'archive_and_clear_map: archived to {archive_path}')
-            return f'archived → {os.path.basename(archive_path)}'
-
+            archive = self._topo_app_service.archive_and_clear()
         except Exception as e:
             self.get_logger().error(f'archive_and_clear_map failed: {e}')
             return f'ERROR: {e}'
+        self._row_action = ROW_ACTION
+        self._run_vm.drop_node.row_action = ROW_ACTION
+        self.get_logger().info(f'archive_and_clear_map: archived to {archive}')
+        return f'archived → {archive}'
 
     # ── System tab ────────────────────────────────────────────────────────────
 

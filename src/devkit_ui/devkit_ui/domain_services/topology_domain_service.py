@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import threading
 
 from rclpy.qos import DurabilityPolicy, HistoryPolicy, QoSProfile, ReliabilityPolicy
 from std_msgs.msg import String
@@ -8,6 +9,12 @@ from std_msgs.msg import String
 from devkit_ui.models import TopoDoc, TopoNode
 from devkit_ui.parse import parse_topo_json
 from devkit_ui.ros_gateway import RosGateway
+from devkit_ui.topo_results import SwitchResult
+
+try:
+    from topological_navigation_msgs.srv import WriteTopologicalMap
+except ImportError:  # topological navigation not installed (e.g. unit tests)
+    WriteTopologicalMap = None
 
 # QoS for topology map: reliable, transient-local so new subscribers get last map
 TMAP_QOS = QoSProfile(
@@ -42,6 +49,10 @@ class TopologyDomainService:
         # Subscribe to map updates and create publisher
         self._ros.create_subscription(String, '/topological_map_2', self._on_topo_map, TMAP_QOS)
         self._topo_map_pub = self._ros.create_publisher(String, '/topological_map_2', TMAP_QOS)
+        self._switch_cli = (
+            self._ros.create_client(
+                WriteTopologicalMap, '/topological_map_manager2/switch_topological_map')
+            if WriteTopologicalMap is not None else None)
 
     def set_doc_changed_callback(self, callback) -> None:
         """Register a callback to be invoked whenever the doc changes.
@@ -74,6 +85,31 @@ class TopologyDomainService:
         msg = String()
         msg.data = json.dumps(self._doc.to_dict(), ensure_ascii=False)
         self._topo_map_pub.publish(msg)
+
+    def switch_map(self, path: str, timeout: float = 5.0) -> SwitchResult:
+        """Ask the map manager to load the map file at path. Blocks up to timeout seconds.
+
+        Call from a worker thread, never from the ROS executor or UI loop.
+        """
+        if self._switch_cli is None:
+            return SwitchResult(available=False)
+        req = WriteTopologicalMap.Request()
+        req.filename = path
+        req.no_alias = True
+        done = threading.Event()
+        result = [None]
+
+        def _on_done(future) -> None:
+            result[0] = future.result()
+            done.set()
+
+        self._switch_cli.call_async(req).add_done_callback(_on_done)
+        done.wait(timeout=timeout)
+        resp = result[0]
+        if resp is None:
+            return SwitchResult(available=True, success=False, message='timeout')
+        return SwitchResult(available=True, success=bool(resp.success),
+                            message=getattr(resp, 'message', ''))
 
     def get_doc(self) -> TopoDoc | None:
         """Return the current topology document."""

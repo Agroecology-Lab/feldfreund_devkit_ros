@@ -14,11 +14,11 @@ from devkit_ui.constants import NAV_ACTION, ROW_ACTION, VISION_ROW_ACTION
 from devkit_ui.models import TopoDoc, TopoEdge, TopoNode, TopoProperties, Vector2
 from devkit_ui.parse import dump_topo_yaml, parse_topo_yaml
 from devkit_ui.topo_defaults import default_actions, default_definitions
-from devkit_ui.topo_test_fakes import attach_topology
+from devkit_ui.topo_test_fakes import attach_topology, patch_store_io
 from devkit_ui.view_models.run_view_model import RunViewModel
 
 
-def load_drop_harness(map_file):
+def load_drop_harness():
     """Run the real drop method with synchronous threading and a temporary YAML path."""
     source_path = Path(__file__).with_name('ui_node.py')
     tree = ast.parse(source_path.read_text(encoding='utf-8'))
@@ -45,9 +45,6 @@ def load_drop_harness(map_file):
         'datetime': datetime,
         'default_actions': default_actions,
         'default_definitions': default_definitions,
-        'os': SimpleNamespace(path=SimpleNamespace(exists=lambda _: map_file.exists())),
-        'parse_topo_yaml': lambda _: parse_topo_yaml(map_file),
-        'dump_topo_yaml': Mock(side_effect=lambda doc, _: dump_topo_yaml(doc, map_file)),
         'threading': SimpleNamespace(
             Thread=lambda target, daemon: SimpleNamespace(start=target)),
     }
@@ -62,7 +59,8 @@ class TestDropTopoNode(unittest.TestCase):
         # pylint: disable-next=consider-using-with
         temp_dir = self.enterContext(TemporaryDirectory())
         self.map_file = Path(temp_dir) / 'field.yaml'
-        harness, self.namespace = load_drop_harness(self.map_file)
+        harness, _ = load_drop_harness()
+        self.namespace = patch_store_io(self)
         self.node = harness()
         self.node._topo_doc = TopoDoc(name='field.yaml')
         self.node._run_vm = RunViewModel(Mock())
@@ -72,7 +70,7 @@ class TestDropTopoNode(unittest.TestCase):
             pose=SimpleNamespace(pose=SimpleNamespace(position=SimpleNamespace(x=1.234, y=5.678))))
         self.node.latest_gps = None
         self.node.get_logger = Mock(return_value=Mock())
-        attach_topology(self.node)
+        attach_topology(self.node, temp_dir)
 
     def test_missing_map_saves_node_and_defaults(self) -> None:
         """Verify a first drop saves the node, row metadata, and default navigation settings."""
