@@ -96,6 +96,9 @@ class FakeElement:
     def set_text(self, value) -> None:
         self.text = value
 
+    def set_content(self, value) -> None:
+        self.content = value
+
     def clear(self) -> None:
         self.children.clear()
 
@@ -168,6 +171,9 @@ class FakeUi:
 
     def checkbox(self, text='', *args, **kwargs):
         return self._element('checkbox', text, *args, **kwargs)
+
+    def joystick(self, *args, **kwargs):
+        return self._element('joystick', *args, **kwargs)
 
     def html(self, text='', *args, **kwargs):
         return self._element('html', text, *args, **kwargs)

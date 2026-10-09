@@ -114,6 +114,152 @@ class TestTopologyStack(unittest.TestCase):
 
         self.assertEqual(vm.topo_doc.name, 'remote')
 
+    def test_default_doc_contains_spaced_nodes_and_bidirectional_edges(self) -> None:
+        doc = create_default_doc()
+        self.assertEqual(doc.name, 'mixed_test_map')
+        self.assertEqual([(node.x, node.y) for node in doc.nodes],
+                         [(0.0, 0.0), (3.0, 0.0), (6.0, 0.0),
+                          (9.0, 0.0), (12.0, 0.0), (15.0, 0.0)])
+        self.assertEqual([[edge.node for edge in node.edges] for node in doc.nodes],
+                         [['N2'], ['N1', 'N3'], ['N2', 'N4'],
+                          ['N3', 'N5'], ['N4', 'N6'], ['N5']])
+
+    def test_default_initialization_syncs_vm_without_publishing_or_sharing_state(self) -> None:
+        ros, domain, app, vm = make_stack()
+        app.initialize_with_default()
+        first = app.get_doc()
+        self.assertIs(first, domain.get_doc())
+        self.assertIs(first, vm.topo_doc)
+        first.remove_node('N1')
+
+        app.initialize_with_default()
+
+        self.assertIsNot(app.get_doc(), first)
+        self.assertIs(vm.topo_doc, app.get_doc())
+        self.assertTrue(vm.has_node('N1'))
+        ros.create_publisher.return_value.publish.assert_not_called()
+
+    def test_queries_cover_missing_doc_and_existing_node(self) -> None:
+        _, _, app, vm = make_stack()
+        self.assertIsNone(app.get_doc())
+        self.assertFalse(vm.has_node('X'))
+        self.assertIsNone(vm.get_node('X'))
+        node = TopoNode(name='X', x=2.0, y=-3.0)
+        app.set_doc(TopoDoc(name='field', nodes=[node]))
+
+        self.assertTrue(vm.has_node('X'))
+        self.assertIs(vm.get_node('X'), node)
+        self.assertFalse(vm.has_node('missing'))
+
+    def test_get_missing_node_returns_none_as_documented(self) -> None:
+        _, _, app, vm = make_stack()
+        app.set_doc(TopoDoc(name='field', nodes=[TopoNode(name='X')]))
+
+        self.assertIsNone(vm.get_node('missing'))
+
+    def test_clear_doc_clears_selection_without_publishing(self) -> None:
+        ros, _, app, vm = make_stack()
+        app.initialize_with_default()
+        vm.set_selected_node('N1')
+
+        app.set_doc(None)
+        app.publish()
+
+        self.assertIsNone(app.get_doc())
+        self.assertIsNone(vm.topo_doc)
+        self.assertIsNone(vm.selected_node)
+        ros.create_publisher.return_value.publish.assert_not_called()
+
+    def test_selection_and_localization_are_independent(self) -> None:
+        ros, _, app, vm = make_stack()
+        app.initialize_with_default()
+        vm.set_selected_node('N2')
+        vm.set_current_node('N1')
+        self.assertEqual(vm.selected_node, 'N2')
+        vm.set_selected_node(None)
+        self.assertEqual(vm.current_node, 'N1')
+        self.assertIsNone(vm.selected_node)
+        ros.create_publisher.return_value.publish.assert_not_called()
+
+    def test_add_then_remove_publish_distinct_snapshots_in_order(self) -> None:
+        ros, _, app, vm = make_stack()
+        app.set_doc(TopoDoc(name='field', nodes=[TopoNode(name='A')]))
+        added = TopoNode(name='B', x=2.0, y=3.0, edges=['A'])
+
+        vm.add_node(added)
+        self.assertIs(vm.get_node('B'), added)
+        vm.remove_node('B')
+
+        messages = [entry.args[0] for entry in
+                    ros.create_publisher.return_value.publish.call_args_list]
+        self.assertEqual(len(messages), 2)
+        self.assertIsNot(messages[0], messages[1])
+        added_payload, removed_payload = [json.loads(msg.data) for msg in messages]
+        self.assertEqual([entry['node']['name'] for entry in added_payload['nodes']], ['A', 'B'])
+        self.assertEqual(added_payload['nodes'][0]['node']['edges'][0]['node'], 'B')
+        self.assertEqual(removed_payload, app.get_doc().to_dict())
+        self.assertEqual([entry['node']['name'] for entry in removed_payload['nodes']], ['A'])
+        self.assertEqual(removed_payload['nodes'][0]['node']['edges'], [])
+
+    def test_remove_rejects_unloaded_or_missing_node_without_side_effects(self) -> None:
+        ros, _, app, vm = make_stack()
+        with self.assertRaisesRegex(ValueError, 'No topology document loaded'):
+            vm.remove_node('missing')
+        app.set_doc(TopoDoc(name='field', nodes=[TopoNode(name='A')]))
+        before = app.get_doc().to_dict()
+        with self.assertRaisesRegex(ValueError, 'not found'):
+            vm.remove_node('missing')
+        self.assertEqual(app.get_doc().to_dict(), before)
+        ros.create_publisher.return_value.publish.assert_not_called()
+
+    def test_invalid_incoming_maps_preserve_doc_and_selection_then_recover(self) -> None:
+        ros, _, app, vm = make_stack()
+        original = TopoDoc(name='field', nodes=[TopoNode(name='A')])
+        app.set_doc(original)
+        vm.set_selected_node('A')
+        callback = ros.create_subscription.call_args.args[2]
+
+        for payload in ('{', 'null', '[]', '{"nodes": [{"node": {}}]}'):
+            with self.subTest(payload=payload):
+                ros.get_logger.return_value.reset_mock()
+                callback(SimpleNamespace(data=payload))
+                self.assertIs(app.get_doc(), original)
+                self.assertIs(vm.topo_doc, original)
+                self.assertEqual(vm.selected_node, 'A')
+                ros.get_logger.return_value.error.assert_called_once()
+                self.assertIn('/topological_map_2', ros.get_logger.return_value.error.call_args.args[0])
+
+        replacement = TopoDoc(name='recovered', nodes=[TopoNode(name='B', x=1.0, y=2.0)])
+        callback(SimpleNamespace(data=json.dumps(replacement.to_dict())))
+        self.assertEqual(vm.topo_doc.to_dict(), replacement.to_dict())
+        self.assertIsNone(vm.selected_node)
+        ros.create_publisher.return_value.publish.assert_not_called()
+
+    def test_subscriber_echo_clears_selection_after_local_removal(self) -> None:
+        ros, _, app, vm = make_stack()
+        app.set_doc(TopoDoc(name='field', nodes=[TopoNode(name='A')]))
+        vm.set_selected_node('A')
+        vm.remove_node('A')
+        message = ros.create_publisher.return_value.publish.call_args.args[0]
+
+        ros.create_subscription.call_args.args[2](message)
+
+        self.assertIsNone(vm.selected_node)
+        self.assertEqual(list(vm.topo_doc.nodes), [])
+
+    def test_publish_preserves_unicode_and_complete_document(self) -> None:
+        ros, _, app, _ = make_stack()
+        doc = TopoDoc(name='área', metric_map='field', nodes=[
+            TopoNode(name='árvore', x=-1.25, y=2.5, meta={'row_id': 2, 'row_role': 'entry'}),
+        ])
+        app.set_doc(doc)
+
+        app.publish()
+
+        message = ros.create_publisher.return_value.publish.call_args.args[0]
+        self.assertIn('árvore', message.data)
+        self.assertEqual(json.loads(message.data), doc.to_dict())
+
 
 if __name__ == '__main__':
     unittest.main()
