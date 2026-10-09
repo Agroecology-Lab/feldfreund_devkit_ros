@@ -1,4 +1,5 @@
 """Unit tests for the service-backed joystick and topology cards."""
+# pylint: disable=protected-access
 import sys
 import unittest
 from types import SimpleNamespace

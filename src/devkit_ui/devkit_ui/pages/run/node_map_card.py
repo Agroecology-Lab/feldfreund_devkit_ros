@@ -53,8 +53,8 @@ class NodeMapCard(ui.card):
         pose = self._pose_state.robot_pose
 
         # Only rebuild the heavy clickable map when topology, selection, or current node changes
-        # Key includes: node count + node names (as tuple for identity) + selection + current
-        map_key = (len(nodes), tuple(n.name for n in nodes), selected, current)
+        # Key includes: document identity + node count + node names + selection + current
+        map_key = (id(doc), len(nodes), tuple(n.name for n in nodes), selected, current)
         if map_key != self._prev_map_key:
             self._prev_map_key = map_key
             self._map_html.set_content(
@@ -71,7 +71,7 @@ class NodeMapCard(ui.card):
             None if pose is None
             else (round(pose[0], 1), round(pose[1], 1), round(pose[2], 2))
         )
-        robot_key = (len(nodes), robot_pose_key)
+        robot_key = (id(doc), len(nodes), robot_pose_key)
         if robot_key != self._prev_robot_key:
             self._prev_robot_key = robot_key
             self._robot_html.set_content(
