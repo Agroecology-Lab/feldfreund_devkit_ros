@@ -30,7 +30,6 @@ from ament_index_python.packages import (
     PackageNotFoundError,
     get_package_share_directory,
 )
-from geometry_msgs.msg import Twist
 from nav_msgs.msg import Odometry
 from nicegui import app, ui, ui_run
 from nicegui import run as ng_run
@@ -46,8 +45,7 @@ from rclpy.qos import (
 )
 from rclpy.time import Time
 from sensor_msgs.msg import BatteryState, NavSatFix, NavSatStatus
-from std_msgs.msg import Bool, Empty, Float64, String
-from std_srvs.srv import Trigger
+from std_msgs.msg import Bool, Float64, String
 from tf2_ros import (
     ConnectivityException,
     ExtrapolationException,
@@ -70,6 +68,13 @@ from devkit_ui import plan_import
 # MISSION: store owns missions.yaml, scheduling, and run recording.
 from devkit_ui.actions import ACTIONS, action_ros_msgs
 from devkit_ui.application_services.drive_application_service import DriveApplicationService
+from devkit_ui.application_services.robot_brain_application_service import RobotBrainApplicationService
+from devkit_ui.application_services.navigation_application_service import (
+    NavigationApplicationService,
+)
+from devkit_ui.application_services.row_discovery_application_service import (
+    RowDiscoveryApplicationService,
+)
 from devkit_ui.application_services.topology_application_service import (
     TopologyApplicationService,
 )
@@ -84,6 +89,9 @@ from devkit_ui.dem import (
     select_reference_contour_latlon,
 )
 from devkit_ui.domain_services.drive_domain_service import DriveDomainService
+from devkit_ui.domain_services.robot_brain_domain_service import RobotBrainDomainService
+from devkit_ui.domain_services.navigation_domain_service import NavigationDomainService
+from devkit_ui.domain_services.row_discovery_domain_service import RowDiscoveryDomainService
 from devkit_ui.domain_services.topology_domain_service import TopologyDomainService
 from devkit_ui.missions import MissionStore
 from devkit_ui.models import (
@@ -114,18 +122,6 @@ from devkit_ui.ros_gateway import RosGateway
 from devkit_ui.view_models.global_view_model import GlobalViewModel
 from devkit_ui.view_models.run_view_model import RunViewModel
 from devkit_ui.view_models.topology_view_model import TopologyViewModel
-
-try:
-    from topological_navigation_msgs.action import GotoNode
-except ImportError:
-    pass
-
-_ACTION_OK = False
-try:
-    from rclpy.action import ActionClient  # pylint: disable=ungrouped-imports
-    _ACTION_OK = True
-except ImportError:
-    pass
 
 # Field 27's actual GPS extent, derived from maps/recon_logs/recon.csv (the
 # real Agri-Field-Dataset field-27 mesh, Zenodo 7805321 — France, ~372m x
@@ -452,6 +448,9 @@ class NiceGuiNode(Node):
         # Initialize the domain services using the gateway.
         self._drive_domain_service = DriveDomainService(self._ros)
         self._topo_domain_service = TopologyDomainService(self._ros)
+        self._robot_brain_domain_service = RobotBrainDomainService(self._ros)
+        self._row_discovery_domain_service = RowDiscoveryDomainService(self._ros)
+        self._nav_domain_service = NavigationDomainService(self._ros)
 
         # Set up the application service layers on top of domain services.
         self._drive_app_service = DriveApplicationService(
@@ -459,10 +458,15 @@ class NiceGuiNode(Node):
         self._topo_app_service = TopologyApplicationService(
             self._topo_domain_service
         )
+        self._robot_brain_app_service = RobotBrainApplicationService(self._robot_brain_domain_service)
+        self._row_discovery_app_service = RowDiscoveryApplicationService(
+            self._row_discovery_domain_service)
+        self._nav_app_service = NavigationApplicationService(self._nav_domain_service)
 
         # Initialize view models
         self._global_vm = GlobalViewModel(self._drive_app_service)
-        self._run_vm = RunViewModel(self._drive_app_service)
+        self._run_vm = RunViewModel(
+            self._drive_app_service, self._row_discovery_app_service, self._nav_app_service)
         self._topo_vm = TopologyViewModel(self._topo_app_service)
 
         # Initialize with default demo document
@@ -483,14 +487,6 @@ class NiceGuiNode(Node):
         # real-world-elapsed-seconds concept regardless of sim state, so a
         # wall clock is correct for all of it, not just the cold-start case.
         self._wall_clock = Clock(clock_type=ClockType.SYSTEM_TIME)
-
-        self.cmd_vel_publisher       = self.create_publisher(Twist,  'cmd_vel',       1)
-        self.esp_enable_publisher    = self.create_publisher(Empty,  'esp/enable',    1)
-        self.esp_disable_publisher   = self.create_publisher(Empty,  'esp/disable',   1)
-        self.esp_reset_publisher     = self.create_publisher(Empty,  'esp/reset',     1)
-        self.esp_restart_publisher   = self.create_publisher(Empty,  'esp/restart',   1)
-        self.esp_configure_publisher = self.create_publisher(Empty,  'esp/configure', 1)
-        self.estop_publisher         = self.create_publisher(Bool,   'estop/soft',    SAFETY_QOS)
 
         _SENSOR_QOS = QoSProfile(
             depth=1,
@@ -641,22 +637,6 @@ class NiceGuiNode(Node):
         # Per-session, never persisted: each new map starts on geometry-only rows.
         self._row_action: str = ROW_ACTION
 
-        if _ACTION_OK:
-            self._nav_ac = ActionClient(self, GotoNode, 'topological_navigation')
-
-        # Row discovery: idle service clients + live status feed from
-        # row_discovery_node (started alongside limbic_row_follow in
-        # sim_nav.launch.py / row_follow.launch.py). Node may not exist if
-        # the launch file hasn't been updated yet -- wait_for_service in
-        # start_discovery()/stop_discovery() surfaces that as a status
-        # string rather than raising.
-        self._row_discovery_start_cli = self.create_client(
-            Trigger, '/row_discovery_node/start_discovery')
-        self._row_discovery_stop_cli = self.create_client(
-            Trigger, '/row_discovery_node/stop_discovery')
-        self.create_subscription(String, '/row_discovery/status',
-            lambda m: setattr(self._run_vm.discovery, 'status', m.data), _SENSOR_QOS)
-
         self.latest_odom:    Odometry | None     = None
         self.latest_gps:     NavSatFix | None    = None
         self.latest_battery: BatteryState | None = None
@@ -668,9 +648,6 @@ class NiceGuiNode(Node):
         self.estop_back_active          = False
         self.linear_velocity            = 0.0
         self.angular_velocity           = 0.0
-
-        self._nav_goal_handle               = None
-        self._nav_cancel_requested          = False
 
         self._track_timer:   object  | None   = None
         self._track_counter: int              = 0
@@ -792,79 +769,16 @@ class NiceGuiNode(Node):
         Parameters:
             target (str): Name of the topology node to navigate to.
         """
-        if not _ACTION_OK:
-            self._run_vm.topo.nav_status = 'action unavailable (import failed)'
-            return
         if self._run_vm.topo.navigating or self._global_vm.soft_estop_active:
             self.get_logger().warn(
                 'send_nav_goal: rejected — navigation already in progress '
                 'or soft-estop active')
             return
-        self._nav_cancel_requested = False
-        self._run_vm.topo.nav_status = f'connecting → {target}…'
-        self._run_vm.topo.navigating = True
-        def _send():
-            """Send a navigation goal to the action server and update navigation status."""
-            ready = self._nav_ac.wait_for_server(timeout_sec=5.0)
-            if not ready:
-                self._run_vm.topo.nav_status = 'action server not ready (5s timeout)'
-                self._run_vm.topo.navigating = False
-                return
-            goal = GotoNode.Goal()
-            goal.target = target
-            self._run_vm.topo.nav_status = f'→ {target}'
-            future = self._nav_ac.send_goal_async(goal, feedback_callback=self._nav_feedback)
-            future.add_done_callback(self._nav_accepted)
-        threading.Thread(target=_send, daemon=True).start()
-
-    def _nav_accepted(self, future) -> None:
-        """Handle acceptance of a navigation goal and register its result callback.
-
-        If cancellation was requested while the goal was still pending acceptance,
-        cancel this handle immediately instead of letting it run unchecked.
-        """
-        gh = future.result()
-        if not gh.accepted:
-            self._run_vm.topo.nav_status = 'goal rejected'
-            self._run_vm.topo.navigating = False
-            self._nav_cancel_requested = False
-            return
-        self._nav_goal_handle = gh
-        if self._nav_cancel_requested:
-            self._nav_cancel_requested = False
-            self._run_vm.topo.nav_status = 'cancelling…'
-            gh.cancel_goal_async()
-        gh.get_result_async().add_done_callback(self._nav_result)
-
-    def _nav_feedback(self, feedback_msg) -> None:
-        """Update the navigation status with the current feedback location."""
-        fb  = feedback_msg.feedback
-        loc = getattr(fb, 'current_node', None) or getattr(fb, 'status', '…')
-        self._run_vm.topo.nav_status = f'en route · {loc}'
-
-    def _nav_result(self, future) -> None:
-        """Update navigation state after a navigation goal completes."""
-        success = getattr(future.result().result, 'success', True)
-        self._run_vm.topo.nav_status = 'arrived' if success else 'failed'
-        self._run_vm.topo.navigating = False
-        self._nav_goal_handle = None
+        self._run_vm.navigate_to(target)
 
     def cancel_nav_goal(self) -> None:
-        """Cancel the active navigation goal.
-
-        If the goal has already been accepted, cancel it now. If a send is still
-        in flight (accepted status not yet known), flag it so `_nav_accepted`
-        cancels it the moment it arrives, and keep `navigating` set so a second
-        goal cannot be accepted in the meantime.
-        """
-        if self._nav_goal_handle:
-            self._nav_goal_handle.cancel_goal_async()
-            self._nav_goal_handle = None
-            self._run_vm.topo.nav_status = 'cancelled'
-            self._run_vm.topo.navigating = False
-        elif self._run_vm.topo.navigating:
-            self._nav_cancel_requested = True
-            self._run_vm.topo.nav_status = 'cancelling…'
+        """Cancel the active navigation goal."""
+        self._run_vm.cancel_navigation()
 
     # ── node dropping ─────────────────────────────────────────────────────────
 
@@ -1089,49 +1003,12 @@ class NiceGuiNode(Node):
     # ── Row discovery ────────────────────────────────────────────────────────
 
     def start_discovery(self) -> None:
-        """Initiate row discovery through the configured ROS 2 Trigger service.
-
-        Updates the discovery status as the request starts, completes, or fails.
-        """
-        self._run_vm.discovery.status = 'starting…'
-        def _work():
-            """
-            Start row discovery and update its status based on service availability and response.
-            """
-            if not self._row_discovery_start_cli.wait_for_service(timeout_sec=2.0):
-                self._run_vm.discovery.active = False
-                self._run_vm.discovery.status = 'ERROR: row_discovery_node not running'
-                return
-            def _cb(f):
-                try:
-                    res = f.result()
-                    self._run_vm.discovery.active = res.success
-                    self._run_vm.discovery.status = res.message or (
-                        'running' if res.success else 'failed to start')
-                except Exception as e:
-                    self._run_vm.discovery.active = False
-                    self._run_vm.discovery.status = f'ERROR: {e}'
-            self._row_discovery_start_cli.call_async(
-                Trigger.Request()).add_done_callback(_cb)
-        threading.Thread(target=_work, daemon=True).start()
+        """Start row discovery."""
+        self._run_vm.start_discovery()
 
     def stop_discovery(self) -> None:
-        """Stop row discovery and update its status when the request completes."""
-        def _work():
-            def _cb(f):
-                try:
-                    res = f.result()
-                    if res.success:
-                        self._run_vm.discovery.active = False
-                        self._run_vm.discovery.status = res.message or 'stopped'
-                    else:
-                        self._run_vm.discovery.status = res.message or (
-                            'ERROR: stop failed — discovery state unknown')
-                except Exception as e:
-                    self._run_vm.discovery.status = f'ERROR: {e} — discovery state unknown'
-            self._row_discovery_stop_cli.call_async(
-                Trigger.Request()).add_done_callback(_cb)
-        threading.Thread(target=_work, daemon=True).start()
+        """Stop row discovery."""
+        self._run_vm.stop_discovery()
 
     def _persist_and_reload(self, modify_fn: Callable[[TopoDoc], None], status_owner: object,
                              status_attr: str, success_msg: str) -> None:
@@ -2579,7 +2456,7 @@ class NiceGuiNode(Node):
             status_lbl.set_text('ERROR: mission already running')
             status_lbl.style('color:#cf222e')
             return
-        if not _ACTION_OK:
+        if not self._run_vm.navigation_available:
             status_lbl.set_text('ERROR: action client unavailable')
             status_lbl.style('color:#cf222e')
             return
@@ -2687,80 +2564,15 @@ class NiceGuiNode(Node):
         threading.Thread(target=_execute, daemon=True).start()
 
     def _send_goal_sync(self, target: str, timeout_sec: float = 300.0) -> bool:
-        """Synchronously execute navigation to a topological node.
-
-        Parameters:
-            target (str): Name of the destination node.
-            timeout_sec (float): Maximum time to wait for navigation completion.
+        """Navigate to a topology node and block until it ends.
 
         Returns:
-            bool: True if navigation succeeds, False if it fails, is cancelled, times out, or the
-            action server is unavailable.
+            bool: True if the robot arrived, False if navigation failed, was cancelled, timed
+            out, or the action server was unavailable.
         """
-        if not _ACTION_OK:
-            return False
-
-        done_event = threading.Event()
-        result_holder: list = [None]
-
-        if not self._nav_ac.wait_for_server(timeout_sec=10.0):
-            self.get_logger().warn('_send_goal_sync: action server not ready')
-            return False
-
-        goal = GotoNode.Goal()
-        goal.target = target
-        self._run_vm.topo.nav_status = f'→ {target}'
-        self._run_vm.topo.navigating = True
-
-        def _on_accepted(future):
-            """
-            Handle acceptance of a navigation goal and register its result callback.
-
-            Parameters:
-                future: Future containing the navigation goal handle.
-            """
-            gh = future.result()
-            if not gh.accepted:
-                result_holder[0] = False
-                self._run_vm.topo.nav_status = 'goal rejected'
-                self._run_vm.topo.navigating = False
-                done_event.set()
-                return
-            self._nav_goal_handle = gh
-            gh.get_result_async().add_done_callback(_on_result)
-
-        def _on_result(future):
-            """
-            Handle completion of a navigation goal and update its status.
-
-            Parameters:
-                future: Future containing the navigation result.
-            """
-            success = getattr(future.result().result, 'success', True)
-            result_holder[0] = success
-            self._run_vm.topo.nav_status = 'arrived' if success else 'failed'
-            self._run_vm.topo.navigating = False
-            self._nav_goal_handle = None
-            done_event.set()
-
-        self._nav_ac.send_goal_async(
-            goal, feedback_callback=self._nav_feedback
-        ).add_done_callback(_on_accepted)
-
-        deadline = timeout_sec
-        interval = 0.25
-        while not done_event.wait(timeout=interval):
-            deadline -= interval
-            if deadline <= 0:
-                self.get_logger().warn(f'_send_goal_sync: timeout for {target}')
-                self.cancel_nav_goal()
-                return False
-            if self._mission_cancel or self._global_vm.soft_estop_active:
-                self.cancel_nav_goal()
-                done_event.wait(timeout=2.0)
-                return False
-
-        return bool(result_holder[0])
+        return self._run_vm.navigate_and_wait(
+            target, timeout_sec,
+            lambda: self._mission_cancel or self._global_vm.soft_estop_active)
 
     def cancel_mission(self) -> None:
         """Signal the executor thread to stop after the current row."""
@@ -2874,19 +2686,19 @@ class NiceGuiNode(Node):
             ui.label('ESP').classes('font-semibold mb-2')
             with ui.row().classes('gap-2 flex-wrap'):
                 ui.button('Enable',
-                    on_click=lambda: self.esp_enable_publisher.publish(Empty())).props(
+                    on_click=self._robot_brain_app_service.enable).props(
                         'color=positive outline no-caps').classes('px-4')
                 ui.button('Disable',
-                    on_click=lambda: self.esp_disable_publisher.publish(Empty())).props(
+                    on_click=self._robot_brain_app_service.disable).props(
                         'color=negative outline no-caps').classes('px-4')
                 ui.button('Reset',
-                    on_click=lambda: self.esp_reset_publisher.publish(Empty())).props(
+                    on_click=self._robot_brain_app_service.reset).props(
                         'color=warning outline no-caps').classes('px-4')
                 ui.button('Restart',
-                    on_click=lambda: self.esp_restart_publisher.publish(Empty())).props(
+                    on_click=self._robot_brain_app_service.restart).props(
                         'color=primary outline no-caps').classes('px-4')
                 ui.button('Configure',
-                    on_click=lambda: self.esp_configure_publisher.publish(Empty())).props(
+                    on_click=self._robot_brain_app_service.configure).props(
                         'outline no-caps').classes('px-4')
         with ui.card().classes('w-full mt-3'):
             ui.label('GPS').classes('font-semibold mb-2')

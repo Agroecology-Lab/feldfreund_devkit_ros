@@ -33,7 +33,14 @@ class RosGateway:
         return self._node.create_subscription(msg_type, topic, callback, qos)
 
     def create_client(self, srv_type, name: str):
+        """Create a service client on the wrapped node."""
         return self._node.create_client(srv_type, name)
+
+    def create_action_client(self, action_type, name: str):
+        """Create an action client on the wrapped node."""
+        # Imported here so modules that only need topics and services load without rclpy.action.
+        from rclpy.action import ActionClient  # pylint: disable=import-outside-toplevel
+        return ActionClient(self._node, action_type, name)
 
     def get_logger(self):
         """Return the wrapped node's logger."""

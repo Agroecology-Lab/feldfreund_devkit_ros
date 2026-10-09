@@ -32,3 +32,25 @@ class PersistResult:
         if self.kind == 'switch_failed':
             return f'{success_msg} (switch failed: {self.detail})'
         return success_msg
+
+
+@dataclass(frozen=True)
+class DiscoveryResult:
+    """Outcome of a row discovery start or stop request.
+
+    active is None when the request did not change whether discovery is running.
+    """
+    active: bool | None
+    status: str
+
+
+@dataclass(frozen=True)
+class NavUpdate:
+    """Progress of a navigation goal, as reported by the navigation domain service.
+
+    outcome is None while the goal is still in progress, otherwise one of
+    'arrived', 'failed', 'rejected', 'cancelled' or 'unavailable'.
+    """
+    status: str
+    navigating: bool
+    outcome: str | None = None
