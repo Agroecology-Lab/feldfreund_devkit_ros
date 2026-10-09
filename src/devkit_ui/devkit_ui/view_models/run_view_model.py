@@ -1,7 +1,6 @@
 from dataclasses import dataclass
 
 from devkit_ui.constants import ROW_ACTION
-from devkit_ui.facades.drive_facade import DriveFacade
 
 
 class RunViewModel:
@@ -45,7 +44,7 @@ class RunViewModel:
         active: bool = False
         status: str = 'idle'
 
-    def __init__(self, drive_facade: DriveFacade) -> None:
+    def __init__(self) -> None:
         """Initialize the run screen state with default values for each view-model component."""
         self.joystick = self.Joystick()
         self.node_map = self.NodeMap()
@@ -53,23 +52,3 @@ class RunViewModel:
         self.drop_node = self.DropNode()
         self.topo = self.Topo()
         self.discovery = self.Discovery()
-
-        self._drive_facade = drive_facade
-
-    def move_joystick(self, x: float, y: float) -> None:
-        self._drive_facade.move_joystick(x, y)
-
-    def stop_joystick(self) -> None:
-        self.move_joystick(0.0, 0.0)
-
-    def update_pose_label(self, odom, gps) -> None:
-        """Refresh the joystick pose label from latest odometry/GPS."""
-        if odom is not None:
-            px = odom.pose.pose.position.x
-            py = odom.pose.pose.position.y
-            gps_str = ''
-            if gps is not None and gps.status.status >= 0:
-                gps_str = f'\n{gps.latitude:.5f}\n{gps.longitude:.5f}'
-            self.joystick.pose_lbl = f'({px:.2f}, {py:.2f}){gps_str}'
-        else:
-            self.joystick.pose_lbl = 'no odom'
