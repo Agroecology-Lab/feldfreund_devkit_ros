@@ -72,6 +72,7 @@ from devkit_ui import plan_import
 
 # MISSION: store owns missions.yaml, scheduling, and run recording.
 from devkit_ui.actions import ACTIONS, action_ros_msgs
+from devkit_ui.application_services.drive_application_service import DriveApplicationService
 from devkit_ui.constants import NAV_ACTION, NODE_NAME, ROW_ACTION, VISION_ROW_ACTION
 
 # CONTOUR: terrain-aware reference line, from recon-logged elevation data.
@@ -82,7 +83,7 @@ from devkit_ui.dem import (
     load_recon_points,
     select_reference_contour_latlon,
 )
-from devkit_ui.facades.drive_facade import DriveFacade
+from devkit_ui.domain_services.drive_domain_service import DriveDomainService
 from devkit_ui.missions import MissionStore
 from devkit_ui.models import (
     NodeID,
@@ -110,7 +111,6 @@ from devkit_ui.pages.run.row_discovery_card import RowDiscoveryCard
 from devkit_ui.pages.run.track_card import TrackCard
 from devkit_ui.parse import dump_topo_yaml, parse_topo_json, parse_topo_yaml
 from devkit_ui.ros_gateway import RosGateway
-from devkit_ui.services.drive_service import DriveService
 from devkit_ui.topo_defaults import default_actions, default_definitions
 from devkit_ui.utils.topo_renderer import build_robot_svg, build_svg, inject_click_js
 from devkit_ui.view_models.global_view_model import GlobalViewModel
@@ -482,14 +482,15 @@ class NiceGuiNode(Node):
         # Instantiate the temporary ROS gateway bridge to abstract underlying ROS nodes
         self._ros = RosGateway(self)
 
-        # Initialize the services using the gateway
-        self._drive_service = DriveService(self._ros)
+        # Initialize the domain services using the gateway.
+        self._drive_domain_service = DriveDomainService(self._ros)
 
-        # Set up the application facade layers on top of services
-        self._drive_facade = DriveFacade(self._drive_service)
+        # Set up the application service layers on top of domain services.
+        self._drive_app_service = DriveApplicationService(
+            self._drive_domain_service)
 
-        self._global_vm = GlobalViewModel(self._drive_facade)
-        self._run_vm = RunViewModel(self._drive_facade)
+        self._global_vm = GlobalViewModel(self._drive_app_service)
+        self._run_vm = RunViewModel(self._drive_app_service)
 
         # Dedicated wall clock for the real/fake-GPS freshness bookkeeping
         # below (store_gps, store_fake_gps, _publish_fake_gps,

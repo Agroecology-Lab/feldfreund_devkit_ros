@@ -6,7 +6,7 @@ from std_msgs.msg import Bool
 from devkit_ui.ros_gateway import RosGateway
 
 
-class DriveService:
+class DriveDomainService:
     """Publish cmd_vel and soft estop."""
 
     def __init__(self, ros: RosGateway) -> None:

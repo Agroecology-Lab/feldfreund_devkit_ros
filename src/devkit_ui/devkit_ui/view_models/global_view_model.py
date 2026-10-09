@@ -1,12 +1,12 @@
-from devkit_ui.facades.drive_facade import DriveFacade
+from devkit_ui.application_services.drive_application_service import DriveApplicationService
 
 
 class GlobalViewModel:
-    def __init__(self, drive_facade: DriveFacade) -> None:
+    def __init__(self, drive_app_service: DriveApplicationService) -> None:
         """Initialize the view model with the soft emergency stop inactive."""
         self.soft_estop_active: bool = False
-        self._drive_facade = drive_facade
+        self._drive_app_service = drive_app_service
 
     def toggle_estop(self) -> None:
-        self.soft_estop_active = self._drive_facade.toggle_estop(
+        self.soft_estop_active = self._drive_app_service.toggle_estop(
             self.soft_estop_active)
