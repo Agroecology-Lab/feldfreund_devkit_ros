@@ -218,7 +218,6 @@ with patch.dict(sys.modules, {'nicegui': nicegui}):
     from devkit_ui.pages.run.row_discovery_card import RowDiscoveryCard
     from devkit_ui.view_models.global_view_model import GlobalViewModel
     from devkit_ui.view_models.run_view_model import RunViewModel
-    from devkit_ui.view_models.topology_view_model import TopologyViewModel
 
 
 geometry_msgs = ModuleType('geometry_msgs')
@@ -255,31 +254,31 @@ class Node:
 class TestRunViewModel(unittest.TestCase):
     def test_row_mode_starts_with_geometry_for_each_session(self) -> None:
         """Verify each new session selects geometry mode independently of earlier sessions."""
-        first = RunViewModel(Mock())
+        first = RunViewModel()
         self.assertEqual(first.drop_node.row_action, ROW_ACTION)
         first.drop_node.row_action = VISION_ROW_ACTION
-        self.assertEqual(RunViewModel(Mock()).drop_node.row_action, ROW_ACTION)
+        self.assertEqual(RunViewModel().drop_node.row_action, ROW_ACTION)
 
     def test_defaults_match_idle_run_state(self) -> None:
-        state = RunViewModel(Mock())
+        state = RunViewModel()
 
         self.assertEqual(state.joystick.pose_lbl, 'no odom')
-        self.assertIsNone(state.node_map.robot_pose)
+        self.assertEqual((state.node_map.map_svg, state.node_map.robot_svg), ('', ''))
         self.assertEqual(
             (state.track.interval, state.track.row_role, state.track.running),
             (5.0, 'entry', False),
         )
-        self.assertEqual(state.topo.nav_status, 'idle')
+        self.assertEqual((state.topo.current_node, state.topo.nav_status), ('—', 'idle'))
         self.assertEqual((state.discovery.active, state.discovery.status), (False, 'idle'))
 
     def test_instances_do_not_share_nested_state(self) -> None:
-        first = RunViewModel(Mock())
-        second = RunViewModel(Mock())
+        first = RunViewModel()
+        second = RunViewModel()
 
-        first.topo.navigating = True
+        first.topo.selected_node = 'ROW_1'
         first.discovery.active = True
 
-        self.assertFalse(second.topo.navigating)
+        self.assertIsNone(second.topo.selected_node)
         self.assertFalse(second.discovery.active)
 
 
@@ -287,7 +286,7 @@ class TestDropNodeCard(unittest.TestCase):
     def setUp(self) -> None:
         fake_ui.reset()
         self.state = RunViewModel.DropNode()
-        self.topo = TopologyViewModel(Mock())
+        self.topo = RunViewModel.Topo()
         self.on_drop = Mock()
         self.card = DropNodeCard(self.state, self.topo, self.on_drop)
 
@@ -376,9 +375,8 @@ class TestDropNodeCard(unittest.TestCase):
 class TestNavigationSidebar(unittest.TestCase):
     def setUp(self) -> None:
         fake_ui.reset()
-        self.global_state = GlobalViewModel(Mock())
-        self.topo = TopologyViewModel(Mock())
-        self.nav_state = RunViewModel.Topo()
+        self.global_state = GlobalViewModel()
+        self.topo = RunViewModel.Topo()
         self.on_go = Mock()
         self.on_cancel = Mock()
         self.on_delete = Mock()
@@ -386,7 +384,6 @@ class TestNavigationSidebar(unittest.TestCase):
         self.sidebar = NavigationSidebar(
             self.global_state,
             self.topo,
-            self.nav_state,
             self.on_go,
             self.on_cancel,
             self.on_delete,
@@ -406,11 +403,11 @@ class TestNavigationSidebar(unittest.TestCase):
         self.assertTrue(go.refresh_binding())
         self.assertTrue(delete.refresh_binding())
 
-        self.nav_state.navigating = True
+        self.topo.navigating = True
         self.assertFalse(go.refresh_binding())
         self.assertTrue(cancel.refresh_binding())
 
-        self.nav_state.navigating = False
+        self.topo.navigating = False
         self.global_state.soft_estop_active = True
         self.assertFalse(go.refresh_binding())
 
@@ -420,7 +417,7 @@ class TestNavigationSidebar(unittest.TestCase):
             ('failed', '#cf222e'),
             ('connecting', '#57606a'),
         ):
-            self.nav_state.nav_status = status
+            self.topo.nav_status = status
             self.sidebar.nav_status.refresh_binding()
             self.assertIn(color, self.sidebar.nav_status.styles[-1])
 
@@ -429,7 +426,7 @@ class TestNavigationSidebar(unittest.TestCase):
             ('ERROR: not found', '#cf222e'),
             ('', '#57606a'),
         ):
-            self.nav_state.delete_status = status
+            self.topo.delete_status = status
             self.sidebar.delete_status.refresh_binding()
             self.assertIn(color, self.sidebar.delete_status.styles[-1])
 

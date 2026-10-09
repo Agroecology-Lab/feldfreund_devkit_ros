@@ -5,6 +5,7 @@ ui_node.py — Sowbot web cockpit on :80
 
 import copy
 import io
+import json
 import math
 import os
 import re
@@ -41,6 +42,7 @@ from rclpy.node import Node
 from rclpy.qos import (
     DurabilityPolicy,
     Duration,
+    HistoryPolicy,
     LivelinessPolicy,
     QoSProfile,
     ReliabilityPolicy,
@@ -71,9 +73,6 @@ from devkit_ui import plan_import
 # MISSION: store owns missions.yaml, scheduling, and run recording.
 from devkit_ui.actions import ACTIONS, action_ros_msgs
 from devkit_ui.application_services.drive_application_service import DriveApplicationService
-from devkit_ui.application_services.topology_application_service import (
-    TopologyApplicationService,
-)
 from devkit_ui.constants import NAV_ACTION, NODE_NAME, ROW_ACTION, VISION_ROW_ACTION
 
 # CONTOUR: terrain-aware reference line, from recon-logged elevation data.
@@ -85,7 +84,6 @@ from devkit_ui.dem import (
     select_reference_contour_latlon,
 )
 from devkit_ui.domain_services.drive_domain_service import DriveDomainService
-from devkit_ui.domain_services.topology_domain_service import TopologyDomainService
 from devkit_ui.missions import MissionStore
 from devkit_ui.models import (
     NodeID,
@@ -111,12 +109,12 @@ from devkit_ui.pages.run.navigation_sidebar import NavigationSidebar
 from devkit_ui.pages.run.node_map_card import NodeMapCard
 from devkit_ui.pages.run.row_discovery_card import RowDiscoveryCard
 from devkit_ui.pages.run.track_card import TrackCard
-from devkit_ui.parse import dump_topo_yaml, parse_topo_yaml
+from devkit_ui.parse import dump_topo_yaml, parse_topo_json, parse_topo_yaml
 from devkit_ui.ros_gateway import RosGateway
 from devkit_ui.topo_defaults import default_actions, default_definitions
+from devkit_ui.utils.topo_renderer import build_robot_svg, build_svg, inject_click_js
 from devkit_ui.view_models.global_view_model import GlobalViewModel
 from devkit_ui.view_models.run_view_model import RunViewModel
-from devkit_ui.view_models.topology_view_model import TopologyViewModel
 
 _TOPO_SRV_OK = False
 try:
@@ -157,6 +155,13 @@ SAFETY_QOS = QoSProfile(
     liveliness_lease_duration=Duration(seconds=1),
 )
 
+TMAP_QOS = QoSProfile(
+    depth=1,
+    reliability=ReliabilityPolicy.RELIABLE,
+    durability=DurabilityPolicy.TRANSIENT_LOCAL,
+    history=HistoryPolicy.KEEP_LAST,
+)
+
 # CONTOUR: spacing for intermediate topo nodes dropped along curved rows
 # (see save_f2c_rows_to_topo()'s WAYPOINTS block and _resample_row_xy()
 # below) — a single entry->exit edge gives limbic_row_follow nothing to
@@ -177,6 +182,12 @@ SAFETY_QOS = QoSProfile(
 # shortening this interval — a denser waypoint chain along the same
 # under-resolved chord doesn't add information the chord doesn't have.
 _CONTOUR_WAYPOINT_INTERVAL_M = 2.5
+
+
+def _topo_to_msg(doc: TopoDoc) -> String:
+    msg = String()
+    msg.data = json.dumps(doc.to_dict(), ensure_ascii=False)
+    return msg
 
 
 def _resample_row_xy(points_ll: list, anchor_lat: float, anchor_lon: float,
@@ -384,6 +395,22 @@ def _shutdown_tools() -> None:
 
 app.on_shutdown(_shutdown_tools)
 
+# ── map parser ────────────────────────────────────────────────────────────────
+
+def _demo_doc() -> TopoDoc:
+    return TopoDoc(
+        name='mixed_test_map',
+        nodes=[
+            TopoNode(name='N1', pose=TopoPose(x=0.0, y=0.0), edges=['N2'], meta={}),
+            TopoNode(name='N2', pose=TopoPose(x=3.0, y=0.0), edges=['N1', 'N3'], meta={}),
+            TopoNode(name='N3', pose=TopoPose(x=6.0, y=0.0), edges=['N2', 'N4'], meta={}),
+            TopoNode(name='N4', pose=TopoPose(x=9.0, y=0.0), edges=['N3', 'N5'], meta={}),
+            TopoNode(name='N5', pose=TopoPose(x=12.0, y=0.0), edges=['N4', 'N6'], meta={}),
+            TopoNode(name='N6', pose=TopoPose(x=15.0, y=0.0), edges=['N5'], meta={}),
+        ],
+    )
+
+
 # ── SVG renderer ──────────────────────────────────────────────────────────────
 
 _TF_STALENESS_LIMIT = 2.0  # s — map->base_link older than this: don't draw it
@@ -457,22 +484,13 @@ class NiceGuiNode(Node):
 
         # Initialize the domain services using the gateway.
         self._drive_domain_service = DriveDomainService(self._ros)
-        self._topo_domain_service = TopologyDomainService(self._ros)
 
         # Set up the application service layers on top of domain services.
         self._drive_app_service = DriveApplicationService(
             self._drive_domain_service)
-        self._topo_app_service = TopologyApplicationService(
-            self._topo_domain_service
-        )
 
-        # Initialize view models
         self._global_vm = GlobalViewModel(self._drive_app_service)
         self._run_vm = RunViewModel(self._drive_app_service)
-        self._topo_vm = TopologyViewModel(self._topo_app_service)
-
-        # Initialize with default demo document
-        self._topo_app_service.initialize_with_default()
 
         # Dedicated wall clock for the real/fake-GPS freshness bookkeeping
         # below (store_gps, store_fake_gps, _publish_fake_gps,
@@ -640,12 +658,16 @@ class NiceGuiNode(Node):
         self.create_subscription(
             String,
             '/current_node',
-            lambda m: self._topo_vm.set_current_node(m.data),
+            lambda m: setattr(self._run_vm.topo, 'current_node', m.data),
             _SENSOR_QOS,
         )
 
         # Per-session, never persisted: each new map starts on geometry-only rows.
         self._row_action: str = ROW_ACTION
+        self._topo_doc:  TopoDoc | None = _demo_doc()
+        self._topo_demo: bool           = False
+        self.create_subscription(String, '/topological_map_2', self._on_topo_map, TMAP_QOS)
+        self._topo_map_pub = self.create_publisher(String, '/topological_map_2', TMAP_QOS)
 
         if _TOPO_SRV_OK:
             self._write_map_cli  = self.create_client(WriteTopologicalMap,
@@ -720,23 +742,15 @@ class NiceGuiNode(Node):
 
         self._pose_fail_log_t = 0.0
 
+        self._run_vm.node_map.map_svg = build_svg(self._topo_doc, None, None)
+        self._run_vm.node_map.robot_svg = build_robot_svg(self._topo_doc.nodes, None)
+
         @ui.page('/')
         def page():
             """
             Builds the NiceGUI application content.
             """
             self.content()
-
-    # ── Topology document property (bridge to view model) ──────────────────
-    # All existing code references self._topo_doc; this property transparently
-    # gets the mirrored doc from the view model, which is kept in sync with
-    # the domain service via the callback. Allows gradual refactoring without
-    # changing all call sites at once.
-
-    @property
-    def _topo_doc(self) -> TopoDoc | None:
-        """Get the current topology document (view model's mirror of domain)."""
-        return self._topo_vm.topo_doc
 
     # ── odom fallback ─────────────────────────────────────────────────────────
 
@@ -795,6 +809,15 @@ class NiceGuiNode(Node):
         yaw = math.atan2(2 * (q.w * q.z + q.x * q.y),
                          1 - 2 * (q.y * q.y + q.z * q.z))
         return (p.x, p.y, yaw)
+
+    # ── map callback ──────────────────────────────────────────────────────────
+
+    def _on_topo_map(self, msg: String) -> None:
+        try:
+            self._topo_doc = parse_topo_json(msg.data)
+            self._topo_demo  = False
+        except Exception as e:
+            self.get_logger().warn(f'Failed to parse /topological_map_2: {e}')
 
     # ── nav actions ───────────────────────────────────────────────────────────
 
@@ -919,12 +942,12 @@ class NiceGuiNode(Node):
 
         x = round(self.latest_odom.pose.pose.position.x, 3) if self.latest_odom else 0.0
         y = round(self.latest_odom.pose.pose.position.y, 3) if self.latest_odom else 0.0
-        current_node = self._topo_vm.current_node
+        current_node = self._run_vm.topo.current_node
         connect_to = (current_node
                       if current_node not in ('—', 'none', 'None', '', None) else None)
         if connect_to and not self._topo_doc.has_node(connect_to):
             connect_to = None
-        selected_node = self._topo_vm.selected_node
+        selected_node = self._run_vm.topo.selected_node
         if not connect_to and selected_node and self._topo_doc.has_node(selected_node):
             connect_to = selected_node
         map_name  = self._topo_doc.name
@@ -1019,7 +1042,8 @@ class NiceGuiNode(Node):
                 })
                 file_doc.insert_node(saved_node)
                 dump_topo_yaml(file_doc, map_file)
-                self._topo_app_service.set_doc(file_doc)
+
+                self._topo_doc = file_doc
 
                 self._run_vm.drop_node.status = (
                     f'{name}{conn_str} at ({x}, {y})'
@@ -1047,13 +1071,13 @@ class NiceGuiNode(Node):
                             f'{row_str}{gps_str} — live'
                         )
                     else:
-                        self._topo_app_service.publish()
+                        self._topo_map_pub.publish(_topo_to_msg(self._topo_doc))
                         err = sr.message if sr else 'timeout'
                         self._run_vm.drop_node.status = (
                             f'{name}{conn_str} saved (switch failed: {err})')
                         self.get_logger().warn(f'switch_topological_map failed ({err})')
                 else:
-                    self._topo_app_service.publish()
+                    self._topo_map_pub.publish(_topo_to_msg(self._topo_doc))
                     self._run_vm.drop_node.status = (
                         f'{name}{conn_str} at ({x},{y})'
                         f'{row_str}{gps_str} — live (no srv)'
@@ -1239,7 +1263,7 @@ class NiceGuiNode(Node):
                 file_doc.ensure_meta(map_name)
 
                 dump_topo_yaml(file_doc, map_file)
-                self._topo_app_service.set_doc(file_doc)
+                self._topo_doc = file_doc
 
                 def _call(client, req, timeout=5.0):
                     ev = threading.Event()
@@ -1259,12 +1283,12 @@ class NiceGuiNode(Node):
                     if sr and sr.success:
                         setattr(status_owner, status_attr, f'{success_msg} — live')
                     else:
-                        self._topo_app_service.publish()
+                        self._topo_map_pub.publish(_topo_to_msg(self._topo_doc))
                         err = sr.message if sr else 'timeout'
                         setattr(status_owner, status_attr,
                                 f'{success_msg} (switch failed: {err})')
                 else:
-                    self._topo_app_service.publish()
+                    self._topo_map_pub.publish(_topo_to_msg(self._topo_doc))
                     setattr(status_owner, status_attr, f'{success_msg} — live (no srv)')
                 self.get_logger().info(f'_persist_and_reload: {success_msg}')
             except Exception as e:
@@ -1382,13 +1406,13 @@ class NiceGuiNode(Node):
         nav_frame = self._topo_doc.transformation.get('topo_frame_id') or 'map'
         timestamp = datetime.now(UTC).strftime('%d-%m-%Y_%H-%M-%S')
 
-        current_node = self._topo_vm.current_node
+        current_node = self._run_vm.topo.current_node
         connect_to = (current_node
                       if current_node not in ('—', 'none', 'None', '', None)
                       else None)
         if connect_to and not self._topo_doc.has_node(connect_to):
             connect_to = None
-        selected_node = self._topo_vm.selected_node
+        selected_node = self._run_vm.topo.selected_node
         if not connect_to and selected_node and self._topo_doc.has_node(selected_node):
             connect_to = selected_node
 
@@ -1732,8 +1756,8 @@ class NiceGuiNode(Node):
             self._run_vm.topo.delete_status = f'ERROR: {name!r} not in map'
             return
 
-        if self._topo_vm.selected_node == name:
-            self._topo_vm.set_selected_node(None)
+        if self._run_vm.topo.selected_node == name:
+            self._run_vm.topo.selected_node = None
         self._run_vm.topo.delete_status = f'deleting {name}…'
 
         def _modify(file_doc):
@@ -1765,8 +1789,8 @@ class NiceGuiNode(Node):
             self._run_vm.topo.delete_status = 'ERROR: map not loaded'
             return
 
-        if self._topo_vm.selected_node in targets:
-            self._topo_vm.set_selected_node(None)
+        if self._run_vm.topo.selected_node in targets:
+            self._run_vm.topo.selected_node = None
         self._run_vm.topo.delete_status = f'deleting row {row_id} ({len(targets)} nodes)…'
 
         def _modify(file_doc):
@@ -1882,8 +1906,7 @@ class NiceGuiNode(Node):
                     )
 
                     NodeMapCard(
-                        topo_vm=self._topo_vm,
-                        pose_state=self._run_vm.node_map,
+                        state=self._run_vm.node_map,
                     )
 
                 with ui.row().classes('w-full gap-3 items-start'):
@@ -1896,7 +1919,7 @@ class NiceGuiNode(Node):
 
                     DropNodeCard(
                         state=self._run_vm.drop_node,
-                        topo_vm=self._topo_vm,
+                        topo_state=self._run_vm.topo,
                         on_drop=self.drop_topo_node,
                         on_row_action=self.set_row_action,
                     )
@@ -1912,21 +1935,20 @@ class NiceGuiNode(Node):
 
             navigation_sidebar = NavigationSidebar(
                 global_store=self._global_vm,
-                topo_vm=self._topo_vm,
-                nav_state=self._run_vm.topo,
+                topo_state=self._run_vm.topo,
                 on_go=lambda:
-                    self.send_nav_goal(self._topo_vm.selected_node)
-                    if self._topo_vm.selected_node else None,
+                    self.send_nav_goal(self._run_vm.topo.selected_node)
+                    if self._run_vm.topo.selected_node else None,
                 on_cancel=self.cancel_nav_goal,
-                on_delete=lambda: self.confirm_delete_node(self._topo_vm.selected_node),
-                on_select=lambda name: self._topo_vm.set_selected_node(name),
+                on_delete=lambda: self.confirm_delete_node(self._run_vm.topo.selected_node),
+                on_select=lambda name: setattr(self._run_vm.topo, 'selected_node', name),
             )
 
         def on_node_clicked(e) -> None:
             """Selects the clicked topology node when it exists in the current map."""
             n = (e.args or {}).get('node')
             if n and self._topo_doc and self._topo_doc.has_node(n):
-                self._topo_vm.set_selected_node(n)
+                self._run_vm.topo.selected_node = n
         ui.on('topo_node_clicked', on_node_clicked)
 
         _prev: dict = {}
@@ -1945,15 +1967,13 @@ class NiceGuiNode(Node):
             if topo_doc is None:
                 return
 
-            current_node = self._topo_vm.current_node
+            current_node = self._run_vm.topo.current_node
 
             rp = self._robot_pose()
             rp_key = None if rp is None else (round(rp[0], 1), round(rp[1], 1),
                                             round(rp[2], 2))
-            self._run_vm.node_map.robot_pose = rp
-
             snap = {
-                'sel': self._topo_vm.selected_node,
+                'sel': self._run_vm.topo.selected_node,
                 'cur': current_node,
                 'stat': self._run_vm.topo.nav_status,
                 'nav': self._run_vm.topo.navigating,
@@ -1966,13 +1986,25 @@ class NiceGuiNode(Node):
                 return
             _prev.update(snap)
 
+            if changed & {'robot', 'nodes'}:
+                self._run_vm.node_map.robot_svg = build_robot_svg(topo_doc.nodes, rp)
+
+            if changed & {'sel', 'cur', 'nodes'}:
+                self._run_vm.node_map.map_svg = build_svg(
+                    topo_doc,
+                    self._run_vm.topo.selected_node,
+                    current_node,
+                )
+                inject_click_js()
+
             if changed & {'sel', 'nodes'}:
                 navigation_sidebar.render_nodes(
                     topo_doc.nodes,
-                    self._topo_vm.selected_node,
+                    self._run_vm.topo.selected_node,
                 )
 
         ui.timer(0.2, refresh_nav)
+        inject_click_js()
 
     # ── Mission tab ───────────────────────────────────────────────────────────
 
@@ -2294,8 +2326,8 @@ class NiceGuiNode(Node):
             topo_doc = self._topo_doc
             if topo_doc is None:
                 return
-            cur = self._topo_vm.current_node
-            selected = self._topo_vm.selected_node
+            cur = self._run_vm.topo.current_node
+            selected = self._run_vm.topo.selected_node
             default_base = ''
             if cur not in ('—', 'none', 'None', '', None) and topo_doc.has_node(cur):
                 default_base = cur
@@ -2997,14 +3029,13 @@ class NiceGuiNode(Node):
             empty_doc.seed_actions(default_actions(), default_definitions())
 
             dump_topo_yaml(empty_doc, map_file)
+            self._topo_doc = empty_doc
             self._row_action = ROW_ACTION
             self._run_vm.drop_node.row_action = ROW_ACTION
 
-            # Replace the document and republish so the topo nav stack sees the cleared map
-            # immediately.
-            self._topo_app_service.set_doc(empty_doc)
+            # Republish so topo nav stack sees the cleared map immediately
             try:
-                self._topo_app_service.publish()
+                self._topo_map_pub.publish(_topo_to_msg(empty_doc))
             except Exception:
                 pass
 

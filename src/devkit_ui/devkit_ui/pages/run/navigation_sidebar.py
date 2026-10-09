@@ -4,14 +4,12 @@ from nicegui import ui
 
 from devkit_ui.view_models.global_view_model import GlobalViewModel
 from devkit_ui.view_models.run_view_model import RunViewModel
-from devkit_ui.view_models.topology_view_model import TopologyViewModel
 
 
 class NavigationSidebar(ui.card):
     def __init__(self,
                  global_store: GlobalViewModel,
-                 topo_vm: TopologyViewModel,
-                 nav_state: RunViewModel.Topo,
+                 topo_state: RunViewModel.Topo,
                  on_go: Callable[[], None],
                  on_cancel: Callable[[], None],
                  on_delete: Callable[[], Awaitable[None] | None],
@@ -22,8 +20,8 @@ class NavigationSidebar(ui.card):
                  Parameters:
                      global_store (GlobalViewModel): Global application state used for
                      emergency-stop handling.
-                     topo_vm (TopologyViewModel): Topology selection and current-node state.
-                     nav_state (RunViewModel.Topo): Run-tab navigation status state.
+                     topo_state (RunViewModel.Topo): Run state containing node selection and
+                     navigation statuses.
                      on_go (Callable[[], None]): Callback invoked to start navigation.
                      on_cancel (Callable[[], None]): Callback invoked to cancel navigation.
                      on_delete (Callable[[], Awaitable[None] | None]): Callback invoked to delete
@@ -41,7 +39,7 @@ class NavigationSidebar(ui.card):
             # Current Node
             ui.label('Current node').classes('sec-label')
             ui.label('').classes('text-sm font-mono font-bold').bind_text_from(
-                topo_vm,
+                topo_state,
                 'current_node',
                 backward=lambda current: current or '—'
             )
@@ -68,7 +66,7 @@ class NavigationSidebar(ui.card):
                 return selected or '—'
 
             self.selected.bind_text_from(
-                topo_vm, 'selected_node', backward=sync_selected
+                topo_state, 'selected_node', backward=sync_selected
             )
 
             # Navigation Status
@@ -94,7 +92,7 @@ class NavigationSidebar(ui.card):
                 return status
 
             self.nav_status.bind_text_from(
-                nav_state, 'nav_status', backward=sync_status
+                topo_state, 'nav_status', backward=sync_status
             )
 
             ui.separator().classes('my-2')
@@ -103,11 +101,11 @@ class NavigationSidebar(ui.card):
             ui.button(
                 'Go', on_click=on_go, color='positive'
             ).classes('w-full').props('no-caps').bind_enabled_from(
-                topo_vm,
+                topo_state,
                 'selected_node',
                 backward=lambda selected: (
                     bool(selected)
-                    and not nav_state.navigating
+                    and not topo_state.navigating
                     and not global_store.soft_estop_active
                 )
             )
@@ -116,7 +114,7 @@ class NavigationSidebar(ui.card):
             ui.button(
                 'Cancel', on_click=on_cancel, color='negative'
             ).classes('w-full').props('no-caps flat').bind_enabled_from(
-                nav_state,
+                topo_state,
                 'navigating'
             )
 
@@ -124,7 +122,7 @@ class NavigationSidebar(ui.card):
             ui.button(
                 'Delete Node', on_click=on_delete, color='negative'
             ).classes('w-full').props('no-caps outline').bind_enabled_from(
-                topo_vm,
+                topo_state,
                 'selected_node',
                 backward=bool
             )
@@ -152,7 +150,7 @@ class NavigationSidebar(ui.card):
                 return status
 
             self.delete_status.bind_text_from(
-                nav_state, 'delete_status', backward=sync_delete_status
+                topo_state, 'delete_status', backward=sync_delete_status
             )
 
             # Nodes list
