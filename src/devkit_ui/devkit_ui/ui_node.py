@@ -82,6 +82,7 @@ from devkit_ui.dem import (
     load_recon_points,
     select_reference_contour_latlon,
 )
+from devkit_ui.facades.drive_facade import DriveFacade
 from devkit_ui.missions import MissionStore
 from devkit_ui.models import (
     NodeID,
@@ -108,6 +109,8 @@ from devkit_ui.pages.run.node_map_card import NodeMapCard
 from devkit_ui.pages.run.row_discovery_card import RowDiscoveryCard
 from devkit_ui.pages.run.track_card import TrackCard
 from devkit_ui.parse import dump_topo_yaml, parse_topo_json, parse_topo_yaml
+from devkit_ui.ros_gateway import RosGateway
+from devkit_ui.services.drive_service import DriveService
 from devkit_ui.topo_defaults import default_actions, default_definitions
 from devkit_ui.utils.topo_renderer import build_robot_svg, build_svg, inject_click_js
 from devkit_ui.view_models.global_view_model import GlobalViewModel
@@ -476,8 +479,17 @@ class NiceGuiNode(Node):
         """
         super().__init__(NODE_NAME)
 
-        self._global_vm = GlobalViewModel()
-        self._run_vm = RunViewModel()
+        # Instantiate the temporary ROS gateway bridge to abstract underlying ROS nodes
+        self._ros = RosGateway(self)
+
+        # Initialize the services using the gateway
+        self._drive_service = DriveService(self._ros)
+
+        # Set up the application facade layers on top of services
+        self._drive_facade = DriveFacade(self._drive_service)
+
+        self._global_vm = GlobalViewModel(self._drive_facade)
+        self._run_vm = RunViewModel(self._drive_facade)
 
         # Dedicated wall clock for the real/fake-GPS freshness bookkeeping
         # below (store_gps, store_fake_gps, _publish_fake_gps,
@@ -1888,11 +1900,8 @@ class NiceGuiNode(Node):
                 with ui.row().classes('w-full gap-3 items-stretch'):
 
                     JoystickControlCard(
-                        global_store=self._global_vm,
-                        state=self._run_vm.joystick,
-                        on_move=self.send_speed,
-                        on_stop=lambda: self.send_speed(0.0, 0.0),
-                        on_estop=self.toggle_estop
+                        global_vm=self._global_vm,
+                        run_vm=self._run_vm,
                     )
 
                     NodeMapCard(
@@ -1947,15 +1956,11 @@ class NiceGuiNode(Node):
             """
             Refresh the navigation view with the latest robot pose, topology, and navigation state.
             """
-            odom = self.latest_odom
-            gps  = self.latest_gps
-            if odom is not None:
-                px, py  = odom.pose.pose.position.x, odom.pose.pose.position.y
-                gps_str = (f'\n{gps.latitude:.5f}\n{gps.longitude:.5f}'
-                        if gps and gps.status.status >= 0 else '')
-                self._run_vm.joystick.pose_lbl = f'({px:.2f}, {py:.2f}){gps_str}'
-            else:
-                self._run_vm.joystick.pose_lbl = 'no odom'
+            self._run_vm.update_pose_label(self.latest_odom, self.latest_gps)
+
+            if self.latest_odom is not None:
+                self.linear_velocity = self.latest_odom.twist.twist.linear.x
+                self.angular_velocity = self.latest_odom.twist.twist.angular.z
 
             topo_doc = self._topo_doc
             if topo_doc is None:
@@ -3052,11 +3057,11 @@ class NiceGuiNode(Node):
                 ui.label('Telemetry').classes('font-semibold mb-2')
                 ui.html('<div class="sec-label">Linear velocity</div>')
                 ui.slider(min=-1, max=1, step=0.05, value=0).props(
-                    'readonly selection-color=transparent color=green').bind_value(
+                    'readonly selection-color=transparent color=green').bind_value_from(
                         self, 'linear_velocity')
                 ui.html('<div class="sec-label mt-2">Angular velocity</div>')
                 ui.slider(min=-1, max=1, step=0.05, value=0).props(
-                    'readonly selection-color=transparent color=green').bind_value(
+                    'readonly selection-color=transparent color=green').bind_value_from(
                         self, 'angular_velocity')
                 ui.html('<div class="sec-label mt-3">Battery</div>')
                 ui.label().classes('text-sm').bind_text_from(self, 'latest_battery',
@@ -4085,25 +4090,17 @@ class NiceGuiNode(Node):
         """
         Toggle the soft emergency-stop state and publish the updated value.
         """
-        self._global_vm.soft_estop_active = not self._global_vm.soft_estop_active
-        msg = Bool()
-        msg.data = self._global_vm.soft_estop_active
-        self.estop_publisher.publish(msg)
+        self._global_vm.toggle_estop()
 
     def send_speed(self, x: float, y: float) -> None:
         """
-        Publish a velocity command and update the stored velocity values.
+        Publish a velocity command.
 
         Parameters:
             x (float): Linear velocity command.
             y (float): Angular velocity command.
         """
-        msg = Twist()
-        msg.linear.x = x
-        msg.angular.z = -y
-        self.linear_velocity = x
-        self.angular_velocity = y
-        self.cmd_vel_publisher.publish(msg)
+        self._run_vm.move_joystick(x, y)
 
     def store_gps(self, msg: NavSatFix) -> None:
         """Cache the latest real GNSS fix and refresh the wall-clock staleness timestamp."""
