@@ -97,12 +97,16 @@ class RunViewModel:
 
     def start_discovery(self) -> None:
         """Ask the row discovery node to start; the outcome lands in self.discovery."""
+        if self._discovery_app_service is None:
+            self.discovery.status = 'ERROR: discovery service unavailable'
+            return
         self.discovery.status = 'starting…'
         self._discovery_app_service.start(self._on_discovery_result)
 
     def stop_discovery(self) -> None:
         """Ask the row discovery node to stop; the outcome lands in self.discovery."""
-        self._discovery_app_service.stop(self._on_discovery_result)
+        if self._discovery_app_service is not None:
+            self._discovery_app_service.stop(self._on_discovery_result)
 
     def _on_discovery_status(self, status: str) -> None:
         self.discovery.status = status
@@ -118,7 +122,7 @@ class RunViewModel:
         """Start navigating to a topology node. Ignored while a goal is already running."""
         if self.topo.navigating:
             return
-        if not self._navigation_app_service.available:
+        if self._navigation_app_service is None or not self._navigation_app_service.available:
             self.topo.nav_status = 'action unavailable (import failed)'
             return
         self.topo.nav_status = f'connecting → {target}…'
@@ -127,18 +131,21 @@ class RunViewModel:
 
     def cancel_navigation(self) -> None:
         """Cancel the running navigation goal, if any."""
-        self._navigation_app_service.cancel()
+        if self._navigation_app_service is not None:
+            self._navigation_app_service.cancel()
 
     def navigate_and_wait(self, target: str, timeout_sec: float,
                           should_abort: Callable[[], bool]) -> bool:
         """Navigate to a topology node and block until it ends. Use from a worker thread."""
+        if self._navigation_app_service is None:
+            return False
         return self._navigation_app_service.navigate_and_wait(
             target, timeout_sec, should_abort, self._on_nav_update)
 
     @property
     def navigation_available(self) -> bool:
         """Whether the navigation action interface is available."""
-        return self._navigation_app_service.available
+        return self._navigation_app_service is not None and self._navigation_app_service.available
 
     def _on_nav_update(self, update: NavUpdate) -> None:
         self.topo.nav_status = update.status

@@ -201,6 +201,51 @@ class TestNavigationDomainService(unittest.TestCase):
         client.accept_future.resolve(handle)
         handle.cancel_goal_async.assert_called_once_with()
 
+    def test_stale_callbacks_do_not_update_a_new_goal(self):
+        # pylint: disable=protected-access
+        client = ActionClient(handle=GoalHandle(finishes=False))
+        domain = make_domain(client)
+        domain.send_goal('A', self.on_update)
+        old_feedback = client.feedback_callback
+        old_goal_id = domain._goal_id
+        domain.cancel_goal()
+        newer_updates = Mock()
+        domain.send_goal('B', newer_updates)
+        newer_updates.reset_mock()
+
+        old_feedback(SimpleNamespace(feedback=SimpleNamespace(current_node='A')))
+        domain._on_accepted(old_goal_id, Mock())
+        domain._on_result(old_goal_id, Mock())
+
+        newer_updates.assert_not_called()
+
+    def test_callbacks_without_update_handler_are_ignored(self):
+        # pylint: disable=protected-access
+        domain = make_domain(ActionClient())
+
+        domain._on_feedback(domain._goal_id, Mock())
+        domain._on_accepted(domain._goal_id, Mock())
+        domain._on_result(domain._goal_id, Mock())
+
+    def test_feedback_keeps_the_callback_captured_before_a_new_goal(self):
+        client = ActionClient(handle=GoalHandle(finishes=False))
+        domain = make_domain(client)
+        domain.send_goal('A', self.on_update)
+        newer_updates = Mock()
+
+        class Feedback:
+            @property
+            def feedback(self):
+                domain.cancel_goal()
+                domain.send_goal('B', newer_updates)
+                newer_updates.reset_mock()
+                return SimpleNamespace(current_node='A')
+
+        client.feedback_callback(Feedback())
+
+        newer_updates.assert_not_called()
+        self.assertEqual(self.updates[-1].status, 'en route · A')
+
     def test_cancel_with_no_goal_does_nothing(self):
         domain = make_domain(ActionClient())
 
@@ -311,6 +356,17 @@ class TestRunViewModelNavigation(unittest.TestCase):
         nav.navigate.assert_not_called()
         self.assertEqual(vm.topo.nav_status, 'action unavailable (import failed)')
         self.assertFalse(vm.topo.navigating)
+
+    def test_missing_navigation_service_is_unavailable(self):
+        vm = RunViewModel(Mock())
+
+        self.assertFalse(vm.navigation_available)
+        vm.navigate_to('A')
+        vm.cancel_navigation()
+
+        self.assertFalse(vm.topo.navigating)
+        self.assertEqual(vm.topo.nav_status, 'action unavailable (import failed)')
+        self.assertFalse(vm.navigate_and_wait('A', 1.0, lambda: False))
 
     def test_updates_drive_status_and_flag(self):
         vm, _ = self.make_vm()

@@ -21,6 +21,7 @@
   <depend>gps_msgs</depend>
   <depend>tf2_ros</depend>
   <depend>devkit_f2c_planner</depend>
+  <exec_depend>std_srvs</exec_depend>
   <exec_depend>python3-yaml</exec_depend>
   <!-- terrain_mask.py: traces the grid_map traversability mask into rings -->
   <exec_depend>python3-skimage</exec_depend>

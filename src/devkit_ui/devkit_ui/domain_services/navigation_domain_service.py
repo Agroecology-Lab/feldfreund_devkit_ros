@@ -92,6 +92,8 @@ class NavigationDomainService:
                 self._cancel_requested = True
             else:
                 return
+        if on_update is None:
+            return
         if reason:
             self._ros.get_logger().warn(f'cancel_goal: {reason}')
         if handle is not None:
@@ -111,17 +113,27 @@ class NavigationDomainService:
             return True
 
     def _on_feedback(self, goal_id: int, feedback_msg) -> None:
-        if goal_id != self._goal_id:
-            return
+        with self._lock:
+            if goal_id != self._goal_id:
+                return
+            on_update = self._on_update
+            if on_update is None:
+                return
         feedback = feedback_msg.feedback
         where = getattr(feedback, 'current_node', None) or getattr(feedback, 'status', '…')
-        self._on_update(NavUpdate(f'en route · {where}', True))
+        on_update(NavUpdate(f'en route · {where}', True))
 
     def _on_accepted(self, goal_id: int, future) -> None:
+        with self._lock:
+            if goal_id != self._goal_id:
+                return
+            on_update = self._on_update
+            if on_update is None:
+                return
         handle = future.result()
         if not handle.accepted:
             if self._finish(goal_id):
-                self._on_update(NavUpdate('goal rejected', False, 'rejected'))
+                on_update(NavUpdate('goal rejected', False, 'rejected'))
             return
         with self._lock:
             if goal_id != self._goal_id:
@@ -130,12 +142,18 @@ class NavigationDomainService:
             cancel_now = self._cancel_requested
             self._cancel_requested = False
         if cancel_now:
-            self._on_update(NavUpdate('cancelling…', True))
+            on_update(NavUpdate('cancelling…', True))
             handle.cancel_goal_async()
         handle.get_result_async().add_done_callback(lambda fut: self._on_result(goal_id, fut))
 
     def _on_result(self, goal_id: int, future) -> None:
+        with self._lock:
+            if goal_id != self._goal_id:
+                return
+            on_update = self._on_update
+            if on_update is None:
+                return
         success = getattr(future.result().result, 'success', True)
         if self._finish(goal_id):
             outcome = 'arrived' if success else 'failed'
-            self._on_update(NavUpdate(outcome, False, outcome))
+            on_update(NavUpdate(outcome, False, outcome))

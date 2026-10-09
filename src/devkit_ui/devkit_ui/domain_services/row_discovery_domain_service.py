@@ -5,7 +5,7 @@ from collections.abc import Callable
 
 from rclpy.qos import QoSProfile, ReliabilityPolicy
 from std_msgs.msg import String
-from std_srvs.srv import Trigger
+from std_srvs.srv import Trigger  # pylint: disable=import-error
 
 from devkit_ui.ros_gateway import RosGateway
 from devkit_ui.topo_results import DiscoveryResult
@@ -56,6 +56,10 @@ class RowDiscoveryDomainService:
     def stop(self, on_done: Callable[[DiscoveryResult], None]) -> None:
         """Ask the node to stop discovering rows; report the outcome through on_done."""
         def _work() -> None:
+            if not self._stop_cli.wait_for_service(timeout_sec=2.0):
+                on_done(DiscoveryResult(None, 'ERROR: row_discovery_node not running'))
+                return
+
             def _cb(future) -> None:
                 try:
                     res = future.result()

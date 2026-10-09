@@ -91,20 +91,27 @@ class TopologyDomainService:
 
         Call from a worker thread, never from the ROS executor or UI loop.
         """
-        if self._switch_cli is None:
+        if self._switch_cli is None or not self._switch_cli.service_is_ready():
             return SwitchResult(available=False)
         req = WriteTopologicalMap.Request()
         req.filename = path
         req.no_alias = True
         done = threading.Event()
         result = [None]
+        error = ['']
 
         def _on_done(future) -> None:
-            result[0] = future.result()
-            done.set()
+            try:
+                result[0] = future.result()
+            except Exception as exc:  # pylint: disable=broad-exception-caught
+                error[0] = str(exc) or type(exc).__name__
+            finally:
+                done.set()
 
         self._switch_cli.call_async(req).add_done_callback(_on_done)
         done.wait(timeout=timeout)
+        if error[0]:
+            return SwitchResult(available=True, success=False, message=error[0])
         resp = result[0]
         if resp is None:
             return SwitchResult(available=True, success=False, message='timeout')

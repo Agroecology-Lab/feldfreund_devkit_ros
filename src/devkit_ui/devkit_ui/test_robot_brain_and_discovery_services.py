@@ -54,7 +54,7 @@ with patch.dict(sys.modules, {
 
 
 class ImmediateThread:
-    def __init__(self, target, daemon=False):
+    def __init__(self, target, daemon=False):  # pylint: disable=unused-argument
         self.target = target
 
     def start(self):
@@ -80,7 +80,7 @@ class TestRobotBrainServices(unittest.TestCase):
         self.ros = Mock(spec=RosGateway)
         self.publishers = {}
 
-        def create_publisher(msg_type, topic, qos):
+        def create_publisher(msg_type, topic, _qos):
             self.assertIs(msg_type, FakeEmpty)
             self.publishers[topic] = Mock()
             return self.publishers[topic]
@@ -118,7 +118,7 @@ class TestRowDiscovery(unittest.TestCase):
         self.ros = Mock(spec=RosGateway)
         self.clients = {}
 
-        def create_client(srv_type, name):
+        def create_client(_srv_type, name):
             self.clients[name.rsplit('/', 1)[-1]] = Mock()
             return self.clients[name.rsplit('/', 1)[-1]]
 
@@ -189,6 +189,27 @@ class TestRowDiscovery(unittest.TestCase):
         self.vm.start_discovery()
 
         self.assertEqual(self.vm.discovery.status, 'starting…')
+
+    def test_stop_without_node_preserves_unknown_discovery_state(self):
+        self.vm.discovery.active = True
+        client = self.clients['stop_discovery']
+        client.wait_for_service.return_value = False
+
+        self.vm.stop_discovery()
+
+        self.assertTrue(self.vm.discovery.active)
+        self.assertEqual(self.vm.discovery.status, 'ERROR: row_discovery_node not running')
+        client.wait_for_service.assert_called_once_with(timeout_sec=2.0)
+        client.call_async.assert_not_called()
+
+    def test_missing_discovery_service_does_not_raise(self):
+        vm = RunViewModel(Mock())
+
+        vm.start_discovery()
+        vm.stop_discovery()
+
+        self.assertFalse(vm.discovery.active)
+        self.assertEqual(vm.discovery.status, 'ERROR: discovery service unavailable')
 
     def test_stop_success_marks_discovery_inactive(self):
         self.vm.discovery.active = True

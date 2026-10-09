@@ -1,6 +1,8 @@
 """Tests for map persistence in TopoMapStore and TopologyApplicationService."""
 import sys
+import threading
 import unittest
+from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
 from tempfile import TemporaryDirectory
 from types import ModuleType, SimpleNamespace
@@ -110,6 +112,49 @@ class TestPersistAndReload(ServiceCase):
         self.domain.doc = None
         with self.assertRaisesRegex(ValueError, 'map not loaded'):
             self.app.persist_and_reload(lambda d: None)
+
+    def test_concurrent_edits_are_preserved_and_switch_does_not_block_writers(self):
+        self.make()
+        self.store.save(live_doc())
+        modifying = threading.Event()
+        release_modify = threading.Event()
+        switching = threading.Event()
+        release_switch = threading.Event()
+        second_modified = threading.Event()
+
+        def first_edit(doc):
+            modifying.set()
+            if not release_modify.wait(2):
+                raise RuntimeError('test did not release first edit')
+            doc.insert_node(TopoNode(name='B', x=0.0, y=0.0))
+
+        def second_edit(doc):
+            doc.insert_node(TopoNode(name='C', x=0.0, y=0.0))
+            second_modified.set()
+
+        def switch(_path):
+            switching.set()
+            if not release_switch.wait(2):
+                raise RuntimeError('test did not release switch')
+            return SwitchResult(True, True)
+
+        self.domain.switch_map = switch
+        with ThreadPoolExecutor(max_workers=2) as pool:
+            first = pool.submit(self.app.persist_and_reload, first_edit)
+            try:
+                self.assertTrue(modifying.wait(1))
+                second = pool.submit(self.app.persist_and_reload, second_edit)
+                self.assertFalse(second_modified.wait(0.05))
+                release_modify.set()
+                self.assertTrue(switching.wait(1))
+                self.assertTrue(second_modified.wait(1))
+            finally:
+                release_modify.set()
+                release_switch.set()
+            self.assertEqual(first.result().kind, 'live')
+            self.assertEqual(second.result().kind, 'live')
+
+        self.assertEqual({n.name for n in self.store.load('live').nodes}, {'A', 'B', 'C'})
 
     def test_describe_texts(self) -> None:
         """Verify status wording for each outcome."""
@@ -226,6 +271,28 @@ class TestDomainSwitchMap(unittest.TestCase):
 
         self.assertEqual(domain.switch_map('/m/field', timeout=0.01),
                          SwitchResult(True, False, 'timeout'))
+
+    def test_without_ready_server_does_not_send_a_request(self):
+        ros = Mock()
+        client = ros.create_client.return_value
+        client.service_is_ready.return_value = False
+        domain = self.module.TopologyDomainService(ros)
+
+        self.assertEqual(domain.switch_map('/m/field'), SwitchResult(available=False))
+        client.call_async.assert_not_called()
+
+    def test_response_error_wakes_waiter_and_preserves_error(self):
+        ros = Mock()
+        future = ros.create_client.return_value.call_async.return_value
+        future.result.side_effect = RuntimeError('switch failed')
+        future.add_done_callback.side_effect = lambda callback: callback(future)
+        domain = self.module.TopologyDomainService(ros)
+        event = threading.Event()
+        with patch.object(self.module.threading, 'Event', return_value=event):
+            result = domain.switch_map('/m/field', timeout=0)
+
+        self.assertTrue(event.is_set())
+        self.assertEqual(result, SwitchResult(True, False, 'switch failed'))
 
     def test_without_message_package_service_is_unavailable(self) -> None:
         """Verify missing topological_navigation_msgs gives available=False."""

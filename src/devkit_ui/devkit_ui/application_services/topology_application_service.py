@@ -3,7 +3,9 @@ from __future__ import annotations
 import copy
 import logging
 import re
-from typing import TYPE_CHECKING, Callable
+import threading
+from collections.abc import Callable
+from typing import TYPE_CHECKING
 
 from devkit_ui.domain_services.topo_map_store import TopoMapStore
 from devkit_ui.models import TopoDoc, TopoNode, TopoPose
@@ -53,6 +55,7 @@ class TopologyApplicationService:
         """
         self._domain = domain_service
         self._store = store or TopoMapStore()
+        self._lock = threading.Lock()
 
     def register_doc_changed_callback(self, callback) -> None:
         """Register a callback with the domain service for doc changes.
@@ -140,22 +143,24 @@ class TopologyApplicationService:
         with default actions if it has none. Raises on read, modify or write errors, and
         leaves the live document untouched in that case.
         """
-        live = self._require_doc()
-        name = live.name
-        if self._store.exists(name):
-            file_doc = self._store.load(name)
-        else:
-            file_doc = copy.deepcopy(live)
-            if not file_doc.actions:
-                file_doc.seed_actions(default_actions(), default_definitions())
+        with self._lock:
+            live = self._require_doc()
+            name = live.name
+            if self._store.exists(name):
+                file_doc = self._store.load(name)
+            else:
+                file_doc = copy.deepcopy(live)
+                if not file_doc.actions:
+                    file_doc.seed_actions(default_actions(), default_definitions())
 
-        modify(file_doc)
+            modify(file_doc)
 
-        # Backfill per-node meta the tmap schema requires (hand-written nodes, F2C rows).
-        # Must run after modify(), or newly added nodes are never backfilled.
-        file_doc.ensure_meta(name)
+            # Backfill per-node meta the tmap schema requires (hand-written nodes, F2C rows).
+            # Must run after modify(), or newly added nodes are never backfilled.
+            file_doc.ensure_meta(name)
 
-        self._store.save(file_doc, name)
+            self._store.save(file_doc, name)
+
         return self._go_live(name, file_doc)
 
     def drop_node(self, node: TopoNode,
@@ -167,33 +172,36 @@ class TopologyApplicationService:
         written and the result is 'skipped'. on_saved runs after the file is written and
         the live document replaced, before the map manager is asked to switch.
         """
-        live = self._require_doc()
-        name = live.name
-        if self._store.exists(name):
-            file_doc = self._store.load(name)
-        else:
-            file_doc = live.clone_empty(name)
-            file_doc.seed_actions(default_actions(), default_definitions())
+        with self._lock:
+            live = self._require_doc()
+            name = live.name
+            if self._store.exists(name):
+                file_doc = self._store.load(name)
+            else:
+                file_doc = live.clone_empty(name)
+                file_doc.seed_actions(default_actions(), default_definitions())
 
-        existing = {n.name for n in file_doc.nodes}
-        if node.name in existing:
-            return PersistResult('skipped', f'{node.name} already in file')
+            existing = {n.name for n in file_doc.nodes}
+            if node.name in existing:
+                return PersistResult('skipped', f'{node.name} already in file')
 
-        saved = copy.deepcopy(node)
-        saved.remove_edges({edge.node for edge in saved.edges if edge.node not in existing})
-        file_doc.insert_node(saved)
-        self._store.save(file_doc, name)
+            saved = copy.deepcopy(node)
+            saved.remove_edges({edge.node for edge in saved.edges if edge.node not in existing})
+            file_doc.insert_node(saved)
+            self._store.save(file_doc, name)
+
         return self._go_live(name, file_doc, on_saved)
 
     def patch_node_role(self, node_name: str, role: str) -> None:
         """Set a node's role in the saved map. Does nothing if there is no file."""
-        live = self._domain.get_doc()
-        if live is None or not self._store.exists(live.name):
-            return
-        doc = self._store.load(live.name)
-        if doc.has_node(node_name):
-            doc.get_node(node_name).patch_role(role)
-        self._store.save(doc, live.name)
+        with self._lock:
+            live = self._domain.get_doc()
+            if live is None or not self._store.exists(live.name):
+                return
+            doc = self._store.load(live.name)
+            if doc.has_node(node_name):
+                doc.get_node(node_name).patch_role(role)
+            self._store.save(doc, live.name)
 
     def save_map_as(self, name: str) -> str:
         """Save a named copy of the map without touching the live one.
@@ -201,26 +209,27 @@ class TopologyApplicationService:
         Prefers the saved file over memory, refuses to overwrite, and returns
         'saved → <name>' or an 'ERROR: ...' status.
         """
-        name = (name or '').strip()
-        live = self._domain.get_doc()
-        if not live:
-            return 'ERROR: map not loaded'
-        if not MAP_NAME_RE.match(name):
-            return 'ERROR: use letters, digits, _ or - (max 64, start with a letter or digit)'
-        if name == live.name:
-            return 'ERROR: that is the live map name'
-        if self._store.exists(name):
-            return f'ERROR: {name} already exists'
-        try:
-            src = self._store.load(live.name) if self._store.exists(live.name) else live
-            if not any(True for _ in src.nodes):
-                return 'ERROR: map has no nodes'
-            self._store.save(src.renamed(name), name)
-            _LOG.info('save_map_as: saved %s', self._store.path(name))
-            return f'saved → {name}'
-        except Exception as e:  # pylint: disable=broad-except
-            _LOG.error('save_map_as failed: %s', e)
-            return f'ERROR: {e}'
+        with self._lock:
+            name = (name or '').strip()
+            live = self._domain.get_doc()
+            if not live:
+                return 'ERROR: map not loaded'
+            if not MAP_NAME_RE.match(name):
+                return 'ERROR: use letters, digits, _ or - (max 64, start with a letter or digit)'
+            if name == live.name:
+                return 'ERROR: that is the live map name'
+            if self._store.exists(name):
+                return f'ERROR: {name} already exists'
+            try:
+                src = self._store.load(live.name) if self._store.exists(live.name) else live
+                if not any(True for _ in src.nodes):
+                    return 'ERROR: map has no nodes'
+                self._store.save(src.renamed(name), name)
+                _LOG.info('save_map_as: saved %s', self._store.path(name))
+                return f'saved → {name}'
+            except Exception as e:  # pylint: disable=broad-except
+                _LOG.error('save_map_as failed: %s', e)
+                return f'ERROR: {e}'
 
     def archive_and_clear(self) -> str:
         """Archive the saved map as <name>_<N>, then replace it with an empty default map.
@@ -229,18 +238,19 @@ class TopologyApplicationService:
         not rolled back and the live document is only replaced after both writes succeed.
         A failure to publish is ignored.
         """
-        live = self._require_doc()
-        name = live.name
-        archive = self._store.next_archive_name(name)
+        with self._lock:
+            live = self._require_doc()
+            name = live.name
+            archive = self._store.next_archive_name(name)
 
-        # Archive what is on disk, not just memory.
-        on_disk = self._store.load(name) if self._store.exists(name) else copy.deepcopy(live)
-        self._store.save(on_disk, archive)
+            # Archive what is on disk, not just memory.
+            on_disk = self._store.load(name) if self._store.exists(name) else copy.deepcopy(live)
+            self._store.save(on_disk, archive)
 
-        # A cleared map is a new map: always start from repo defaults.
-        empty = live.clone_empty(name)
-        empty.seed_actions(default_actions(), default_definitions())
-        self._store.save(empty, name)
+            # A cleared map is a new map: always start from repo defaults.
+            empty = live.clone_empty(name)
+            empty.seed_actions(default_actions(), default_definitions())
+            self._store.save(empty, name)
 
         self._domain.set_doc(empty)
         try:
