@@ -123,7 +123,7 @@ class TopologyDomainService:
 
     def get_node(self, name: str) -> TopoNode | None:
         """Get a node by name from the current document."""
-        if self._doc is None:
+        if self._doc is None or not self._doc.has_node(name):
             return None
         return self._doc.get_node(name)
 
