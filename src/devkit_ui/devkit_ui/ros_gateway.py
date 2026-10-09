@@ -21,19 +21,25 @@ class RosGateway:
     """Wrap a ROS node to create publishers/subscriptions without coupling to it."""
 
     def __init__(self, node: Node) -> None:
+        """Store the node used for ROS communication, logging, and time."""
         self._node = node
 
     def create_publisher(self, msg_type, topic: str, qos: int | QoSProfile) -> Publisher:
+        """Create a publisher on the wrapped node with the supplied type, topic, and QoS."""
         return self._node.create_publisher(msg_type, topic, qos)
 
     def create_subscription(self, msg_type, topic: str, callback, qos: int | QoSProfile) -> Subscription:
+        """Create a subscription on the wrapped node with the supplied callback and QoS."""
         return self._node.create_subscription(msg_type, topic, callback, qos)
 
     def get_logger(self):
+        """Return the wrapped node's logger."""
         return self._node.get_logger()
 
     def get_clock(self) -> Clock:
+        """Return the wrapped node's clock."""
         return self._node.get_clock()
 
     def now_wall_sec(self) -> float:
+        """Return node clock time in seconds, using simulated time when enabled."""
         return self._node.get_clock().now().nanoseconds * 1e-9
