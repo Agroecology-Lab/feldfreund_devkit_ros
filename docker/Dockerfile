@@ -224,9 +224,12 @@ RUN --mount=type=cache,target=/root/.cache/pip \
 # 5.2b optical_flow_ros (PMW3901 / PAA5100) Python dependencies
 #      Not resolvable by rosdep (absent from its package.xml). numpy and
 #      transforms3d are already satisfied above; pip leaves numpy 2.x as is.
+#      pmw3901 1.0.0 requires spidev and imports gpiod (v2 API) and gpiodevice.
+#      RPi.GPIO is not used by it or by optical_flow_ros. Pinned like the git
+#      clones in Stage 8; bump deliberately.
 RUN --mount=type=cache,target=/root/.cache/pip \
     pip install --break-system-packages \
-      pmw3901 RPi.GPIO gpiod gpiodevice
+      pmw3901==1.0.0 gpiod==2.5.0 gpiodevice==0.1.0
 
 # 5.3 YOLOX-Nano pretrained weights
 RUN mkdir -p /root/models && \
@@ -329,10 +332,9 @@ RUN sed -i 's/default_value="Test Rover"/default_value=""/' \
       src/ublox_dgnss/ublox_dgnss/launch/ublox_mb+r_rover.launch.py
 
 # optical_flow_ros broadcasts odom -> base_link by default (publish_tf: true).
-# FusionCore owns that transform (see devkit.yaml), so disable the duplicate.
-RUN sed -i 's/publish_tf: true/publish_tf: false/' \
-      src/optical_flow_ros/config/sensor_params.yaml && \
-    grep -q 'publish_tf: false' src/optical_flow_ros/config/sensor_params.yaml
+# FusionCore owns that transform (see devkit.yaml). The clone is left unpatched:
+# devkit_bringup/config/optical_flow.yaml disables the duplicate at launch, so
+# start the driver with `ros2 launch devkit_bringup optical_flow.launch.py`.
 
 
 # ============================================================

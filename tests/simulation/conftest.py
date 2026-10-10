@@ -29,6 +29,7 @@ def launch_file(monkeypatch, tmp_path):
         'launch.substitutions': 'Command LaunchConfiguration PathJoinSubstitution',
         'launch_ros.actions': 'Node LifecycleNode',
         'launch_ros.parameter_descriptions': 'ParameterValue',
+        'launch_ros.event_handlers': 'OnStateTransition',
         'launch_ros.events.lifecycle': 'ChangeState',
         'launch_ros.substitutions': 'FindPackageShare',
         'lifecycle_msgs.msg': 'Transition',
@@ -51,6 +52,7 @@ def launch_file(monkeypatch, tmp_path):
         lambda package: str(share / package)
     )
     sys.modules['lifecycle_msgs.msg'].Transition.TRANSITION_CONFIGURE = 1
+    sys.modules['lifecycle_msgs.msg'].Transition.TRANSITION_ACTIVATE = 3
 
     def load(package, filename):
         """Return top-level actions from a launch file loaded with the ROS doubles."""

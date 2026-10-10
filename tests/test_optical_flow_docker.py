@@ -8,9 +8,9 @@ from pathlib import Path
 import pytest
 
 ROOT = Path(__file__).resolve().parents[1]
-SENSOR_CONFIG = Path('src/optical_flow_ros/config/sensor_params.yaml')
 DRIVER_URL = 'https://github.com/adityakamath/optical_flow_ros'
 DRIVER_COMMIT = '423965e74a7282371ffaf1d0d2981895c561f0aa'
+SENSOR_PACKAGES = {'pmw3901==1.0.0', 'gpiod==2.5.0', 'gpiodevice==0.1.0'}
 
 
 def test_driver_commit_is_pinned(docker_instructions):
@@ -19,10 +19,10 @@ def test_driver_commit_is_pinned(docker_instructions):
 
 
 @pytest.mark.parametrize('pip_status', [0, 1])
-def test_sensor_dependencies_are_installed_and_failures_propagate(
+def test_sensor_dependencies_are_pinned_and_failures_propagate(
     docker_instructions, tmp_path, pip_status,
 ):
-    """Install all missing hardware dependencies and reject a failed installation."""
+    """Install exactly the pinned hardware dependencies and reject a failed installation."""
     command = run_instruction(docker_instructions, 'pmw3901')
     result = run_shell(command, tmp_path, prelude=r'''
 pip() { printf '%s\n' "$@" > pip.args; return "$PIP_STATUS"; }
@@ -32,20 +32,25 @@ pip() { printf '%s\n' "$@" > pip.args; return "$PIP_STATUS"; }
     args = (tmp_path / 'pip.args').read_text().splitlines()
     assert args[0] == 'install'
     assert '--break-system-packages' in args
-    assert {'pmw3901', 'RPi.GPIO', 'gpiod', 'gpiodevice'} <= set(args)
+    # NOTE: RPi.GPIO is imported by neither pmw3901 1.0.0 nor optical_flow_ros.
+    assert set(args[1:]) - {'--break-system-packages'} == SENSOR_PACKAGES
 
 
 def test_optical_flow_layers_precede_workspace_build(docker_instructions):
-    """Dependencies and patched source must exist before rosdep and colcon run."""
+    """Dependencies and source must exist before rosdep and colcon run."""
     dependencies = run_instruction(docker_instructions, 'pmw3901')
     clone = run_instruction(docker_instructions, DRIVER_URL)
-    patch = run_instruction(docker_instructions, str(SENSOR_CONFIG))
     rosdep = run_instruction(docker_instructions, 'rosdep install')
     colcon = run_instruction(docker_instructions, 'colcon build')
     commands = [shell_command(line) for line in docker_instructions if line.startswith('RUN ')]
     assert commands.index(dependencies) < commands.index(clone)
-    assert commands.index(clone) < commands.index(patch) < commands.index(rosdep)
-    assert commands.index(rosdep) < commands.index(colcon)
+    assert commands.index(clone) < commands.index(rosdep) < commands.index(colcon)
+
+
+def test_driver_clone_is_not_patched(docker_instructions):
+    """TF ownership is set by devkit_bringup/config/optical_flow.yaml, so one mechanism decides."""
+    assert not [line for line in docker_instructions
+                if line.startswith('RUN ') and 'src/optical_flow_ros/' in line]
 
 
 @pytest.mark.parametrize('commit_override', [None, '0123456789abcdef0123456789abcdef01234567'])
@@ -86,56 +91,6 @@ def test_driver_clone_retries_and_propagates_exhaustion(
     else:
         assert (destination / 'checked-out').is_file()
         assert not (destination / 'partial-fetch').exists()
-
-
-@pytest.mark.parametrize('initial_value', ['true', 'false'])
-def test_tf_patch_disables_broadcast_and_preserves_sensor_settings(
-    docker_instructions, tmp_path, initial_value,
-):
-    """Keep FusionCore as TF owner, preserving parameters and allowing repeated builds."""
-    config = tmp_path / SENSOR_CONFIG
-    config.parent.mkdir(parents=True)
-    prefix = (
-        'optical_flow:\n'
-        '    ros__parameters:\n'
-        '        parent_frame: odom\n'
-        '        child_frame: base_link\n'
-        '        board: paa5100\n'
-        '        spi_nr: 0\n'
-        '        spi_slot: front\n'
-        '        rotation: 0\n'
-        '        z_height: 0.025\n'
-    )
-    config.write_text(prefix + f'        publish_tf: {initial_value}\n')
-    unrelated = config.with_name('other_params.yaml')
-    unrelated.write_text('publish_tf: true\n')
-    command = run_instruction(docker_instructions, str(SENSOR_CONFIG))
-
-    for _ in range(2):
-        result = run_shell(command, tmp_path)
-        assert result.returncode == 0, result.stderr
-        assert config.read_text() == prefix + '        publish_tf: false\n'
-    assert unrelated.read_text() == 'publish_tf: true\n'
-
-
-@pytest.mark.parametrize('contents', [None, '', 'optical_flow:\n    ros__parameters: {}\n',
-                                     'optical_flow:\n    ros__parameters:\n        publish_tf: yes\n'])
-def test_tf_patch_rejects_missing_or_unrecognized_setting(
-    docker_instructions, tmp_path, contents,
-):
-    """Fail the build when upstream drift prevents the expected TF configuration."""
-    config = tmp_path / SENSOR_CONFIG
-    config.parent.mkdir(parents=True)
-    if contents is not None:
-        config.write_text(contents)
-
-    result = run_shell(run_instruction(docker_instructions, str(SENSOR_CONFIG)), tmp_path)
-
-    assert result.returncode != 0
-    if contents is None:
-        assert not config.exists()
-    else:
-        assert config.read_text() == contents
 
 
 @pytest.fixture(scope='module')
