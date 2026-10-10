@@ -53,10 +53,10 @@ from devkit_ui import plan_import
 # MISSION: store owns missions.yaml, scheduling, and run recording.
 from devkit_ui.actions import ACTIONS, action_ros_msgs
 from devkit_ui.application_services.drive_application_service import DriveApplicationService
-from devkit_ui.application_services.robot_brain_application_service import RobotBrainApplicationService
 from devkit_ui.application_services.navigation_application_service import (
     NavigationApplicationService,
 )
+from devkit_ui.application_services.robot_brain_application_service import RobotBrainApplicationService
 from devkit_ui.application_services.row_discovery_application_service import (
     RowDiscoveryApplicationService,
 )
@@ -77,8 +77,8 @@ from devkit_ui.dem import (
     select_reference_contour_latlon,
 )
 from devkit_ui.domain_services.drive_domain_service import DriveDomainService
-from devkit_ui.domain_services.robot_brain_domain_service import RobotBrainDomainService
 from devkit_ui.domain_services.navigation_domain_service import NavigationDomainService
+from devkit_ui.domain_services.robot_brain_domain_service import RobotBrainDomainService
 from devkit_ui.domain_services.row_discovery_domain_service import RowDiscoveryDomainService
 from devkit_ui.domain_services.telemetry_domain_service import TelemetryDomainService
 from devkit_ui.domain_services.topology_domain_service import TopologyDomainService
@@ -1465,7 +1465,7 @@ class NiceGuiNode(Node):
                     if self._topo_vm.selected_node else None,
                 on_cancel=self.cancel_nav_goal,
                 on_delete=lambda: self.confirm_delete_node(self._topo_vm.selected_node),
-                on_select=lambda name: self._topo_vm.set_selected_node(name),
+                on_select=self._topo_vm.set_selected_node,
             )
 
         def on_node_clicked(e) -> None:

@@ -23,7 +23,7 @@ class FakeTopologyDomain:
 
     def __init__(self, node) -> None:
         """Keep topology on the harness node and default map switching to unavailable."""
-        self._node = node
+        self._state = vars(node)
         self._callback = None
         self.switch_result = SwitchResult(available=False)
         self.switch_map = Mock(side_effect=lambda path, timeout=5.0: self.switch_result)
@@ -34,26 +34,32 @@ class FakeTopologyDomain:
 
     def get_doc(self):
         """Return the document currently held by the harness node."""
-        return self._node._topo_doc
+        return self._state['_topo_doc']
 
     def set_doc(self, doc) -> None:
         """Replace the harness document and notify the registered callback."""
-        self._node._topo_doc = doc
+        self._state['_topo_doc'] = doc
         if self._callback is not None:
             self._callback(doc)
 
     def publish(self) -> None:
         """Send the document dictionary to the harness publisher for assertions."""
-        self._node._topo_map_pub.publish(self._node._topo_doc.to_dict())
+        self._state['_topo_map_pub'].publish(self.get_doc().to_dict())
 
 
 def attach_topology(node, maps_dir):
     """Wire the fake domain, a real app service on maps_dir and a real view model onto node."""
-    node._topo_map_pub = Mock()
-    node._topo_domain = FakeTopologyDomain(node)
-    node.topo_store = TopoMapStore(str(maps_dir))
-    node._topo_app_service = TopologyApplicationService(node._topo_domain, node.topo_store)
-    node._topo_vm = TopologyViewModel(node._topo_app_service)
+    domain = FakeTopologyDomain(node)
+    store = TopoMapStore(str(maps_dir))
+    app = TopologyApplicationService(domain, store)
+    # Populate the namespace used by the methods compiled into the test harness.
+    vars(node).update(
+        _topo_map_pub=Mock(),
+        _topo_domain=domain,
+        topo_store=store,
+        _topo_app_service=app,
+        _topo_vm=TopologyViewModel(app),
+    )
     return node
 
 
