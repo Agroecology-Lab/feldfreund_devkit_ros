@@ -131,6 +131,49 @@ class TestTelemetryGateway(unittest.TestCase):
             self.gateway.lookup_transform('map', 'base_link')
         self.assertIs(raised.exception, failure)
 
+    def test_tf_buffers_and_listeners_are_independent_per_gateway(self):
+        """Separate nodes must not share localization buffers or listener ownership."""
+        first_buffer, second_buffer = mock.Mock(), mock.Mock()
+        self.buffer_factory.side_effect = [first_buffer, second_buffer]
+        second_node = mock.Mock()
+        second_gateway = ros_gateway.RosGateway(second_node)
+        self.assertIs(
+            self.gateway.lookup_transform('map', 'base_link'),
+            first_buffer.lookup_transform.return_value)
+        self.assertIs(
+            second_gateway.lookup_transform('odom', 'gps'),
+            second_buffer.lookup_transform.return_value)
+        self.listener_factory.assert_has_calls([
+            mock.call(first_buffer, self.node), mock.call(second_buffer, second_node),
+        ])
+        self.gateway.start_tf_listener()
+        second_gateway.start_tf_listener()
+        self.assertEqual(self.buffer_factory.call_count, 2)
+        self.assertEqual(self.listener_factory.call_count, 2)
+
+    def test_timer_creation_failure_propagates_without_invoking_callback(self):
+        """Failure to register a timer is visible to the caller without firing it early."""
+        failure = RuntimeError('node has shut down')
+        self.node.create_timer.side_effect = failure
+        callback = mock.Mock()
+        for clock in (None, object()):
+            with self.subTest(clock=clock), self.assertRaises(RuntimeError) as raised:
+                self.gateway.create_timer(1.0, callback, clock=clock)
+            self.assertIs(raised.exception, failure)
+        callback.assert_not_called()
+
+    def test_wall_clock_creation_failure_can_be_retried(self):
+        """A failed clock constructor must not leave a cached unusable clock."""
+        failure = RuntimeError('clock unavailable')
+        clock = object()
+        self.clock_factory.side_effect = [failure, clock]
+        with self.assertRaises(RuntimeError) as raised:
+            self.gateway.wall_clock()
+        self.assertIs(raised.exception, failure)
+        self.assertIs(self.gateway.wall_clock(), clock)
+        self.assertIs(self.gateway.wall_clock(), clock)
+        self.assertEqual(self.clock_factory.call_count, 2)
+
 
 if __name__ == '__main__':
     unittest.main()

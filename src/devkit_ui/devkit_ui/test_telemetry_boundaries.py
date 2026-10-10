@@ -1,6 +1,7 @@
 """Regression cases for telemetry freshness, source selection and clock boundaries."""
 import math
 import unittest
+from types import SimpleNamespace
 from unittest.mock import Mock
 
 from devkit_ui import test_telemetry_services as fixtures
@@ -170,6 +171,80 @@ class TestTelemetryBoundaries(unittest.TestCase):
             self.service.robot_pose()
         self.assertIs(raised.exception, failure)
         self.ros.logger.warn.assert_not_called()
+
+    def test_gps_freshness_uses_arrival_time_instead_of_message_stamp(self):
+        """Delayed or future sensor stamps do not change the wall-clock trust window."""
+        for stamp in (0, 10_000):
+            with self.subTest(stamp=stamp):
+                ros = fixtures.FakeRos()
+                service = fixtures.TelemetryDomainService(
+                    ros, is_sim=False, fake_gps_datum=fixtures.DATUM)
+                real = fixtures.fix()
+                real.header = SimpleNamespace(stamp=SimpleNamespace(sec=stamp, nanosec=0))
+                ros.subscriptions['/gnss/fix'](real)
+                ros.wall = 105.0
+                accepted = fixtures.odom()
+                ros.subscriptions['/fusion/odom'](accepted)
+                self.assertIs(service.latest_odom, accepted)
+                ros.wall = 105.001
+                ros.subscriptions['/fusion/odom'](fixtures.odom())
+                self.assertIs(service.latest_odom, accepted)
+
+    def test_new_valid_fix_restarts_both_freshness_windows(self):
+        """Each valid arrival renews fusion eligibility and delays shim takeover."""
+        self.sub['/gnss/fix'](fixtures.fix())
+        self.ros.wall = 104.0
+        real = fixtures.fix(lat=49.0)
+        self.sub['/gnss/fix'](real)
+        self.ros.wall = 109.0
+        fused = fixtures.odom()
+        self.sub['/fusion/odom'](fused)
+        self.assertIs(self.service.latest_odom, fused)
+        self.ros.wall = 109.001
+        self.sub['/fusion/odom'](fixtures.odom())
+        self.assertIs(self.service.latest_odom, fused)
+        shim = fixtures.fix()
+        for now, expected in ((123.999, real), (124.0, shim)):
+            with self.subTest(now=now):
+                self.ros.wall = now
+                self.sub['/gnss/fix_sim_shim'](shim)
+                self.assertIs(self.service.latest_gps, expected)
+
+    def test_invalid_fix_preserves_the_remaining_valid_fix_window(self):
+        """A no-fix message is displayed without prematurely revoking recent GNSS trust."""
+        self.sub['/gnss/fix'](fixtures.fix())
+        self.ros.wall = 104.0
+        invalid = fixtures.fix(status=fixtures.STATUS_NO_FIX)
+        self.sub['/gnss/fix'](invalid)
+        self.sub['/gnss/fix_sim_shim'](fixtures.fix())
+        self.assertIs(self.service.latest_gps, invalid)
+        fused = fixtures.odom()
+        self.sub['/fusion/odom'](fused)
+        self.assertIs(self.service.latest_odom, fused)
+        self.ros.wall = 105.001
+        self.sub['/fusion/odom'](fixtures.odom())
+        self.assertIs(self.service.latest_odom, fused)
+
+    def test_fresh_odometry_does_not_hide_stale_tf_and_tf_can_recover(self):
+        """The map marker follows TF freshness independently of incoming wheel messages."""
+        self.ros.transform = fixtures.transform(100.0)
+        self.assertEqual(self.service.robot_pose(), (1.0, 2.0, 0.0))
+        self.ros.node_time = 103.0
+        self.sub['/odom'](fixtures.odom())
+        self.assertIsNone(self.service.robot_pose())
+        self.ros.transform = fixtures.transform(103.0, x=-4.0, y=0.0)
+        self.assertEqual(self.service.robot_pose(), (-4.0, 0.0, 0.0))
+        self.assertEqual(self.ros.logger.warn.call_count, 1)
+
+    def test_negative_yaw_is_unchanged_by_quaternion_sign(self):
+        """Equivalent quaternion signs give the same signed heading in all quadrants."""
+        for expected in (-3 * math.pi / 4, -math.pi / 2, 3 * math.pi / 4):
+            for sign in (-1, 1):
+                with self.subTest(yaw=expected, sign=sign):
+                    self.ros.transform = fixtures.transform(
+                        100.0, qz=sign * math.sin(expected / 2),
+                        qw=sign * math.cos(expected / 2))
+                    self.assertAlmostEqual(self.service.robot_pose()[2], expected)
 
 
 if __name__ == '__main__':

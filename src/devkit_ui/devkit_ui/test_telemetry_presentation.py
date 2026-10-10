@@ -110,6 +110,67 @@ class TestTelemetryPresentation(unittest.TestCase):
             with self.subTest(property=name), self.assertRaises(AttributeError):
                 setattr(node, name, None)
 
+    def test_displayed_velocity_tracks_only_accepted_odometry(self):
+        """Rejected fusion and fallback messages cannot replace trusted displayed velocity."""
+        self.sub['/gnss/fix'](fixtures.fix())
+        events = (
+            ('/odom', fixtures.odom(linear=0.2, angular=-0.1), (0.2, -0.1)),
+            ('/fusion/odom', fixtures.odom(cov_xx=2.0), (0.2, -0.1)),
+            ('/odometry/global', fixtures.odom(linear=-0.5, angular=0.4), (-0.5, 0.4)),
+            ('/fusion/odom', fixtures.odom(linear=0.8, angular=-0.6), (0.8, -0.6)),
+            ('/odom', fixtures.odom(), (0.8, -0.6)),
+            ('/odometry/global', fixtures.odom(), (0.8, -0.6)),
+            ('/fusion/odom', fixtures.odom(linear=0.0, angular=0.0), (0.0, 0.0)),
+        )
+        for topic, reading, expected in events:
+            with self.subTest(topic=topic, expected=expected):
+                self.sub[topic](reading)
+                self.assertEqual(self.app.measured_velocity(), expected)
+                self.vm.refresh()
+                self.assertEqual((self.vm.linear_velocity, self.vm.angular_velocity), expected)
+
+    def test_simulated_fix_is_replaced_by_live_real_and_invalid_readings(self):
+        """GPS consumers see the actual cached source even when the real fix is invalid."""
+        domain = fixtures.TelemetryDomainService(
+            self.ros, is_sim=True, fake_gps_datum=fixtures.DATUM)
+        app = TelemetryApplicationService(domain)
+        vm = TelemetryViewModel(app)
+        shim = fixtures.fix()
+        real = fixtures.fix(lat=52.0)
+        invalid = fixtures.fix(status=fixtures.STATUS_NO_FIX)
+        for topic, reading, expected in (
+            ('/gnss/fix_sim_shim', shim, shim),
+            ('/gnss/fix', real, real),
+            ('/gnss/fix_sim_shim', shim, real),
+            ('/gnss/fix', invalid, invalid),
+            ('/gnss/fix_sim_shim', shim, invalid),
+        ):
+            with self.subTest(topic=topic, reading=reading):
+                self.sub[topic](reading)
+                self.assertIs(app.latest_gps, expected)
+                self.assertIs(vm.gps, expected)
+
+    def test_measured_velocity_uses_only_longitudinal_and_yaw_components(self):
+        """Lateral, vertical, roll and pitch rates do not leak into the drive display."""
+        reading = fixtures.odom(linear=-0.25, angular=0.75)
+        reading.twist.twist.linear.y = 10.0
+        reading.twist.twist.linear.z = 20.0
+        reading.twist.twist.angular.x = 30.0
+        reading.twist.twist.angular.y = 40.0
+        self.sub['/odom'](reading)
+        self.assertEqual(self.app.measured_velocity(), (-0.25, 0.75))
+        self.vm.refresh()
+        self.assertEqual((self.vm.linear_velocity, self.vm.angular_velocity), (-0.25, 0.75))
+
+    def test_unexpected_pose_errors_propagate_through_each_presentation_layer(self):
+        """The application and view model must not turn programming errors into missing poses."""
+        failure = ValueError('malformed transform')
+        self.ros.transform_error = failure
+        for layer in (self.app, self.vm):
+            with self.subTest(layer=type(layer).__name__), self.assertRaises(ValueError) as raised:
+                layer.robot_pose()
+            self.assertIs(raised.exception, failure)
+
 
 def load_node_telemetry_bridge():
     """Load the actual bridge properties using the repository's isolated AST harness pattern."""
