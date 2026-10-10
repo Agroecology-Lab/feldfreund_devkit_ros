@@ -18,7 +18,7 @@ def test_driver_commit_is_pinned(docker_instructions):
     assert build_args(docker_instructions)['OPTICAL_FLOW_ROS_COMMIT'] == DRIVER_COMMIT
 
 
-@pytest.mark.parametrize('pip_status', [0, 1])
+@pytest.mark.parametrize('pip_status', [0, 1, 137])
 def test_sensor_dependencies_are_pinned_and_failures_propagate(
     docker_instructions, tmp_path, pip_status,
 ):
@@ -71,7 +71,7 @@ def test_driver_clone_uses_requested_revision(docker_instructions, tmp_path, com
     assert (tmp_path / 'src/optical_flow_ros/checked-out').is_file()
 
 
-@pytest.mark.parametrize('failed_operation', ['fetch', 'checkout'])
+@pytest.mark.parametrize('failed_operation', ['init', 'fetch', 'checkout'])
 @pytest.mark.parametrize('failed_attempts', [1, 4, 5])
 def test_driver_clone_retries_and_propagates_exhaustion(
     docker_instructions, tmp_path, failed_operation, failed_attempts,
@@ -84,6 +84,13 @@ def test_driver_clone_retries_and_propagates_exhaustion(
     exhausted = failed_attempts == 5
     assert (result.returncode != 0) is exhausted, result.stderr
     assert int((tmp_path / 'attempts').read_text()) == min(failed_attempts + 1, 5)
+    operations = ['init -q', f'fetch --depth 1 {DRIVER_URL} {DRIVER_COMMIT}',
+                  'prompt=0', 'checkout -q FETCH_HEAD']
+    failed_prefix = operations[:{'init': 1, 'fetch': 3, 'checkout': 4}[failed_operation]]
+    expected_log = failed_prefix * failed_attempts
+    if not exhausted:
+        expected_log += operations
+    assert (tmp_path / 'optical-git.log').read_text().splitlines() == expected_log
     destination = tmp_path / 'src/optical_flow_ros'
     if exhausted:
         assert not destination.exists()
@@ -91,6 +98,29 @@ def test_driver_clone_retries_and_propagates_exhaustion(
     else:
         assert (destination / 'checked-out').is_file()
         assert not (destination / 'partial-fetch').exists()
+
+
+def test_driver_retry_removes_stale_checkout_without_removing_other_sources(
+    docker_instructions, tmp_path,
+):
+    """A retry cleans only the failed driver's source tree before fetching it again."""
+    destination = tmp_path / 'src/optical_flow_ros'
+    destination.mkdir(parents=True)
+    stale = destination / 'obsolete_sensor.py'
+    stale.write_text('old driver source')
+    sibling = tmp_path / 'src/local_driver/keep.py'
+    sibling.parent.mkdir()
+    sibling.write_text('local source')
+
+    result = clone_workspace(
+        docker_instructions, tmp_path, build_args(docker_instructions),
+        FAIL_OPERATION='fetch', FAIL_ATTEMPTS='1',
+    )
+
+    assert result.returncode == 0, result.stderr
+    assert not stale.exists()
+    assert (destination / 'checked-out').is_file()
+    assert sibling.read_text() == 'local source'
 
 
 @pytest.fixture(scope='module')
