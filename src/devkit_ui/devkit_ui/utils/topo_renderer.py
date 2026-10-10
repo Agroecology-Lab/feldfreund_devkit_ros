@@ -56,6 +56,7 @@ def build_robot_svg(nodes: Iterator[TopoNode], robot: tuple | None) -> str:
 
 
 def build_svg(doc: TopoDoc | None, selected: str | None, current: str | None) -> str:
+    """Render the topology with selected/current highlights, or an empty-map placeholder."""
     if doc is None or not doc.nodes:
         return (f'<svg width="100%" viewBox="0 0 {_SVG_W} {_SVG_H}" '
                 f'style="background:#f6f8fa;border-radius:4px;border:1px solid #d0d7de">'

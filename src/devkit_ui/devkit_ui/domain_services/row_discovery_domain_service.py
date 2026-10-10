@@ -21,6 +21,7 @@ class RowDiscoveryDomainService:
     """
 
     def __init__(self, ros: RosGateway) -> None:
+        """Create discovery service clients and subscribe to discovery status."""
         self._start_cli = ros.create_client(Trigger, '/row_discovery_node/start_discovery')
         self._stop_cli = ros.create_client(Trigger, '/row_discovery_node/stop_discovery')
         self._status_callback: Callable[[str], None] | None = None
@@ -31,17 +32,20 @@ class RowDiscoveryDomainService:
         self._status_callback = callback
 
     def _on_status(self, msg: String) -> None:
+        """Forward the received status string to the registered callback, if any."""
         if self._status_callback is not None:
             self._status_callback(msg.data)
 
     def start(self, on_done: Callable[[DiscoveryResult], None]) -> None:
         """Ask the node to start discovering rows; report the outcome through on_done."""
         def _work() -> None:
+            """Wait for the start service and submit a request, or report unavailability."""
             if not self._start_cli.wait_for_service(timeout_sec=2.0):
                 on_done(DiscoveryResult(False, 'ERROR: row_discovery_node not running'))
                 return
 
             def _cb(future) -> None:
+                """Report the start response or mark discovery inactive on a request error."""
                 try:
                     res = future.result()
                     on_done(DiscoveryResult(res.success, res.message or (
@@ -56,11 +60,13 @@ class RowDiscoveryDomainService:
     def stop(self, on_done: Callable[[DiscoveryResult], None]) -> None:
         """Ask the node to stop discovering rows; report the outcome through on_done."""
         def _work() -> None:
+            """Wait for the stop service and submit a request, or report unknown state."""
             if not self._stop_cli.wait_for_service(timeout_sec=2.0):
                 on_done(DiscoveryResult(None, 'ERROR: row_discovery_node not running'))
                 return
 
             def _cb(future) -> None:
+                """Report a successful stop or preserve unknown state on failure."""
                 try:
                     res = future.result()
                     if res.success:

@@ -260,6 +260,7 @@ class TopologyApplicationService:
         return archive
 
     def _require_doc(self) -> TopoDoc:
+        """Return the live document or raise ValueError when no map is loaded."""
         doc = self._domain.get_doc()
         if doc is None:
             raise ValueError('map not loaded')

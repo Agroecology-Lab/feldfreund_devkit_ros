@@ -15,6 +15,7 @@ class RobotBrainDomainService:
     """
 
     def __init__(self, ros: RosGateway) -> None:
+        """Create one empty-message publisher for each supported robot brain command."""
         self._pubs = {
             command: ros.create_publisher(Empty, f'esp/{command}', 1)
             for command in ROBOT_BRAIN_COMMANDS

@@ -15,10 +15,13 @@ class DriveApplicationService:
     """
 
     def __init__(self, drive_service: DriveDomainService) -> None:
+        """Store the domain service used to publish drive commands."""
         self._drive = drive_service
 
     def move_joystick(self, x: float, y: float) -> None:
+        """Forward linear x and turn y commands to the drive domain service."""
         self._drive.send_speed(x, y)
 
     def toggle_estop(self, current: bool) -> bool:
+        """Publish the inverse of current and return the new soft estop state."""
         return self._drive.toggle_estop(current)

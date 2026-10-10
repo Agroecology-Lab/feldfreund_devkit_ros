@@ -10,6 +10,7 @@ class DriveDomainService:
     """Publish cmd_vel and soft estop."""
 
     def __init__(self, ros: RosGateway) -> None:
+        """Create the velocity and soft estop publishers through the ROS gateway."""
         self._ros = ros
 
         self._cmd_vel_pub = ros.create_publisher(Twist, 'cmd_vel', 1)

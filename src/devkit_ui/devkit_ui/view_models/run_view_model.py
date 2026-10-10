@@ -76,9 +76,11 @@ class RunViewModel:
             discovery_app_service.register_status_callback(self._on_discovery_status)
 
     def move_joystick(self, x: float, y: float) -> None:
+        """Forward linear x and turn y commands to the drive application service."""
         self._drive_app_service.move_joystick(x, y)
 
     def stop_joystick(self) -> None:
+        """Request zero linear and angular speed through the drive service."""
         self.move_joystick(0.0, 0.0)
 
     def update_pose_label(self, odom, gps) -> None:
@@ -109,9 +111,11 @@ class RunViewModel:
             self._discovery_app_service.stop(self._on_discovery_result)
 
     def _on_discovery_status(self, status: str) -> None:
+        """Replace the displayed discovery status with the latest message."""
         self.discovery.status = status
 
     def _on_discovery_result(self, result: DiscoveryResult) -> None:
+        """Apply discovery status, preserving the active flag when state is unknown."""
         if result.active is not None:
             self.discovery.active = result.active
         self.discovery.status = result.status
@@ -148,5 +152,6 @@ class RunViewModel:
         return self._navigation_app_service is not None and self._navigation_app_service.available
 
     def _on_nav_update(self, update: NavUpdate) -> None:
+        """Apply navigation progress to the displayed status and running flag."""
         self.topo.nav_status = update.status
         self.topo.navigating = update.navigating

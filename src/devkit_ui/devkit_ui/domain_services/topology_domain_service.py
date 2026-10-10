@@ -101,6 +101,7 @@ class TopologyDomainService:
         error = ['']
 
         def _on_done(future) -> None:
+            """Capture the switch response or error and always wake the waiting worker."""
             try:
                 result[0] = future.result()
             except Exception as exc:  # pylint: disable=broad-exception-caught

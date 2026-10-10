@@ -16,10 +16,12 @@ class NavigationApplicationService:
     """User-intent commands for navigating to topology nodes."""
 
     def __init__(self, nav_service: NavigationDomainService) -> None:
+        """Store the domain service used to send and cancel navigation goals."""
         self._nav = nav_service
 
     @property
     def available(self) -> bool:
+        """Return whether the domain has a navigation action client."""
         return self._nav.available
 
     def navigate(self, target: str, on_update: Callable[[NavUpdate], None]) -> None:
@@ -45,6 +47,7 @@ class NavigationApplicationService:
         outcome: list[str | None] = [None]
 
         def _on_update(update: NavUpdate) -> None:
+            """Forward progress and wake the waiter when a terminal outcome arrives."""
             if on_update is not None:
                 on_update(update)
             if update.outcome is not None:

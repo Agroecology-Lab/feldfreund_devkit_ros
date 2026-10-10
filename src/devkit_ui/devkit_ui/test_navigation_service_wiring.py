@@ -35,6 +35,7 @@ def load_navigation_service_harness():
 
 class TestNavigationServiceWiring(unittest.TestCase):
     def setUp(self):
+        """Build a navigation UI harness with shared view models and synthetic telemetry."""
         fake_ui.reset()
         self.ui_on = self.enterContext(patch.object(fake_ui, 'on', create=True))
         self.node, self.namespace = load_navigation_service_harness()
@@ -61,6 +62,7 @@ class TestNavigationServiceWiring(unittest.TestCase):
         self.sidebar = self.namespace['NavigationSidebar'].return_value
 
     def test_document_property_follows_view_model_replacement(self):
+        """Verify the node document property follows replacement and clearing in the view model."""
         replacement = TopoDoc(name='new')
         self.node._topo_vm.update_doc(replacement)
         self.assertIs(self.node._topo_doc, replacement)
@@ -68,6 +70,7 @@ class TestNavigationServiceWiring(unittest.TestCase):
         self.assertIsNone(self.node._topo_doc)
 
     def test_cards_receive_shared_topology_and_pose_state(self):
+        """Verify cards receive the shared topology, run, and global view models."""
         self.namespace['NodeMapCard'].assert_called_once_with(
             topo_vm=self.node._topo_vm, pose_state=self.node._run_vm.node_map)
         self.namespace['JoystickControlCard'].assert_called_once_with(
@@ -76,6 +79,7 @@ class TestNavigationServiceWiring(unittest.TestCase):
                       self.node._topo_vm)
 
     def test_commands_delegate_without_overwriting_measured_velocity(self):
+        """Verify drive commands delegate while measured odometry velocities stay unchanged."""
         self.node.linear_velocity, self.node.angular_velocity = 0.2, -0.3
         self.drive.toggle_estop.return_value = True
 
@@ -88,6 +92,7 @@ class TestNavigationServiceWiring(unittest.TestCase):
         self.assertEqual((self.node.linear_velocity, self.node.angular_velocity), (0.2, -0.3))
 
     def test_refresh_uses_odometry_velocity_and_forwards_latest_pose(self):
+        """Verify refresh updates telemetry without rebuilding an unchanged node list."""
         self.refresh()
         self.assertEqual((self.node.linear_velocity, self.node.angular_velocity), (0.3, -0.4))
         self.assertEqual(self.node._run_vm.joystick.pose_lbl, '(1.00, 2.00)')
@@ -101,6 +106,7 @@ class TestNavigationServiceWiring(unittest.TestCase):
         self.sidebar.render_nodes.assert_called_once()
 
     def test_refresh_without_map_still_updates_telemetry(self):
+        """Verify telemetry updates without a map while map-specific refresh work is skipped."""
         self.node._topo_vm.update_doc(None)
 
         self.refresh()
@@ -111,6 +117,7 @@ class TestNavigationServiceWiring(unittest.TestCase):
         self.sidebar.render_nodes.assert_not_called()
 
     def test_losing_odometry_and_robot_pose_clears_display_state(self):
+        """Verify lost telemetry clears the pose label and robot overlay state."""
         self.refresh()
         self.node.latest_odom = None
         self.node._robot_pose.return_value = None
@@ -121,6 +128,7 @@ class TestNavigationServiceWiring(unittest.TestCase):
         self.assertIsNone(self.node._run_vm.node_map.robot_pose)
 
     def test_node_click_ignores_invalid_payloads_and_selects_existing_node(self):
+        """Verify node clicks select existing nodes and tolerate invalid data or a missing map."""
         self.assertEqual(self.ui_on.call_args.args[0], 'topo_node_clicked')
         callback = self.ui_on.call_args.args[1]
         self.node._topo_vm.set_selected_node('A')
@@ -135,6 +143,7 @@ class TestNavigationServiceWiring(unittest.TestCase):
         self.assertIsNone(self.node._topo_vm.selected_node)
 
     def test_sidebar_actions_use_latest_selection_and_separate_navigation_state(self):
+        """Verify sidebar commands use the current selection and distinct navigation state."""
         callbacks = self.namespace['NavigationSidebar'].call_args.kwargs
         self.assertIs(callbacks['topo_vm'], self.node._topo_vm)
         self.assertIs(callbacks['nav_state'], self.node._run_vm.topo)

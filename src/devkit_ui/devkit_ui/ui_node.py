@@ -900,6 +900,7 @@ class NiceGuiNode(Node):
                 base = f'{name}{conn_str} at ({x},{y}){row_str}{gps_str}'
 
                 def _saved() -> None:
+                    """Show reloading status after saving the node and before switching maps."""
                     self._run_vm.drop_node.status = f'{base} — reloading…'
 
                 result = self._topo_app_service.drop_node(new_node, on_saved=_saved)
@@ -1595,7 +1596,9 @@ class NiceGuiNode(Node):
     # ── existing helpers below ───────────────────────────────────────────────
 
     def _patch_node_role(self, node_name: str, role: str) -> None:
+        """Update the saved node role in a worker thread without blocking the caller."""
         def _write():
+            """Persist the role through the topology service and log any failure."""
             try:
                 self._topo_app_service.patch_node_role(node_name, role)
             except Exception as e:

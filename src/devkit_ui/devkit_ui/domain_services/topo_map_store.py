@@ -16,6 +16,7 @@ class TopoMapStore:
     """Read and write map files in a single directory."""
 
     def __init__(self, maps_dir: str = DEFAULT_MAPS_DIR) -> None:
+        """Store the directory used for map reads, writes, and archive names."""
         self._dir = str(maps_dir)
 
     def path(self, name: str) -> str:
@@ -23,9 +24,11 @@ class TopoMapStore:
         return f'{self._dir}/{name}'
 
     def exists(self, name: str) -> bool:
+        """Return whether the named map path exists in the storage directory."""
         return os.path.exists(self.path(name))
 
     def load(self, name: str) -> TopoDoc:
+        """Parse the named map file, propagating file and YAML parsing errors."""
         return parse_topo_yaml(self.path(name))
 
     def save(self, doc: TopoDoc, name: str | None = None) -> None:

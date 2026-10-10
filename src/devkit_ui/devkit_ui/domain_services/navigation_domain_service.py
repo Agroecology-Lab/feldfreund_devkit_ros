@@ -23,6 +23,7 @@ class NavigationDomainService:
     """
 
     def __init__(self, ros: RosGateway) -> None:
+        """Create an optional action client and initialize the guarded goal state."""
         self._ros = ros
         self._client = (
             ros.create_action_client(GotoNode, NAV_ACTION_NAME) if GotoNode is not None else None)
@@ -113,6 +114,7 @@ class NavigationDomainService:
             return True
 
     def _on_feedback(self, goal_id: int, feedback_msg) -> None:
+        """Report progress for the current goal, ignoring stale goal callbacks."""
         with self._lock:
             if goal_id != self._goal_id:
                 return
@@ -124,6 +126,7 @@ class NavigationDomainService:
         on_update(NavUpdate(f'en route · {where}', True))
 
     def _on_accepted(self, goal_id: int, future) -> None:
+        """Handle goal rejection or acceptance, including any pending cancellation."""
         with self._lock:
             if goal_id != self._goal_id:
                 return
@@ -147,6 +150,7 @@ class NavigationDomainService:
         handle.get_result_async().add_done_callback(lambda fut: self._on_result(goal_id, fut))
 
     def _on_result(self, goal_id: int, future) -> None:
+        """Report arrival or failure and release the current goal state."""
         with self._lock:
             if goal_id != self._goal_id:
                 return

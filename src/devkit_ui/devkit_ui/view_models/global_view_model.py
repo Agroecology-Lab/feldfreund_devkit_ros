@@ -15,5 +15,6 @@ class GlobalViewModel:
         self._drive_app_service = drive_app_service
 
     def toggle_estop(self) -> None:
+        """Update soft estop state from the service result after publishing succeeds."""
         self.soft_estop_active = self._drive_app_service.toggle_estop(
             self.soft_estop_active)

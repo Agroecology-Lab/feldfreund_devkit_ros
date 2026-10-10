@@ -11,12 +11,14 @@ from devkit_ui.view_models.run_view_model import RunViewModel
 
 class FakeTwist:
     def __init__(self):
+        """Initialize independent linear and angular vectors with zero components."""
         self.linear = SimpleNamespace(x=0.0, y=0.0, z=0.0)
         self.angular = SimpleNamespace(x=0.0, y=0.0, z=0.0)
 
 
 class FakeBool:
     def __init__(self):
+        """Initialize a false boolean message for soft estop tests."""
         self.data = False
 
 
@@ -41,6 +43,7 @@ with patch.dict(sys.modules, {
 
 class TestDriveServices(unittest.TestCase):
     def setUp(self):
+        """Wire real drive services and view models to separate mock publishers."""
         self.ros = Mock(spec=RosGateway)
         self.velocity_publisher = Mock()
         self.estop_publisher = Mock()
@@ -51,11 +54,13 @@ class TestDriveServices(unittest.TestCase):
         self.global_vm = GlobalViewModel(self.app)
 
     def test_commands_use_separate_topics(self):
+        """Verify velocity and soft estop use their own message types and topics."""
         self.assertEqual(self.ros.create_publisher.call_args_list, [
             call(FakeTwist, 'cmd_vel', 1), call(FakeBool, 'estop/soft', 1),
         ])
 
     def test_joystick_preserves_linear_speed_and_reverses_turn_direction(self):
+        """Verify joystick commands preserve forward speed and negate turn input."""
         for linear, angular in [(0.4, -0.7), (-0.5, 0.3), (0.0, 0.0)]:
             with self.subTest(linear=linear, angular=angular):
                 self.velocity_publisher.reset_mock()
@@ -68,6 +73,7 @@ class TestDriveServices(unittest.TestCase):
                 self.estop_publisher.publish.assert_not_called()
 
     def test_stop_publishes_zero_without_mutating_previous_command(self):
+        """Verify stopping publishes a fresh zero command and preserves the earlier message."""
         self.run.move_joystick(0.8, 0.6)
         self.run.stop_joystick()
 
@@ -78,6 +84,7 @@ class TestDriveServices(unittest.TestCase):
         self.assertEqual((messages[1].linear.x, messages[1].angular.z), (0.0, 0.0))
 
     def test_estop_toggles_both_directions_and_keeps_messages_independent(self):
+        """Verify successive estop toggles publish independent messages on the estop topic."""
         self.assertFalse(self.global_vm.soft_estop_active)
         self.global_vm.toggle_estop()
         self.assertTrue(self.global_vm.soft_estop_active)
@@ -90,6 +97,7 @@ class TestDriveServices(unittest.TestCase):
         self.velocity_publisher.publish.assert_not_called()
 
     def test_failed_estop_publish_preserves_last_confirmed_ui_state(self):
+        """Verify a publish exception leaves the displayed estop state unchanged."""
         self.estop_publisher.publish.side_effect = RuntimeError('publisher down')
         for current in (False, True):
             with self.subTest(current=current):
@@ -99,11 +107,13 @@ class TestDriveServices(unittest.TestCase):
                 self.assertIs(self.global_vm.soft_estop_active, current)
 
     def test_velocity_publish_failure_reaches_caller(self):
+        """Verify velocity publishing errors propagate through the view model."""
         self.velocity_publisher.publish.side_effect = RuntimeError('publisher down')
         with self.assertRaisesRegex(RuntimeError, 'publisher down'):
             self.run.move_joystick(0.5, 0.1)
 
     def test_global_view_model_uses_service_result(self):
+        """Verify the view model stores the returned estop state without assuming a toggle."""
         app = Mock(spec=DriveApplicationService)
         app.toggle_estop.return_value = False
         vm = GlobalViewModel(app)
@@ -116,11 +126,13 @@ class TestDriveServices(unittest.TestCase):
 
 class TestPoseLabel(unittest.TestCase):
     def setUp(self):
+        """Create a run view model and odometry fixture with fractional coordinates."""
         self.vm = RunViewModel(Mock(spec=DriveApplicationService))
         self.odom = SimpleNamespace(pose=SimpleNamespace(
             pose=SimpleNamespace(position=SimpleNamespace(x=1.234, y=-5.678))))
 
     def test_formats_odometry_and_only_valid_gps_fixes(self):
+        """Verify coordinate precision and inclusion of GPS only for valid fixes."""
         for status in (-1, 0, 1, 2):
             with self.subTest(status=status):
                 gps = SimpleNamespace(status=SimpleNamespace(status=status),
@@ -132,6 +144,7 @@ class TestPoseLabel(unittest.TestCase):
                 self.assertEqual(self.vm.joystick.pose_lbl, expected)
 
     def test_losing_gps_removes_stale_coordinates(self):
+        """Verify losing GPS removes its coordinates while retaining odometry."""
         gps = SimpleNamespace(status=SimpleNamespace(status=0), latitude=0.0, longitude=0.0)
         self.vm.update_pose_label(self.odom, gps)
         self.assertEqual(self.vm.joystick.pose_lbl, '(1.23, -5.68)\n0.00000\n0.00000')
@@ -141,6 +154,7 @@ class TestPoseLabel(unittest.TestCase):
         self.assertEqual(self.vm.joystick.pose_lbl, '(1.23, -5.68)')
 
     def test_missing_odometry_overrides_stale_label_even_with_gps(self):
+        """Verify missing odometry replaces the pose label regardless of GPS availability."""
         gps = SimpleNamespace(status=SimpleNamespace(status=0), latitude=51.0, longitude=-2.0)
         for fix in (gps, None):
             with self.subTest(gps=fix):
@@ -151,10 +165,12 @@ class TestPoseLabel(unittest.TestCase):
 
 class TestRosGateway(unittest.TestCase):
     def setUp(self):
+        """Wrap a mock ROS node in the real gateway."""
         self.node = Mock()
         self.gateway = RosGateway(self.node)
 
     def test_publisher_forwards_arguments_and_returns_handle(self):
+        """Verify publisher creation preserves message type, topic, QoS, and returned handle."""
         for qos in (1, object()):
             with self.subTest(qos=qos):
                 self.node.reset_mock()
@@ -163,6 +179,7 @@ class TestRosGateway(unittest.TestCase):
                 self.assertIs(result, self.node.create_publisher.return_value)
 
     def test_subscription_preserves_callback_and_returns_handle(self):
+        """Verify subscription creation forwards its callback and returns the node handle."""
         callback, qos = Mock(), object()
         result = self.gateway.create_subscription(FakeBool, 'estop/soft', callback, qos)
 
@@ -170,12 +187,14 @@ class TestRosGateway(unittest.TestCase):
         self.assertIs(result, self.node.create_subscription.return_value)
 
     def test_logger_and_clock_are_returned_unchanged(self):
+        """Verify logger and clock access return the underlying node objects."""
         self.assertIs(self.gateway.get_logger(), self.node.get_logger.return_value)
         self.assertIs(self.gateway.get_clock(), self.node.get_clock.return_value)
         self.node.get_logger.assert_called_once_with()
         self.node.get_clock.assert_called_once_with()
 
     def test_time_reads_clock_on_every_call_and_converts_fractional_seconds(self):
+        """Verify each time query reads the clock and converts nanoseconds to seconds."""
         self.node.get_clock.return_value.now.side_effect = [
             SimpleNamespace(nanoseconds=value) for value in (0, 1_250_000_000, 2_750_000_000)
         ]

@@ -17,6 +17,7 @@ class FakeEmpty:
 
 class FakeString:
     def __init__(self, data=''):
+        """Store the string payload delivered to discovery status callbacks."""
         self.data = data
 
 
@@ -55,32 +56,39 @@ with patch.dict(sys.modules, {
 
 class ImmediateThread:
     def __init__(self, target, daemon=False):  # pylint: disable=unused-argument
+        """Capture the worker for deterministic execution on start."""
         self.target = target
 
     def start(self):
+        """Run the captured worker synchronously for deterministic service tests."""
         self.target()
 
 
 class Future:
     def __init__(self, result=None, error=None):
+        """Configure the response or exception returned by the fake service future."""
         self._result = result
         self._error = error
 
     def result(self):
+        """Raise the configured error or return the configured service response."""
         if self._error is not None:
             raise self._error
         return self._result
 
     def add_done_callback(self, callback):
+        """Invoke the completion callback immediately with this future."""
         callback(self)
 
 
 class TestRobotBrainServices(unittest.TestCase):
     def setUp(self):
+        """Wire robot brain services to mock publishers indexed by command topic."""
         self.ros = Mock(spec=RosGateway)
         self.publishers = {}
 
         def create_publisher(msg_type, topic, _qos):
+            """Require empty messages and record a mock publisher for the given topic."""
             self.assertIs(msg_type, FakeEmpty)
             self.publishers[topic] = Mock()
             return self.publishers[topic]
@@ -90,10 +98,12 @@ class TestRobotBrainServices(unittest.TestCase):
         self.app = RobotBrainApplicationService(self.domain)
 
     def test_one_publisher_per_command_on_its_own_topic(self):
+        """Verify each supported brain command has a dedicated ESP topic."""
         self.assertEqual(
             set(self.publishers), {f'esp/{command}' for command in ROBOT_BRAIN_COMMANDS})
 
     def test_each_app_command_publishes_only_on_its_topic(self):
+        """Verify each application command publishes one empty message only to its topic."""
         for command in ROBOT_BRAIN_COMMANDS:
             with self.subTest(command=command):
                 for publisher in self.publishers.values():
@@ -109,16 +119,19 @@ class TestRobotBrainServices(unittest.TestCase):
                         publisher.publish.assert_not_called()
 
     def test_unknown_command_is_rejected(self):
+        """Verify unsupported brain commands raise ValueError."""
         with self.assertRaises(ValueError):
             self.domain.send('explode')
 
 
 class TestRowDiscovery(unittest.TestCase):
     def setUp(self):
+        """Wire discovery services and a view model with workers executed synchronously."""
         self.ros = Mock(spec=RosGateway)
         self.clients = {}
 
         def create_client(_srv_type, name):
+            """Record a mock service client keyed by the final component of its name."""
             self.clients[name.rsplit('/', 1)[-1]] = Mock()
             return self.clients[name.rsplit('/', 1)[-1]]
 
@@ -131,17 +144,20 @@ class TestRowDiscovery(unittest.TestCase):
         self.addCleanup(self.thread_patch.stop)
 
     def respond(self, name, success=True, message='', error=None):
+        """Configure a ready discovery client with a response or request error."""
         client = self.clients[name]
         client.wait_for_service.return_value = True
         client.call_async.return_value = Future(
             SimpleNamespace(success=success, message=message), error)
 
     def test_talks_to_the_row_discovery_node_services_and_status_topic(self):
+        """Verify discovery creates start/stop clients and subscribes to the status topic."""
         self.assertEqual(set(self.clients), {'start_discovery', 'stop_discovery'})
         topic = self.ros.create_subscription.call_args.args[1]
         self.assertEqual(topic, '/row_discovery/status')
 
     def test_status_feed_updates_the_view_model(self):
+        """Verify discovery status messages reach the displayed status."""
         callback = self.ros.create_subscription.call_args.args[2]
 
         callback(FakeString('row 3 found'))
@@ -149,6 +165,7 @@ class TestRowDiscovery(unittest.TestCase):
         self.assertEqual(self.vm.discovery.status, 'row 3 found')
 
     def test_start_success_marks_discovery_active(self):
+        """Verify a successful start sets active state and the default running status."""
         self.respond('start_discovery', success=True)
 
         self.vm.start_discovery()
@@ -157,6 +174,7 @@ class TestRowDiscovery(unittest.TestCase):
         self.assertEqual(self.vm.discovery.status, 'running')
 
     def test_start_failure_keeps_the_service_message(self):
+        """Verify a rejected start preserves its diagnostic and leaves discovery inactive."""
         self.respond('start_discovery', success=False, message='no camera')
 
         self.vm.start_discovery()
@@ -165,6 +183,7 @@ class TestRowDiscovery(unittest.TestCase):
         self.assertEqual(self.vm.discovery.status, 'no camera')
 
     def test_start_without_the_node_reports_it_is_not_running(self):
+        """Verify an unavailable start service reports an error without sending a request."""
         self.clients['start_discovery'].wait_for_service.return_value = False
 
         self.vm.start_discovery()
@@ -174,6 +193,7 @@ class TestRowDiscovery(unittest.TestCase):
         self.clients['start_discovery'].call_async.assert_not_called()
 
     def test_start_error_is_reported(self):
+        """Verify start request exceptions become status errors and leave discovery inactive."""
         self.respond('start_discovery', error=RuntimeError('boom'))
 
         self.vm.start_discovery()
@@ -182,6 +202,7 @@ class TestRowDiscovery(unittest.TestCase):
         self.assertEqual(self.vm.discovery.status, 'ERROR: boom')
 
     def test_start_shows_starting_before_the_reply(self):
+        """Verify a pending start response leaves the UI showing its starting status."""
         self.clients['start_discovery'].wait_for_service.return_value = True
         pending = Mock()
         self.clients['start_discovery'].call_async.return_value = pending
@@ -191,6 +212,7 @@ class TestRowDiscovery(unittest.TestCase):
         self.assertEqual(self.vm.discovery.status, 'starting…')
 
     def test_stop_without_node_preserves_unknown_discovery_state(self):
+        """Verify an unavailable stop service preserves the last active state."""
         self.vm.discovery.active = True
         client = self.clients['stop_discovery']
         client.wait_for_service.return_value = False
@@ -203,6 +225,7 @@ class TestRowDiscovery(unittest.TestCase):
         client.call_async.assert_not_called()
 
     def test_missing_discovery_service_does_not_raise(self):
+        """Verify absent discovery services are tolerated and report unavailability."""
         vm = RunViewModel(Mock())
 
         vm.start_discovery()
@@ -212,6 +235,7 @@ class TestRowDiscovery(unittest.TestCase):
         self.assertEqual(vm.discovery.status, 'ERROR: discovery service unavailable')
 
     def test_stop_success_marks_discovery_inactive(self):
+        """Verify a successful stop clears active state and supplies the default stop status."""
         self.vm.discovery.active = True
         self.respond('stop_discovery', success=True)
 
@@ -221,6 +245,7 @@ class TestRowDiscovery(unittest.TestCase):
         self.assertEqual(self.vm.discovery.status, 'stopped')
 
     def test_failed_stop_leaves_discovery_marked_active(self):
+        """Verify a rejected stop preserves active state and reports uncertainty."""
         self.vm.discovery.active = True
         self.respond('stop_discovery', success=False)
 
@@ -230,6 +255,7 @@ class TestRowDiscovery(unittest.TestCase):
         self.assertEqual(self.vm.discovery.status, 'ERROR: stop failed — discovery state unknown')
 
     def test_stop_error_leaves_discovery_marked_active(self):
+        """Verify a stop exception preserves active state and reports the error."""
         self.vm.discovery.active = True
         self.respond('stop_discovery', error=RuntimeError('boom'))
 
