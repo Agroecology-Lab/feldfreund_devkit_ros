@@ -208,6 +208,28 @@ xhost +local:docker
 ./manage.py 
 ```
 
+#### Optical flow sensor (PMW3901 / PAA5100)
+
+[`optical_flow_ros`](https://github.com/adityakamath/optical_flow_ros) is built into the image (Dockerfile Stage 8, pinned by `OPTICAL_FLOW_ROS_COMMIT`). Its pip dependencies (`pmw3901`, `gpiod`, `gpiodevice`) are installed at pinned versions in Stage 5.2b.
+
+Run inside the container:
+```bash
+ros2 launch devkit_bringup optical_flow.launch.py
+```
+
+Do not use upstream's `optical_flow_launch.py`: it broadcasts `odom` -> `base_link`, which FusionCore owns.
+
+- Sensor parameters: `config/sensor_params.yaml` in the upstream package (`board`, `spi_nr`, `spi_slot`, `rotation`, `z_height`, `sensor_timeout`). `src/devkit_bringup/config/optical_flow.yaml` is loaded after it and sets `publish_tf: false`. Put local driver settings there, not in the cloned source.
+- The launch remaps `odom` to `flow_odom` and publishes `/diagnostics`.
+- `flow_odom` is not consumed by FusionCore (its inputs are hardcoded to `/gnss/fix` and `/odom/wheels`).
+- Upstream tested on Raspberry Pi (SPI). Not tested here on the supported SBCs.
+- Requires `/dev/spidev*` on the host; the container runs privileged with `/dev` mounted.
+
+Known limitations of the pinned driver, not fixed here:
+- `flow_odom` is not fit for fusion. The orientation is left unset (0, 0, 0, 0), every covariance is zero and angular velocity is zero. Do not feed it to an estimator without fixing the message.
+- `/diagnostics` reports OK whenever the node runs. A sensor timeout is published as zero motion, so it is not a health signal.
+- Each read can block for up to `sensor_timeout` (0.5 s) inside a 100 Hz timer. A stationary sensor therefore publishes slower than 100 Hz, and the linear velocity (distance divided by the nominal 0.01 s) is wrong whenever a callback runs late.
+
 ## Management & Tools
 
 ### manage.py
@@ -217,7 +239,7 @@ The primary entry point for the system. While it runs the full stack by default,
 |:---|:---|:---|
 | `./manage.py` | (No arguments) | Runs `run_runtime()` immediately using live volumes.|
 | `./manage.py build` | `build` | local-only, fully cached including external clones |
-| `./manage.py build +pull` | `build` | Re-clones the 9 external repos, keeps apt/pip/local layers cached |
+| `./manage.py build +pull` | `build` | Re-clones the 10 external repos, keeps apt/pip/local layers cached |
 | `./manage.py build +pull +sim` | `build ` | Same, plus INSTALL_SIM=true |
 | `./manage.py full-build` | `full-build` | Runs `run_build(full=True)`. Cleans system & Re-installs all system dependencies. |
 | `./manage.py neo` | `neo` | Runs `neo`. Runs only the line following code for the second 'neo'(cortex) perception SBC. Then check `http://localhost:8081` (web_video_server; 8080 is the Medkit gateway) |
@@ -381,6 +403,7 @@ python3 agbot-diagnostic.py full
 | **ublox_dgnss** | aussierobots | Apache-2.0 | ✅ | *None (Hardware Driver)* | GNSS driver |
 | **sentor** | LCAS (fork of francescodelduchetto/sentor) | MIT | ✅ | *None (Monitoring Tool)* | Topic- and node-monitoring health node |
 | **ros2graph_explorer** | nilseuropa | BSD-3-Clause | ✅ | *None (Debug Tool)* | Dev/debug graph inspector |
+| **optical_flow_ros** | adityakamath | Apache-2.0 | ✅ | *None (Hardware Driver)* | PMW3901 / PAA5100 optical flow sensor driver |
 | **Fields2Cover v2.0.0** | Fields2Cover | BSD-3-Clause | ✅ | [Mier et al., 2023](https://doi.org/10.1109/LRA.2023.3248439) | Built from source; pulls OR-tools (Apache-2.0) + GDAL (MIT) |
 | **lizard** | Agroecology-Lab | MIT (©Zauberzeug GmbH) | ✅ | *None (Firmware Tool)* | ESP32 tooling; retain Zauberzeug notice |
 | **YOLOX 0.3.0** + yolox_nano weights | Megvii | Apache-2.0 | ✅ | [Ge et al., 2021](https://arxiv.org/abs/2107.08430) | Confirm weights terms for commercial use |

@@ -221,6 +221,16 @@ RUN --mount=type=cache,target=/root/.cache/pip \
       thop tqdm loguru ninja tabulate \
       nicegui pyserial lizard pymongo networkx
 
+# 5.2b optical_flow_ros (PMW3901 / PAA5100) Python dependencies
+#      Not resolvable by rosdep (absent from its package.xml). numpy and
+#      transforms3d are already satisfied above; pip leaves numpy 2.x as is.
+#      pmw3901 1.0.0 requires spidev and imports gpiod (v2 API) and gpiodevice.
+#      RPi.GPIO is not used by it or by optical_flow_ros. Pinned like the git
+#      clones in Stage 8; bump deliberately.
+RUN --mount=type=cache,target=/root/.cache/pip \
+    pip install --break-system-packages \
+      pmw3901==1.0.0 gpiod==2.5.0 gpiodevice==0.1.0
+
 # 5.3 YOLOX-Nano pretrained weights
 RUN mkdir -p /root/models && \
     wget -q -O /root/models/yolox_nano.pth \
@@ -290,6 +300,7 @@ ARG VIRTUAL_MAIZE_FIELD_COMMIT=e525d70c3c73fcdfae9c77bb8e4ca03bf3377ac3
 ARG SENTOR_COMMIT=93487502fb9b2645c75f79b9b9613c7e2650fd06
 ARG ROS2GRAPH_EXPLORER_COMMIT=9a046bd851bbc02ef5efd38e6d38012f16ef9d5f
 ARG ROS2GRAPHER_COMMIT=2d12258a6afc671e213b2ff7eb0e9a47ac151470
+ARG OPTICAL_FLOW_ROS_COMMIT=423965e74a7282371ffaf1d0d2981895c561f0aa
 
 # All repos clone in parallel; each retries 5x. Any failed clone fails the
 # build (a missing repo breaks rosdep/colcon downstream anyway).
@@ -313,11 +324,17 @@ RUN pinclone() { \
     pinclone https://github.com/LCAS/sentor                            "$SENTOR_COMMIT"                src/sentor                & pids="$pids $!"; \
     pinclone https://github.com/nilseuropa/ros2graph_explorer          "$ROS2GRAPH_EXPLORER_COMMIT"    src/ros2graph_explorer    & pids="$pids $!"; \
     pinclone https://github.com/Supull/ros2grapher.git                 "$ROS2GRAPHER_COMMIT"           src/ros2grapher           & pids="$pids $!"; \
+    pinclone https://github.com/adityakamath/optical_flow_ros          "$OPTICAL_FLOW_ROS_COMMIT"      src/optical_flow_ros      & pids="$pids $!"; \
     rc=0; for p in $pids; do wait "$p" || rc=1; done; \
     test "$rc" = 0 && test -f src/vision_opencv/cv_bridge/package.xml
 
 RUN sed -i 's/default_value="Test Rover"/default_value=""/' \
       src/ublox_dgnss/ublox_dgnss/launch/ublox_mb+r_rover.launch.py
+
+# optical_flow_ros broadcasts odom -> base_link by default (publish_tf: true).
+# FusionCore owns that transform (see devkit.yaml). The clone is left unpatched:
+# devkit_bringup/config/optical_flow.yaml disables the duplicate at launch, so
+# start the driver with `ros2 launch devkit_bringup optical_flow.launch.py`.
 
 
 # ============================================================

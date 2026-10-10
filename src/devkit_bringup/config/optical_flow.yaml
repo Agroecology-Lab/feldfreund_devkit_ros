@@ -1,0 +1,6 @@
+# Overrides for optical_flow_ros, loaded after the package's own sensor_params.yaml
+# by launch/optical_flow.launch.py. Put project-specific driver settings here, not in the cloned source.
+optical_flow:
+  ros__parameters:
+    # FusionCore owns odom -> base_link (see devkit.yaml). Upstream defaults to true.
+    publish_tf: false
