@@ -162,6 +162,48 @@ class TestTelemetryPresentation(unittest.TestCase):
         self.vm.refresh()
         self.assertEqual((self.vm.linear_velocity, self.vm.angular_velocity), (-0.25, 0.75))
 
+    def test_cached_gps_remains_visible_after_freshness_windows_expire(self):
+        """GPS readers expose the cached message even after it cannot authorize fusion."""
+        node = load_node_telemetry_bridge()
+        node._telemetry_app_service = self.app
+        for status in (fixtures.STATUS_FIX, fixtures.STATUS_NO_FIX):
+            with self.subTest(status=status):
+                reading = fixtures.fix(status=status)
+                self.sub['/gnss/fix'](reading)
+                self.ros.wall += 60.0
+                self.ros.node_time += 60.0
+                self.vm.refresh()
+                self.assertIs(self.app.latest_gps, reading)
+                self.assertIs(self.vm.gps, reading)
+                self.assertIs(node.latest_gps, reading)
+                self.sub['/fusion/odom'](fixtures.odom())
+                self.assertIsNone(self.app.latest_odom)
+
+    def test_measured_velocity_preserves_child_frame_values_without_tf(self):
+        """Velocity stays in the odometry child frame even when map TF is unavailable."""
+        reading = fixtures.odom(linear=-1.25, angular=0.75)
+        reading.header = SimpleNamespace(frame_id='odom')
+        reading.child_frame_id = 'base_link'
+        self.sub['/odom'](reading)
+        self.ros.lookup_transform = Mock(side_effect=fixtures.TransformUnavailable('no map'))
+
+        self.assertEqual(self.app.measured_velocity(), (-1.25, 0.75))
+        self.vm.refresh()
+        self.assertEqual((self.vm.linear_velocity, self.vm.angular_velocity), (-1.25, 0.75))
+        self.ros.lookup_transform.assert_not_called()
+
+    def test_pose_freshness_and_recovery_propagate_through_both_layers(self):
+        """Each layer preserves the domain's None result for missing or stale transforms."""
+        for layer in (self.app, self.vm):
+            with self.subTest(layer=type(layer).__name__):
+                self.ros.transform_error = fixtures.TransformUnavailable('not ready')
+                self.assertIsNone(layer.robot_pose())
+                self.ros.transform_error = None
+                self.ros.transform = fixtures.transform(97.0)
+                self.assertIsNone(layer.robot_pose())
+                self.ros.transform = fixtures.transform(100.0, x=-3.0, y=4.0)
+                self.assertEqual(layer.robot_pose(), (-3.0, 4.0, 0.0))
+
     def test_unexpected_pose_errors_propagate_through_each_presentation_layer(self):
         """The application and view model must not turn programming errors into missing poses."""
         failure = ValueError('malformed transform')

@@ -236,6 +236,38 @@ class TestTelemetryBoundaries(unittest.TestCase):
         self.assertEqual(self.service.robot_pose(), (-4.0, 0.0, 0.0))
         self.assertEqual(self.ros.logger.warn.call_count, 1)
 
+    def test_nan_covariance_still_requires_fresh_gnss_before_latching_fusion(self):
+        """Preserve the documented NaN behavior without bypassing the GNSS age gate."""
+        wheel = fixtures.odom()
+        self.sub['/odom'](wheel)
+        self.sub['/fusion/odom'](fixtures.odom(cov_xx=math.nan))
+        self.assertIs(self.service.latest_odom, wheel)
+
+        self.sub['/gnss/fix'](fixtures.fix())
+        fused = fixtures.odom(cov_xx=math.nan)
+        self.sub['/fusion/odom'](fused)
+        self.assertIs(self.service.latest_odom, fused)
+        self.ros.wall = 106.0
+        self.sub['/fusion/odom'](fixtures.odom(cov_xx=math.nan))
+        self.assertIs(self.service.latest_odom, fused)
+        for topic in ('/odom', '/odometry/global'):
+            self.sub[topic](fixtures.odom())
+            self.assertIs(self.service.latest_odom, fused)
+
+    def test_invalid_shim_is_cached_after_yield_window_without_authorizing_fusion(self):
+        """Shim contents are unvalidated, but never refresh the real-fix timestamp."""
+        real = fixtures.fix()
+        self.sub['/gnss/fix'](real)
+        invalid = fixtures.fix(lat=math.nan, lon=math.inf, status=fixtures.STATUS_NO_FIX)
+        self.ros.wall = 119.0
+        self.sub['/gnss/fix_sim_shim'](invalid)
+        self.assertIs(self.service.latest_gps, real)
+        self.ros.wall = 120.0
+        self.sub['/gnss/fix_sim_shim'](invalid)
+        self.assertIs(self.service.latest_gps, invalid)
+        self.sub['/fusion/odom'](fixtures.odom())
+        self.assertIsNone(self.service.latest_odom)
+
     def test_negative_yaw_is_unchanged_by_quaternion_sign(self):
         """Equivalent quaternion signs give the same signed heading in all quadrants."""
         for expected in (-3 * math.pi / 4, -math.pi / 2, 3 * math.pi / 4):

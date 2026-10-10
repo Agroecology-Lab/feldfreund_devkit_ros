@@ -162,6 +162,35 @@ class TestTelemetryGateway(unittest.TestCase):
             self.assertIs(raised.exception, failure)
         callback.assert_not_called()
 
+    def test_lookup_returns_stamped_transform_without_applying_an_age_limit(self):
+        """The gateway leaves freshness decisions to callers, including for old stamps."""
+        transform = types.SimpleNamespace(
+            header=types.SimpleNamespace(stamp=types.SimpleNamespace(sec=1, nanosec=250)),
+        )
+        self.buffer_factory.return_value.lookup_transform.return_value = transform
+        self.node.get_clock.return_value.now.return_value.nanoseconds = 100_000_000_000
+
+        self.assertIs(self.gateway.lookup_transform('map', 'base_link'), transform)
+        self.assertEqual((transform.header.stamp.sec, transform.header.stamp.nanosec), (1, 250))
+        self.node.get_clock.assert_not_called()
+        self.clock_factory.assert_not_called()
+
+    def test_tf_buffer_creation_failure_propagates_and_can_be_retried(self):
+        """Failed lazy construction leaves a later lookup able to initialize buffering."""
+        failure = RuntimeError('buffer unavailable')
+        buffer = mock.Mock()
+        self.buffer_factory.side_effect = [failure, buffer]
+        with self.assertRaises(RuntimeError) as raised:
+            self.gateway.lookup_transform('map', 'base_link')
+        self.assertIs(raised.exception, failure)
+        self.listener_factory.assert_not_called()
+
+        self.assertIs(
+            self.gateway.lookup_transform('map', 'base_link'), buffer.lookup_transform.return_value,
+        )
+        self.listener_factory.assert_called_once_with(buffer, self.node)
+        self.assertEqual(self.buffer_factory.call_count, 2)
+
     def test_wall_clock_creation_failure_can_be_retried(self):
         """A failed clock constructor must not leave a cached unusable clock."""
         failure = RuntimeError('clock unavailable')
