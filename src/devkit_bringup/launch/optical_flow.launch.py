@@ -21,7 +21,15 @@ from lifecycle_msgs.msg import Transition
 
 
 def generate_launch_description():
-    """Configure the lifecycle optical flow node, then activate it once it is inactive."""
+    """Return a launch description that configures and activates the optical flow node.
+
+    Load project overrides after the driver's sensor parameters and remap odom
+    to flow_odom. Request activation only on configuring -> inactive transitions,
+    leaving deliberate deactivation intact.
+
+    Raise PackageNotFoundError if optical_flow_ros or devkit_bringup cannot be
+    found in the ament index.
+    """
     node = LifecycleNode(
         package='optical_flow_ros',
         executable='optical_flow_publisher',
