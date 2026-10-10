@@ -87,16 +87,14 @@ class TelemetryDomainService:
 
     def __init__(self, ros: RosGateway, is_sim: bool,
                  fake_gps_datum: tuple[float, float], fake_gps_alt: float = 40.0) -> None:
-        """Subscribe to the telemetry topics and, when is_sim is set, start the fake-GPS shim.
+        """Subscribe to telemetry, start TF buffering and, in simulation, start the GPS shim.
 
         Parameters:
             ros: ROS gateway for subscriptions, timers, TF and time.
-            is_sim: Whether the robot is simulated. The authoritative signal is plumbed from
-                manage.py's is_sim through devkit.launch.py -> ui.launch.py, so the shim is
-                never started on hardware.
-            fake_gps_datum: (latitude, longitude) the shim publishes. It matches the leaflet
-                centre / F2C fallback used elsewhere in the UI.
-            fake_gps_alt: Altitude in metres the shim publishes.
+            is_sim: Whether to enable the fallback GPS publisher and its one-second wall-clock
+                timer. Passed from manage.py through devkit.launch.py -> ui.launch.py.
+            fake_gps_datum: (latitude, longitude) in degrees that the shim publishes.
+            fake_gps_alt: Altitude in meters that the shim publishes.
         """
         self._ros = ros
         self._is_sim = is_sim
@@ -175,7 +173,11 @@ class TelemetryDomainService:
     # ── GNSS ──────────────────────────────────────────────────────────────────
 
     def _on_gps(self, msg: NavSatFix) -> None:
-        """Cache the latest real GNSS fix and refresh the wall-clock staleness timestamp."""
+        """Cache every real GNSS message, including invalid fixes.
+
+        Refresh the wall-clock freshness timestamp only for status at least STATUS_FIX,
+        finite latitude and longitude, and coordinates other than (0, 0).
+        """
         self.latest_gps = msg
         # Anything arriving on the real /gnss/fix topic is by definition a real fix, because
         # the shim publishes elsewhere. Only refresh the timestamp for valid fixes: at least
@@ -192,9 +194,8 @@ class TelemetryDomainService:
 
         This topic is never seen by fusioncore, so it is purely for the UI's own use (e.g. the
         topo-map save path needing a finite fix at cold start before the real bridge has
-        published one). Content-gated rather than topic-gated: only takes effect if no real
-        fix has arrived recently, so a slow-starting real bridge doesn't leave the UI without
-        any fix while it comes up.
+        published one). Ignore it while the last valid real fix is less than 20 wall-clock
+        seconds old; otherwise cache it without validating its contents.
         """
         if self._ros.wall_time_sec() - self._last_real_gps_t < FAKE_GPS_YIELD_WINDOW:
             return  # a real fix was seen recently; don't override it
@@ -217,7 +218,13 @@ class TelemetryDomainService:
     # ── Odometry ──────────────────────────────────────────────────────────────
 
     def _on_fusion_odom(self, msg: Odometry) -> None:
-        """Update the latest odometry from fusion once its covariance is trustworthy."""
+        """Accept fusion odometry after the covariance and GNSS freshness checks.
+
+        Reject x-position covariance at or below zero or above 1 m², or a timestamp of the
+        last valid real fix over five wall-clock seconds old. NaN covariance is not rejected.
+        Acceptance disables fallback odometry for the service's lifetime; rejected messages
+        leave the cached odometry and that selection unchanged.
+        """
         cov_xx = msg.pose.covariance[0]
         if cov_xx <= 0.0 or cov_xx > FUSION_COV_TRUST_THRESHOLD:
             return  # not trustworthy yet — let /odom keep driving the marker
@@ -229,7 +236,7 @@ class TelemetryDomainService:
         self.latest_odom = msg
 
     def _on_odom_fallback(self, msg: Odometry) -> None:
-        """Use wheel odometry whenever fusion odometry has not yet been trusted.
+        """Cache /odom or /odometry/global until fusion odometry has been accepted.
 
         The original guard (only when nothing had arrived yet) froze the value after the first
         message, giving a stale pose for every subsequent drop/save. We instead update
@@ -268,6 +275,10 @@ class TelemetryDomainService:
 
     def robot_pose(self) -> tuple[float, float, float] | None:
         """Return (x, y, yaw) of the robot in the map frame, or None if unavailable.
+
+        Positions are in meters and yaw is in radians. Return None for TransformUnavailable
+        or a transform over two seconds old on the node clock (simulated time when enabled).
+        Other lookup errors propagate.
 
         This is a real map->base_link TF lookup, not raw /odom: odom's origin is the robot's
         dead-reckoning start point (spawn in sim), not map (0,0), so using it raw plots the

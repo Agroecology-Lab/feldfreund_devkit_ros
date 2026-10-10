@@ -542,7 +542,10 @@ class NiceGuiNode(Node):
 
     @property
     def latest_gps(self) -> NavSatFix | None:
-        """Return the latest usable GNSS fix, or None before any has arrived."""
+        """Return the cached GNSS message, or None before any has been cached.
+
+        May contain an invalid real fix or the simulation fallback; freshness is not checked.
+        """
         return self._telemetry_app_service.latest_gps
 
     # ── nav actions ───────────────────────────────────────────────────────────
@@ -2449,7 +2452,9 @@ class NiceGuiNode(Node):
                         dot = ui.html('<span class="dot-off"></span>')
                         ui.label(label).classes('text-sm')
                     def _mk(d=dot, a=attr):
+                        """Return a callback updating HTML element d from telemetry attribute a."""
                         def _u():
+                            """Show a warning dot for an active bumper, otherwise an OK dot."""
                             d.set_content(
                                 f'<span class="dot-{"warn" if getattr(self._telemetry_vm, a) else "ok"}"></span>')
                         return _u
@@ -2460,7 +2465,9 @@ class NiceGuiNode(Node):
                         dot = ui.html('<span class="dot-off"></span>')
                         ui.label(label).classes('text-sm')
                     def _mk2(d=dot, a=attr):
+                        """Return a callback updating HTML element d from telemetry attribute a."""
                         def _u():
+                            """Show a warning dot for an active e-stop, otherwise an off dot."""
                             d.set_content(
                                 f'<span class="dot-{"warn" if getattr(self._telemetry_vm, a) else "off"}"></span>')
                         return _u
@@ -2493,6 +2500,7 @@ class NiceGuiNode(Node):
             _FIX_LABELS = {-1: 'NO FIX', 0: 'AUTONOMOUS', 1: 'SBAS',
                             2: 'DGNSS', 4: 'RTK FLOAT', 5: 'RTK FIXED'}
             def update_gps_ui():
+                """Refresh the GPS map and status label; keep their values if no message is cached."""
                 gps = self._telemetry_vm.gps
                 if gps is not None:
                     lat, lon = gps.latitude, gps.longitude

@@ -69,17 +69,20 @@ class RosGateway:
         return self._wall_clock
 
     def wall_time_sec(self) -> float:
-        """Return real elapsed time in seconds, independent of simulated time."""
+        """Return system-clock time in seconds since the epoch, independent of simulated time."""
         return self.wall_clock().now().nanoseconds * 1e-9
 
     def create_timer(self, period_sec: float, callback, clock: Clock | None = None):
-        """Create a timer on the wrapped node, optionally driven by a specific clock."""
+        """Create and return a repeating timer with a period in seconds.
+
+        Use the node's clock, including simulated time when enabled, unless clock is supplied.
+        """
         if clock is None:
             return self._node.create_timer(period_sec, callback)
         return self._node.create_timer(period_sec, callback, clock=clock)
 
     def start_tf_listener(self) -> None:
-        """Start buffering TF messages now, so lookups have history when first requested."""
+        """Start buffering TF messages for lookups; do nothing if buffering already started."""
         if self._tf_buffer is not None:
             return
         # Imported here so modules that only need topics and services load without tf2_ros.
@@ -91,9 +94,11 @@ class RosGateway:
         TransformListener(self._tf_buffer, self._node)
 
     def lookup_transform(self, target_frame: str, source_frame: str):
-        """Return the latest transform between two frames.
+        """Return the latest transform from source_frame into target_frame.
 
+        Start TF buffering if needed. Return the stamped transform without an age check.
         Raises TransformUnavailable when the transform is missing, disconnected or out of range.
+        Other errors propagate unchanged.
         """
         # pylint: disable=import-outside-toplevel
         from rclpy.time import Time
