@@ -27,7 +27,10 @@ class TelemetryApplicationService:
 
     @property
     def latest_gps(self) -> NavSatFix | None:
-        """Return the latest usable GNSS fix, or None before any has arrived."""
+        """Return the cached GNSS message, or None before any has been cached.
+
+        May contain an invalid real fix or the simulation fallback; freshness is not checked.
+        """
         return self._telemetry.latest_gps
 
     @property
@@ -61,12 +64,19 @@ class TelemetryApplicationService:
         return self._telemetry.estop_back_active
 
     def measured_velocity(self) -> tuple[float, float] | None:
-        """Return (linear, angular) velocity from the latest odometry, or None without any."""
+        """Return (linear x in m/s, angular z in rad/s) from the latest odometry.
+
+        Values are in the odometry's child frame; return None without odometry.
+        """
         odom = self._telemetry.latest_odom
         if odom is None:
             return None
         return odom.twist.twist.linear.x, odom.twist.twist.angular.z
 
     def robot_pose(self) -> tuple[float, float, float] | None:
-        """Return (x, y, yaw) in the map frame, or None while the pose is unavailable."""
+        """Return (x, y, yaw) in the map frame, in meters, meters, and radians.
+
+        Return None for an unavailable TF lookup or a transform over two node-clock seconds old.
+        Other lookup errors propagate from the telemetry service.
+        """
         return self._telemetry.robot_pose()

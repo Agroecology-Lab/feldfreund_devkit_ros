@@ -36,7 +36,10 @@ class TelemetryViewModel:
 
     @property
     def gps(self) -> NavSatFix | None:
-        """Return the latest GNSS fix, or None before any has arrived."""
+        """Return the cached GNSS message, or None before any has been cached.
+
+        May contain an invalid real fix or the simulation fallback; freshness is not checked.
+        """
         return self._app_service.latest_gps
 
     @property
@@ -73,5 +76,9 @@ class TelemetryViewModel:
         return self._app_service.estop_back_active
 
     def robot_pose(self) -> tuple[float, float, float] | None:
-        """Return (x, y, yaw) in the map frame, or None while the pose is unavailable."""
+        """Return (x, y, yaw) in the map frame, in meters, meters, and radians.
+
+        Return None for an unavailable TF lookup or a transform over two node-clock seconds old.
+        Other lookup errors propagate from the telemetry service.
+        """
         return self._app_service.robot_pose()

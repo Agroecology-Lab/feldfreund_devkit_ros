@@ -53,10 +53,10 @@ from devkit_ui import plan_import
 # MISSION: store owns missions.yaml, scheduling, and run recording.
 from devkit_ui.actions import ACTIONS, action_ros_msgs
 from devkit_ui.application_services.drive_application_service import DriveApplicationService
-from devkit_ui.application_services.robot_brain_application_service import RobotBrainApplicationService
 from devkit_ui.application_services.navigation_application_service import (
     NavigationApplicationService,
 )
+from devkit_ui.application_services.robot_brain_application_service import RobotBrainApplicationService
 from devkit_ui.application_services.row_discovery_application_service import (
     RowDiscoveryApplicationService,
 )
@@ -77,8 +77,8 @@ from devkit_ui.dem import (
     select_reference_contour_latlon,
 )
 from devkit_ui.domain_services.drive_domain_service import DriveDomainService
-from devkit_ui.domain_services.robot_brain_domain_service import RobotBrainDomainService
 from devkit_ui.domain_services.navigation_domain_service import NavigationDomainService
+from devkit_ui.domain_services.robot_brain_domain_service import RobotBrainDomainService
 from devkit_ui.domain_services.row_discovery_domain_service import RowDiscoveryDomainService
 from devkit_ui.domain_services.telemetry_domain_service import TelemetryDomainService
 from devkit_ui.domain_services.topology_domain_service import TopologyDomainService
@@ -542,7 +542,10 @@ class NiceGuiNode(Node):
 
     @property
     def latest_gps(self) -> NavSatFix | None:
-        """Return the latest usable GNSS fix, or None before any has arrived."""
+        """Return the cached GNSS message, or None before any has been cached.
+
+        May contain an invalid real fix or the simulation fallback; freshness is not checked.
+        """
         return self._telemetry_app_service.latest_gps
 
     # ── nav actions ───────────────────────────────────────────────────────────
@@ -1462,7 +1465,7 @@ class NiceGuiNode(Node):
                     if self._topo_vm.selected_node else None,
                 on_cancel=self.cancel_nav_goal,
                 on_delete=lambda: self.confirm_delete_node(self._topo_vm.selected_node),
-                on_select=lambda name: self._topo_vm.set_selected_node(name),
+                on_select=self._topo_vm.set_selected_node,
             )
 
         def on_node_clicked(e) -> None:
@@ -2449,7 +2452,9 @@ class NiceGuiNode(Node):
                         dot = ui.html('<span class="dot-off"></span>')
                         ui.label(label).classes('text-sm')
                     def _mk(d=dot, a=attr):
+                        """Return a callback updating HTML element d from telemetry attribute a."""
                         def _u():
+                            """Show a warning dot for an active bumper, otherwise an OK dot."""
                             d.set_content(
                                 f'<span class="dot-{"warn" if getattr(self._telemetry_vm, a) else "ok"}"></span>')
                         return _u
@@ -2460,7 +2465,9 @@ class NiceGuiNode(Node):
                         dot = ui.html('<span class="dot-off"></span>')
                         ui.label(label).classes('text-sm')
                     def _mk2(d=dot, a=attr):
+                        """Return a callback updating HTML element d from telemetry attribute a."""
                         def _u():
+                            """Show a warning dot for an active e-stop, otherwise an off dot."""
                             d.set_content(
                                 f'<span class="dot-{"warn" if getattr(self._telemetry_vm, a) else "off"}"></span>')
                         return _u
@@ -2493,6 +2500,7 @@ class NiceGuiNode(Node):
             _FIX_LABELS = {-1: 'NO FIX', 0: 'AUTONOMOUS', 1: 'SBAS',
                             2: 'DGNSS', 4: 'RTK FLOAT', 5: 'RTK FIXED'}
             def update_gps_ui():
+                """Refresh the GPS map and status label; keep their values if no message is cached."""
                 gps = self._telemetry_vm.gps
                 if gps is not None:
                     lat, lon = gps.latitude, gps.longitude
