@@ -6,10 +6,14 @@ from pathlib import Path
 from types import SimpleNamespace
 from unittest.mock import Mock, patch
 
+from devkit_ui.application_services.telemetry_application_service import (
+    TelemetryApplicationService,
+)
 from devkit_ui.models import TopoDoc, TopoNode
 from devkit_ui.test_run_ui import fake_ui
 from devkit_ui.view_models.global_view_model import GlobalViewModel
 from devkit_ui.view_models.run_view_model import RunViewModel
+from devkit_ui.view_models.telemetry_view_model import TelemetryViewModel
 from devkit_ui.view_models.topology_view_model import TopologyViewModel
 
 
@@ -50,13 +54,17 @@ class TestNavigationServiceWiring(unittest.TestCase):
                      'start_discovery', 'stop_discovery', 'send_nav_goal',
                      'cancel_nav_goal', 'confirm_delete_node', '_obstacle_mgr'):
             setattr(self.node, name, Mock())
-        self.node._robot_pose = Mock(return_value=(1.0, 2.0, 0.5))
-        self.node.latest_gps = None
-        self.node.latest_odom = SimpleNamespace(
-            pose=SimpleNamespace(pose=SimpleNamespace(position=SimpleNamespace(x=1.0, y=2.0))),
-            twist=SimpleNamespace(twist=SimpleNamespace(
-                linear=SimpleNamespace(x=0.3), angular=SimpleNamespace(z=-0.4))),
+        self.telemetry = SimpleNamespace(
+            latest_gps=None,
+            latest_odom=SimpleNamespace(
+                pose=SimpleNamespace(
+                    pose=SimpleNamespace(position=SimpleNamespace(x=1.0, y=2.0))),
+                twist=SimpleNamespace(twist=SimpleNamespace(
+                    linear=SimpleNamespace(x=0.3), angular=SimpleNamespace(z=-0.4))),
+            ),
+            robot_pose=Mock(return_value=(1.0, 2.0, 0.5)),
         )
+        self.node._telemetry_vm = TelemetryViewModel(TelemetryApplicationService(self.telemetry))
         self.node._nav_content()
         self.refresh = fake_ui.timers[0].callback
         self.sidebar = self.namespace['NavigationSidebar'].return_value
@@ -80,7 +88,8 @@ class TestNavigationServiceWiring(unittest.TestCase):
 
     def test_commands_delegate_without_overwriting_measured_velocity(self):
         """Verify drive commands delegate while measured odometry velocities stay unchanged."""
-        self.node.linear_velocity, self.node.angular_velocity = 0.2, -0.3
+        self.node._telemetry_vm.linear_velocity = 0.2
+        self.node._telemetry_vm.angular_velocity = -0.3
         self.drive.toggle_estop.return_value = True
 
         self.node.send_speed(0.8, 0.6)
@@ -89,17 +98,21 @@ class TestNavigationServiceWiring(unittest.TestCase):
         self.drive.move_joystick.assert_called_once_with(0.8, 0.6)
         self.drive.toggle_estop.assert_called_once_with(False)
         self.assertTrue(self.node._global_vm.soft_estop_active)
-        self.assertEqual((self.node.linear_velocity, self.node.angular_velocity), (0.2, -0.3))
+        telemetry_vm = self.node._telemetry_vm
+        self.assertEqual((telemetry_vm.linear_velocity, telemetry_vm.angular_velocity),
+                         (0.2, -0.3))
 
     def test_refresh_uses_odometry_velocity_and_forwards_latest_pose(self):
         """Verify refresh updates telemetry without rebuilding an unchanged node list."""
         self.refresh()
-        self.assertEqual((self.node.linear_velocity, self.node.angular_velocity), (0.3, -0.4))
+        telemetry_vm = self.node._telemetry_vm
+        self.assertEqual((telemetry_vm.linear_velocity, telemetry_vm.angular_velocity),
+                         (0.3, -0.4))
         self.assertEqual(self.node._run_vm.joystick.pose_lbl, '(1.00, 2.00)')
         self.assertEqual(self.node._run_vm.node_map.robot_pose, (1.0, 2.0, 0.5))
         self.sidebar.render_nodes.assert_called_once()
 
-        self.node._robot_pose.return_value = (1.01, 2.01, 0.501)
+        self.telemetry.robot_pose.return_value = (1.01, 2.01, 0.501)
         self.refresh()
 
         self.assertEqual(self.node._run_vm.node_map.robot_pose, (1.01, 2.01, 0.501))
@@ -111,16 +124,18 @@ class TestNavigationServiceWiring(unittest.TestCase):
 
         self.refresh()
 
-        self.assertEqual((self.node.linear_velocity, self.node.angular_velocity), (0.3, -0.4))
+        telemetry_vm = self.node._telemetry_vm
+        self.assertEqual((telemetry_vm.linear_velocity, telemetry_vm.angular_velocity),
+                         (0.3, -0.4))
         self.assertEqual(self.node._run_vm.joystick.pose_lbl, '(1.00, 2.00)')
-        self.node._robot_pose.assert_not_called()
+        self.telemetry.robot_pose.assert_not_called()
         self.sidebar.render_nodes.assert_not_called()
 
     def test_losing_odometry_and_robot_pose_clears_display_state(self):
         """Verify lost telemetry clears the pose label and robot overlay state."""
         self.refresh()
-        self.node.latest_odom = None
-        self.node._robot_pose.return_value = None
+        self.telemetry.latest_odom = None
+        self.telemetry.robot_pose.return_value = None
 
         self.refresh()
 

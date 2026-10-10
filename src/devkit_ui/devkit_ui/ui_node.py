@@ -33,26 +33,11 @@ from ament_index_python.packages import (
 from nav_msgs.msg import Odometry
 from nicegui import app, ui, ui_run
 from nicegui import run as ng_run
-from rclpy.clock import Clock, ClockType
 from rclpy.executors import ExternalShutdownException
 from rclpy.node import Node
-from rclpy.qos import (
-    DurabilityPolicy,
-    Duration,
-    LivelinessPolicy,
-    QoSProfile,
-    ReliabilityPolicy,
-)
-from rclpy.time import Time
-from sensor_msgs.msg import BatteryState, NavSatFix, NavSatStatus
+from rclpy.qos import QoSProfile, ReliabilityPolicy
+from sensor_msgs.msg import NavSatFix
 from std_msgs.msg import Bool, Float64, String
-from tf2_ros import (
-    ConnectivityException,
-    ExtrapolationException,
-    LookupException,
-)
-from tf2_ros.buffer import Buffer
-from tf2_ros.transform_listener import TransformListener
 
 # F2C: lat/lon<->XY projection + swath generator, now a standalone package
 # (devkit_f2c_planner) — see its f2c_planner.py docstring for why.
@@ -75,6 +60,9 @@ from devkit_ui.application_services.navigation_application_service import (
 from devkit_ui.application_services.row_discovery_application_service import (
     RowDiscoveryApplicationService,
 )
+from devkit_ui.application_services.telemetry_application_service import (
+    TelemetryApplicationService,
+)
 from devkit_ui.application_services.topology_application_service import (
     TopologyApplicationService,
 )
@@ -92,6 +80,7 @@ from devkit_ui.domain_services.drive_domain_service import DriveDomainService
 from devkit_ui.domain_services.robot_brain_domain_service import RobotBrainDomainService
 from devkit_ui.domain_services.navigation_domain_service import NavigationDomainService
 from devkit_ui.domain_services.row_discovery_domain_service import RowDiscoveryDomainService
+from devkit_ui.domain_services.telemetry_domain_service import TelemetryDomainService
 from devkit_ui.domain_services.topology_domain_service import TopologyDomainService
 from devkit_ui.missions import MissionStore
 from devkit_ui.models import (
@@ -121,6 +110,7 @@ from devkit_ui.pages.run.track_card import TrackCard
 from devkit_ui.ros_gateway import RosGateway
 from devkit_ui.view_models.global_view_model import GlobalViewModel
 from devkit_ui.view_models.run_view_model import RunViewModel
+from devkit_ui.view_models.telemetry_view_model import TelemetryViewModel
 from devkit_ui.view_models.topology_view_model import TopologyViewModel
 
 # Field 27's actual GPS extent, derived from maps/recon_logs/recon.csv (the
@@ -138,14 +128,6 @@ from devkit_ui.view_models.topology_view_model import TopologyViewModel
 # cosmetic.
 FIELD27_CENTER = (48.0046000, 3.6644000)
 FIELD27_BOUNDS = ((48.0031957, 3.6612233), (48.0060043, 3.6675767))
-
-SAFETY_QOS = QoSProfile(
-    depth=1,
-    reliability=ReliabilityPolicy.RELIABLE,
-    durability=DurabilityPolicy.TRANSIENT_LOCAL,
-    liveliness=LivelinessPolicy.AUTOMATIC,
-    liveliness_lease_duration=Duration(seconds=1),
-)
 
 # CONTOUR: spacing for intermediate topo nodes dropped along curved rows
 # (see save_f2c_rows_to_topo()'s WAYPOINTS block and _resample_row_xy()
@@ -376,8 +358,6 @@ app.on_shutdown(_shutdown_tools)
 
 # ── SVG renderer ──────────────────────────────────────────────────────────────
 
-_TF_STALENESS_LIMIT = 2.0  # s — map->base_link older than this: don't draw it
-
 # ── Fields2Cover geometry helpers ─────────────────────────────────────────────
 
 # F2C core (lat/lon<->XY projection + _run_f2c) — imported at top of file
@@ -445,12 +425,21 @@ class NiceGuiNode(Node):
         # Instantiate the temporary ROS gateway bridge to abstract underlying ROS nodes
         self._ros = RosGateway(self)
 
+        # The sim flag is the authoritative signal, plumbed from manage.py's is_sim through
+        # devkit.launch.py -> ui.launch.py.
+        self.declare_parameter('sim', False)
+        self._is_sim = bool(self.get_parameter('sim').value)
+
         # Initialize the domain services using the gateway.
         self._drive_domain_service = DriveDomainService(self._ros)
         self._topo_domain_service = TopologyDomainService(self._ros)
         self._robot_brain_domain_service = RobotBrainDomainService(self._ros)
         self._row_discovery_domain_service = RowDiscoveryDomainService(self._ros)
         self._nav_domain_service = NavigationDomainService(self._ros)
+        # FIELD27_CENTER is the datum the sim GPS shim publishes. See FIELD27_CENTER for why a
+        # mismatch with the field's real datum is dangerous, not just cosmetic.
+        self._telemetry_domain_service = TelemetryDomainService(
+            self._ros, is_sim=self._is_sim, fake_gps_datum=FIELD27_CENTER)
 
         # Set up the application service layers on top of domain services.
         self._drive_app_service = DriveApplicationService(
@@ -462,171 +451,23 @@ class NiceGuiNode(Node):
         self._row_discovery_app_service = RowDiscoveryApplicationService(
             self._row_discovery_domain_service)
         self._nav_app_service = NavigationApplicationService(self._nav_domain_service)
+        self._telemetry_app_service = TelemetryApplicationService(
+            self._telemetry_domain_service)
 
         # Initialize view models
         self._global_vm = GlobalViewModel(self._drive_app_service)
         self._run_vm = RunViewModel(
             self._drive_app_service, self._row_discovery_app_service, self._nav_app_service)
         self._topo_vm = TopologyViewModel(self._topo_app_service)
+        self._telemetry_vm = TelemetryViewModel(self._telemetry_app_service)
 
         # Initialize with default demo document
         self._topo_app_service.initialize_with_default()
-
-        # Dedicated wall clock for the real/fake-GPS freshness bookkeeping
-        # below (store_gps, store_fake_gps, _publish_fake_gps,
-        # _store_fusion_odom). This node runs with use_sim_time=True in sim
-        # mode (see sim_nav.launch.py) so that TF-staleness checks agree
-        # with fusioncore's sim-time stamps once Gazebo is up. But before
-        # Gazebo publishes /clock, a sim-time Clock is frozen at 0 — which
-        # means a self.get_clock().now()-driven timer plain never fires, and
-        # "elapsed time since last real fix" comparisons against a frozen 0
-        # both read as "just happened". That silently defeated the whole
-        # point of the fake-GPS shim (a fix available before Gazebo/the real
-        # bridge exists), so save_f2c_rows_to_topo always failed with
-        # "no GPS fix yet" until Gazebo was started. Freshness here is a
-        # real-world-elapsed-seconds concept regardless of sim state, so a
-        # wall clock is correct for all of it, not just the cold-start case.
-        self._wall_clock = Clock(clock_type=ClockType.SYSTEM_TIME)
 
         _SENSOR_QOS = QoSProfile(
             depth=1,
             reliability=ReliabilityPolicy.BEST_EFFORT,
         )
-        self.create_subscription(
-            NavSatFix, '/gnss/fix', self.store_gps, _SENSOR_QOS)
-
-        # Sim GPS shim: saving a topo map hard-requires a finite, non-zero fix
-        # (see save path) to anchor nodes to a datum, and at cold start
-        # nothing has published one yet. Gazebo's real navsat sensor IS
-        # bridged onto /gnss/fix (ros_gz_bridge.yaml) — this shim used to
-        # publish onto that SAME topic and rely on a discovery-time backoff
-        # (get_publishers_info_by_topic) to yield to the real bridge. That
-        # was racy: DDS discovery has latency, so a bridge that starts
-        # publishing in the same window could be missed, letting one fake
-        # fix at the hardcoded datum below reach fusioncore. That datum is
-        # ~53m from a real field's actual datum (verified against
-        # maps/maize_map's back-solved origin) — a jump big enough to trip
-        # fusioncore's outlier gate and anchor it on the wrong reference for
-        # the rest of the run, silently rejecting every subsequent real fix.
-        # Fix: publish on a dedicated topic so there is no shared-topic race
-        # at all, and only let the UI treat it as a real-position fallback
-        # (topo-map save path) when no genuine /gnss/fix has arrived
-        # recently — fusioncore never subscribes to this topic, so it can
-        # no longer be corrupted by the shim regardless of timing.
-        # The sim flag is the authoritative signal, plumbed from
-        # manage.py's is_sim through devkit.launch.py -> ui.launch.py, so we
-        # never publish this on hardware. The India datum matches the
-        # leaflet centre / F2C fallback used elsewhere in this UI — see
-        # FIELD27_CENTER above.
-        _FAKE_GPS_TOPIC = '/gnss/fix_sim_shim'
-        self.declare_parameter('sim', False)
-        self._is_sim = bool(self.get_parameter('sim').value)
-        self._FAKE_GPS_LAT, self._FAKE_GPS_LON = FIELD27_CENTER
-        self._FAKE_GPS_ALT = 40.0
-        # Sentinel marking our own synthetic fixes. Kept even though the
-        # shim is off /gnss/fix now: store_fake_gps still uses it to make
-        # sure we're not somehow processing our own echo, and it's cheap
-        # insurance against a future re-merge of the two topics.
-        # status.service is uint16 and real receivers only set the low bits
-        # (GPS=1/GLONASS=2/COMPASS=4/GALILEO=8, max 15), so a high value is
-        # unambiguous and assignable.
-        self._FAKE_GPS_SENTINEL = 0xF000
-        self._last_real_gps_t = 0.0
-        if self._is_sim:
-            self._fake_gps_pub = self.create_publisher(
-                NavSatFix, _FAKE_GPS_TOPIC, _SENSOR_QOS)
-            self.create_subscription(
-                NavSatFix, _FAKE_GPS_TOPIC, self.store_fake_gps, _SENSOR_QOS)
-            # clock=self._wall_clock: a sim-time timer never fires before
-            # Gazebo publishes /clock (see _wall_clock comment above), which
-            # would silently disable this shim for the entire cold-start
-            # window it exists to cover.
-            self.create_timer(1.0, self._publish_fake_gps, clock=self._wall_clock)
-            self.get_logger().info(
-                f'Sim mode: publishing fake fix on {_FAKE_GPS_TOPIC} at datum '
-                f'({self._FAKE_GPS_LAT}, {self._FAKE_GPS_LON}) — fusioncore '
-                'does not subscribe to this topic')
-        self.create_subscription(
-            BatteryState, 'battery_state', self.store_battery, 1)
-        self.create_subscription(
-            Bool, 'bumper/front_top', self.update_bumper_front_top, SAFETY_QOS)
-        self.create_subscription(
-            Bool, 'bumper/front_bottom', self.update_bumper_front_bottom, SAFETY_QOS)
-        self.create_subscription(
-            Bool, 'bumper/back', self.update_bumper_back, SAFETY_QOS)
-        self.create_subscription(
-            Bool, 'estop/front', self.update_estop_front, SAFETY_QOS)
-        self.create_subscription(
-            Bool, 'estop/back', self.update_estop_back, SAFETY_QOS)
-
-        _ODOM_QOS = QoSProfile(
-            depth=10,
-            reliability=ReliabilityPolicy.RELIABLE,
-        )
-        self._fusion_odom_seen: bool = False
-
-        # Position covariance (diagonal xx) threshold below which a
-        # /fusion/odom message is trusted enough to take over from ground
-        # truth. fusioncore publishes early, low-confidence estimates before
-        # heading validates / lever arm resolves (e.g. covariance still huge,
-        # origin at 0,0) — latching onto the FIRST message unconditionally
-        # (previous behaviour) froze the UI marker on a garbage pose forever,
-        # since /odom stops updating latest_odom the instant any /fusion/odom
-        # message arrives. Now we keep tracking /odom until fusion's own
-        # reported covariance says it's actually trustworthy.
-        #
-        # Covariance alone is not enough: a UKF anchored to a degenerate GNSS
-        # origin (e.g. the world had no <spherical_coordinates>, so every fix
-        # was frozen at lat=0/lon=0) can report LOW covariance while dead
-        # reckoning off pure IMU+encoder with zero real GNSS correction —
-        # confidently wrong, not uncertain. Low covariance only means "the
-        # filter is internally consistent", not "the filter is right". So
-        # also require a real GNSS fix within the last few seconds
-        # (self._last_real_gps_t, set in store_gps and already used to gate
-        # the fake-fix shim) before trusting /fusion/odom at all. This is
-        # belt-and-suspenders on top of fixing the actual root cause (missing
-        # spherical_coordinates in the generated world) — it stops the UI
-        # from silently re-trusting a confidently-wrong fusion pose if that
-        # world-georeference patch ever regresses again.
-        _FUSION_COV_TRUST_THRESHOLD = 1.0  # m^2 — matches fusioncore_sim.yaml's loosened floor
-        _FUSION_GNSS_STALENESS_LIMIT = 5.0  # s — real /gnss/fix must be this fresh
-
-        def _store_fusion_odom(m: Odometry) -> None:
-            """Update the map marker from fused odometry once its covariance is trustworthy."""
-            cov_xx = m.pose.covariance[0]
-            if cov_xx <= 0.0 or cov_xx > _FUSION_COV_TRUST_THRESHOLD:
-                return  # not trustworthy yet — let /odom keep driving the marker
-            # Wall clock: _last_real_gps_t is now recorded on wall time (see
-            # store_gps), so this comparison must use the same clock.
-            now = self._wall_clock.now().nanoseconds * 1e-9
-            if now - self._last_real_gps_t > _FUSION_GNSS_STALENESS_LIMIT:
-                return  # low covariance but no recent real GNSS correction —
-                        # confidently wrong, not confidently right
-            self._fusion_odom_seen = True
-            self.latest_odom = m
-
-        self.create_subscription(Odometry, '/fusion/odom', _store_fusion_odom, _ODOM_QOS)
-        self.create_subscription(Odometry, '/odom',
-                                 self._odom_fallback, _ODOM_QOS)
-
-        # TF: _robot_pose() needs the actual map->base_link transform, not a
-        # raw odom-frame pose. odom frame origin is wherever the robot
-        # started dead-reckoning (spawn point in sim) — it does NOT coincide
-        # with map (0,0), so plotting raw /odom against topo_nodes (map
-        # frame) puts the marker off wherever it actually is, potentially
-        # off-canvas entirely. Buffer/listener give us a real map->base_link
-        # lookup regardless of whether map->odom is a static bootstrap
-        # transform (sim) or a live localisation output (real hardware).
-        self._tf_buffer = Buffer()
-        self._tf_listener = TransformListener(self._tf_buffer, self)
-
-        # /odometry/global is fed by a relay of /fusion/odom in sim (see
-        # sim_nav.launch.py) — same trust gating applies via _odom_fallback's
-        # self._fusion_odom_seen check, so it won't overwrite a good pose with
-        # a stale/uninitialized one either.
-        self.create_subscription(Odometry, '/odometry/global',
-                                 self._odom_fallback, _ODOM_QOS)
-
         self.create_subscription(
             String,
             '/current_node',
@@ -636,18 +477,6 @@ class NiceGuiNode(Node):
 
         # Per-session, never persisted: each new map starts on geometry-only rows.
         self._row_action: str = ROW_ACTION
-
-        self.latest_odom:    Odometry | None     = None
-        self.latest_gps:     NavSatFix | None    = None
-        self.latest_battery: BatteryState | None = None
-
-        self.bumper_front_top_active    = False
-        self.bumper_front_bottom_active = False
-        self.bumper_back_active         = False
-        self.estop_front_active         = False
-        self.estop_back_active          = False
-        self.linear_velocity            = 0.0
-        self.angular_velocity           = 0.0
 
         self._track_timer:   object  | None   = None
         self._track_counter: int              = 0
@@ -683,8 +512,6 @@ class NiceGuiNode(Node):
         self._mission_cancel:    bool          = False
         self._mission_run_id:    str | None = None   # active MissionStore id
 
-        self._pose_fail_log_t = 0.0
-
         @ui.page('/')
         def page():
             """
@@ -703,63 +530,20 @@ class NiceGuiNode(Node):
         """Get the current topology document (view model's mirror of domain)."""
         return self._topo_vm.topo_doc
 
-    # ── odom fallback ─────────────────────────────────────────────────────────
+    # ── Telemetry (bridge to the telemetry service) ────────────────────────
+    # ObstacleManager, MissionStore and the F2C/drop-node code read the latest odometry and GPS
+    # fix off the node. These read-only properties keep those call sites unchanged while the
+    # state itself lives in the telemetry service.
 
-    def _odom_fallback(self, msg: Odometry) -> None:
-        """Use /odom (wheel odometry) whenever /fusion/odom has not yet arrived.
+    @property
+    def latest_odom(self) -> Odometry | None:
+        """Return the odometry currently driving the UI, or None before any has arrived."""
+        return self._telemetry_app_service.latest_odom
 
-        The original guard (if self.latest_odom is None) froze the value after
-        the first message, giving a stale pose for every subsequent drop/save.
-        We instead update continuously as long as /fusion/odom hasn't been seen —
-        tracked by whether the subscriber lambda has ever fired (self._fusion_odom_seen).
-        """
-        if not self._fusion_odom_seen:
-            self.latest_odom = msg
-
-    def _robot_pose(self) -> tuple | None:
-        """(x, y, yaw) of the robot in map frame, or None if unavailable.
-
-        Real map->base_link TF lookup, not raw /odom — odom's origin is the
-        robot's dead-reckoning start point (spawn in sim), not map (0,0), so
-        using it raw plots the marker off by the full map->odom offset.
-
-        Liveness and staleness are both checked against the TF result itself
-        (not latest_odom, which this no longer reads) so the marker tracks
-        the actual thing being drawn: if /odom dies but TF is still fresh,
-        keep showing it; if TF stalls, blank it even if /odom is still
-        ticking.
-        """
-        # TEMP DIAGNOSTIC (remove once the marker-drop cause is confirmed):
-        # distinguishes "TF lookup threw" from "TF stale" from "all fine" so
-        # we can see which one fires when the marker disappears on nav start.
-        # Rate-limited to ~1/s so it doesn't flood the log while the failure
-        # persists across many UI refresh ticks.
-        now_wall = self.get_clock().now().nanoseconds * 1e-9
-        can_log  = (now_wall - self._pose_fail_log_t) > 1.0
-
-        try:
-            t = self._tf_buffer.lookup_transform(
-                'map', 'base_link', Time())
-        except (LookupException, ConnectivityException, ExtrapolationException) as e:
-            if can_log:
-                self._pose_fail_log_t = now_wall
-                self.get_logger().warn(
-                    f'_robot_pose: TF lookup map->base_link failed '
-                    f'({type(e).__name__}): {e}')
-            return None
-        stamp = t.header.stamp.sec + t.header.stamp.nanosec * 1e-9
-        now = self.get_clock().now().nanoseconds * 1e-9
-        if now - stamp > _TF_STALENESS_LIMIT:
-            if can_log:
-                self._pose_fail_log_t = now_wall
-                self.get_logger().warn(
-                    f'_robot_pose: TF map->base_link stale by '
-                    f'{now - stamp:.2f}s (limit {_TF_STALENESS_LIMIT}s)')
-            return None
-        p, q = t.transform.translation, t.transform.rotation
-        yaw = math.atan2(2 * (q.w * q.z + q.x * q.y),
-                         1 - 2 * (q.y * q.y + q.z * q.z))
-        return (p.x, p.y, yaw)
+    @property
+    def latest_gps(self) -> NavSatFix | None:
+        """Return the latest usable GNSS fix, or None before any has arrived."""
+        return self._telemetry_app_service.latest_gps
 
     # ── nav actions ───────────────────────────────────────────────────────────
 
@@ -1694,11 +1478,8 @@ class NiceGuiNode(Node):
             """
             Refresh the navigation view with the latest robot pose, topology, and navigation state.
             """
-            self._run_vm.update_pose_label(self.latest_odom, self.latest_gps)
-
-            if self.latest_odom is not None:
-                self.linear_velocity = self.latest_odom.twist.twist.linear.x
-                self.angular_velocity = self.latest_odom.twist.twist.angular.z
+            self._telemetry_vm.refresh()
+            self._run_vm.update_pose_label(self._telemetry_vm.odom, self._telemetry_vm.gps)
 
             topo_doc = self._topo_doc
             if topo_doc is None:
@@ -1706,7 +1487,7 @@ class NiceGuiNode(Node):
 
             current_node = self._topo_vm.current_node
 
-            rp = self._robot_pose()
+            rp = self._telemetry_vm.robot_pose()
             rp_key = None if rp is None else (round(rp[0], 1), round(rp[1], 1),
                                             round(rp[2], 2))
             self._run_vm.node_map.robot_pose = rp
@@ -2650,15 +2431,14 @@ class NiceGuiNode(Node):
                 ui.html('<div class="sec-label">Linear velocity</div>')
                 ui.slider(min=-1, max=1, step=0.05, value=0).props(
                     'readonly selection-color=transparent color=green').bind_value_from(
-                        self, 'linear_velocity')
+                        self._telemetry_vm, 'linear_velocity')
                 ui.html('<div class="sec-label mt-2">Angular velocity</div>')
                 ui.slider(min=-1, max=1, step=0.05, value=0).props(
                     'readonly selection-color=transparent color=green').bind_value_from(
-                        self, 'angular_velocity')
+                        self._telemetry_vm, 'angular_velocity')
                 ui.html('<div class="sec-label mt-3">Battery</div>')
-                ui.label().classes('text-sm').bind_text_from(self, 'latest_battery',
-                    lambda msg: (f'{msg.percentage*100:.1f}%  {msg.voltage:.1f} V'
-                                 if msg is not None else '—'))
+                ui.label().classes('text-sm').bind_text_from(
+                    self._telemetry_vm, 'battery_text')
             with ui.card().classes('flex-1'):
                 ui.label('Safety').classes('font-semibold mb-2')
                 ui.html('<div class="sec-label">Bumpers</div>')
@@ -2671,7 +2451,7 @@ class NiceGuiNode(Node):
                     def _mk(d=dot, a=attr):
                         def _u():
                             d.set_content(
-                                f'<span class="dot-{"warn" if getattr(self,a) else "ok"}"></span>')
+                                f'<span class="dot-{"warn" if getattr(self._telemetry_vm, a) else "ok"}"></span>')
                         return _u
                     ui.timer(0.2, _mk())
                 ui.html('<div class="sec-label mt-3">E-stops</div>')
@@ -2682,7 +2462,7 @@ class NiceGuiNode(Node):
                     def _mk2(d=dot, a=attr):
                         def _u():
                             d.set_content(
-                                f'<span class="dot-{"warn" if getattr(self,a) else "off"}"></span>')
+                                f'<span class="dot-{"warn" if getattr(self._telemetry_vm, a) else "off"}"></span>')
                         return _u
                     ui.timer(0.2, _mk2())
         with ui.card().classes('w-full mt-3'):
@@ -2713,16 +2493,17 @@ class NiceGuiNode(Node):
             _FIX_LABELS = {-1: 'NO FIX', 0: 'AUTONOMOUS', 1: 'SBAS',
                             2: 'DGNSS', 4: 'RTK FLOAT', 5: 'RTK FIXED'}
             def update_gps_ui():
-                if self.latest_gps is not None:
-                    lat, lon = self.latest_gps.latitude, self.latest_gps.longitude
+                gps = self._telemetry_vm.gps
+                if gps is not None:
+                    lat, lon = gps.latitude, gps.longitude
                     leaflet.set_center((lat, lon))
                     marker.move(lat, lon)
-                    code = self.latest_gps.status.status
-                    cov  = self.latest_gps.position_covariance[0]
+                    code = gps.status.status
+                    cov  = gps.position_covariance[0]
                     gps_status_lbl.set_text(
                         f'{_FIX_LABELS.get(code, str(code))}  '
                         f'{lat:.6f}, {lon:.6f}  '
-                        f'alt={self.latest_gps.altitude:.1f}m  '
+                        f'alt={gps.altitude:.1f}m  '
                         f'σ={cov**0.5:.2f}m')
                     col = '#1a7f37' if code == 5 else '#9a6700' if code >= 1 else '#cf222e'
                     gps_status_lbl.style(f'color:{col}')
@@ -3693,67 +3474,6 @@ class NiceGuiNode(Node):
             y (float): Angular velocity command.
         """
         self._run_vm.move_joystick(x, y)
-
-    def store_gps(self, msg: NavSatFix) -> None:
-        """Cache the latest real GNSS fix and refresh the wall-clock staleness timestamp."""
-        self.latest_gps = msg
-        # Anything arriving on the real /gnss/fix topic is by definition a
-        # real fix now that the shim publishes elsewhere — no sentinel check
-        # needed here any more, but keep the same variable/semantics for the
-        # staleness gate below. Wall clock (see self._wall_clock comment) so
-        # this stays meaningful before /clock exists.
-        # Only refresh _last_real_gps_t for valid fixes: at least STATUS_FIX,
-        # finite coordinates, and not (0,0). Leave _last_real_gps_t unchanged
-        # for invalid/no-fix messages, preserving store_fake_gps behavior and
-        # the UI's last usable fix.
-        if (msg.status.status >= NavSatStatus.STATUS_FIX
-                and math.isfinite(msg.latitude) and math.isfinite(msg.longitude)
-                and not (msg.latitude == 0.0 and msg.longitude == 0.0)):
-            self._last_real_gps_t = self._wall_clock.now().nanoseconds * 1e-9
-
-    def store_fake_gps(self, msg: NavSatFix) -> None:
-        """Consume the sim shim's fix as a fallback ONLY (see _FAKE_GPS_TOPIC
-        setup docstring). This topic is never seen by fusioncore, so this is
-        purely for the UI's own use (e.g. the topo-map save path needing a
-        finite fix at cold start before the real bridge has published one).
-        Content-gated rather than topic-gated: only takes effect if no real
-        fix has arrived recently, so a slow-starting real bridge doesn't
-        leave the UI without any fix while it comes up.
-        """
-        now = self._wall_clock.now().nanoseconds * 1e-9
-        if now - self._last_real_gps_t < 20.0:
-            return  # a real fix was seen recently; don't override it
-        self.latest_gps = msg
-
-    def _publish_fake_gps(self) -> None:
-        """Publish a fix at the field datum (sim only — timer isn't created
-        on hardware). Runs on its own dedicated topic (_FAKE_GPS_TOPIC), so
-        there is no shared-topic race with ros_gz_bridge's real navsat
-        publisher any more — no discovery-timing backoff needed, since
-        fusioncore and the real bridge never see this topic at all.
-        """
-        msg = NavSatFix()
-        # Wall clock: self.get_clock() is frozen at 0 before Gazebo
-        # publishes /clock, which would stamp every cold-start fix
-        # identically instead of just being a cosmetic difference.
-        msg.header.stamp = self._wall_clock.now().to_msg()
-        msg.header.frame_id = 'gps'
-        msg.status.status = NavSatStatus.STATUS_FIX
-        msg.status.service = self._FAKE_GPS_SENTINEL
-        msg.latitude = self._FAKE_GPS_LAT
-        msg.longitude = self._FAKE_GPS_LON
-        msg.altitude = self._FAKE_GPS_ALT
-        self._fake_gps_pub.publish(msg)
-
-    # pylint: disable=multiple-statements
-    def store_battery(self, msg: BatteryState) -> None:      self.latest_battery = msg
-    def update_bumper_front_top(self, msg: Bool) -> None:    self.bumper_front_top_active = msg.data
-    def update_bumper_front_bottom(self, msg: Bool) -> None:
-        self.bumper_front_bottom_active = msg.data
-    def update_bumper_back(self, msg: Bool) -> None:         self.bumper_back_active = msg.data
-    def update_estop_front(self, msg: Bool) -> None:         self.estop_front_active = msg.data
-    def update_estop_back(self, msg: Bool) -> None:          self.estop_back_active = msg.data
-    # pylint: enable=multiple-statements
 
 
 # ── entrypoints ───────────────────────────────────────────────────────────────

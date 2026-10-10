@@ -11,7 +11,7 @@ def generate_launch_description():
     # sim flows down from devkit.launch.py. The UI node uses it to decide
     # whether to publish a fake fix on /gnss/fix_sim_shim at the field
     # datum, purely as a cold-start fallback for the UI's own topo-map save
-    # path (see ui_node._publish_fake_gps / store_fake_gps). This used to
+    # path (see TelemetryDomainService._publish_fake_gps / _on_fake_gps). This used to
     # publish onto /gnss/fix itself — the same topic ros_gz_bridge bridges
     # Gazebo's real navsat sensor onto — and rely on a discovery-timing
     # backoff to yield to the real fix. That race could be lost once during
