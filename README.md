@@ -218,7 +218,7 @@ ros2 launch optical_flow_ros optical_flow_launch.py
 ```
 
 - Sensor parameters: `config/sensor_params.yaml` in the package (`board`, `spi_nr`, `spi_slot`, `rotation`, `z_height`, `publish_tf`).
-- Launch remaps `odom` to `flow_odom`. Also publishes `/tf` and `/diagnostics`.
+- Launch remaps `odom` to `flow_odom` and publishes `/diagnostics`, with TF disabled.
 - Upstream default `publish_tf: true` broadcasts `odom` -> `base_link`, which FusionCore owns. The Dockerfile sets `publish_tf: false` in the package's `sensor_params.yaml`.
 - `flow_odom` is not consumed by FusionCore (its inputs are hardcoded to `/gnss/fix` and `/odom/wheels`).
 - Upstream tested on Raspberry Pi (SPI). Not tested here on the supported SBCs.
