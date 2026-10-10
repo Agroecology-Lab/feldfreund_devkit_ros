@@ -3,9 +3,7 @@
 ui_node.py — Sowbot web cockpit on :80
 """
 
-import copy
 import io
-import json
 import math
 import os
 import re
@@ -32,32 +30,14 @@ from ament_index_python.packages import (
     PackageNotFoundError,
     get_package_share_directory,
 )
-from geometry_msgs.msg import Twist
 from nav_msgs.msg import Odometry
 from nicegui import app, ui, ui_run
 from nicegui import run as ng_run
-from rclpy.clock import Clock, ClockType
 from rclpy.executors import ExternalShutdownException
 from rclpy.node import Node
-from rclpy.qos import (
-    DurabilityPolicy,
-    Duration,
-    HistoryPolicy,
-    LivelinessPolicy,
-    QoSProfile,
-    ReliabilityPolicy,
-)
-from rclpy.time import Time
-from sensor_msgs.msg import BatteryState, NavSatFix, NavSatStatus
-from std_msgs.msg import Bool, Empty, Float64, String
-from std_srvs.srv import Trigger
-from tf2_ros import (
-    ConnectivityException,
-    ExtrapolationException,
-    LookupException,
-)
-from tf2_ros.buffer import Buffer
-from tf2_ros.transform_listener import TransformListener
+from rclpy.qos import QoSProfile, ReliabilityPolicy
+from sensor_msgs.msg import NavSatFix
+from std_msgs.msg import Bool, Float64, String
 
 # F2C: lat/lon<->XY projection + swath generator, now a standalone package
 # (devkit_f2c_planner) — see its f2c_planner.py docstring for why.
@@ -72,6 +52,20 @@ from devkit_ui import plan_import
 
 # MISSION: store owns missions.yaml, scheduling, and run recording.
 from devkit_ui.actions import ACTIONS, action_ros_msgs
+from devkit_ui.application_services.drive_application_service import DriveApplicationService
+from devkit_ui.application_services.robot_brain_application_service import RobotBrainApplicationService
+from devkit_ui.application_services.navigation_application_service import (
+    NavigationApplicationService,
+)
+from devkit_ui.application_services.row_discovery_application_service import (
+    RowDiscoveryApplicationService,
+)
+from devkit_ui.application_services.telemetry_application_service import (
+    TelemetryApplicationService,
+)
+from devkit_ui.application_services.topology_application_service import (
+    TopologyApplicationService,
+)
 from devkit_ui.constants import NAV_ACTION, NODE_NAME, ROW_ACTION, VISION_ROW_ACTION
 
 # CONTOUR: terrain-aware reference line, from recon-logged elevation data.
@@ -82,6 +76,12 @@ from devkit_ui.dem import (
     load_recon_points,
     select_reference_contour_latlon,
 )
+from devkit_ui.domain_services.drive_domain_service import DriveDomainService
+from devkit_ui.domain_services.robot_brain_domain_service import RobotBrainDomainService
+from devkit_ui.domain_services.navigation_domain_service import NavigationDomainService
+from devkit_ui.domain_services.row_discovery_domain_service import RowDiscoveryDomainService
+from devkit_ui.domain_services.telemetry_domain_service import TelemetryDomainService
+from devkit_ui.domain_services.topology_domain_service import TopologyDomainService
 from devkit_ui.missions import MissionStore
 from devkit_ui.models import (
     NodeID,
@@ -107,26 +107,11 @@ from devkit_ui.pages.run.navigation_sidebar import NavigationSidebar
 from devkit_ui.pages.run.node_map_card import NodeMapCard
 from devkit_ui.pages.run.row_discovery_card import RowDiscoveryCard
 from devkit_ui.pages.run.track_card import TrackCard
-from devkit_ui.parse import dump_topo_yaml, parse_topo_json, parse_topo_yaml
-from devkit_ui.topo_defaults import default_actions, default_definitions
-from devkit_ui.utils.topo_renderer import build_robot_svg, build_svg, inject_click_js
+from devkit_ui.ros_gateway import RosGateway
 from devkit_ui.view_models.global_view_model import GlobalViewModel
 from devkit_ui.view_models.run_view_model import RunViewModel
-
-_TOPO_SRV_OK = False
-try:
-    from topological_navigation_msgs.action import GotoNode
-    from topological_navigation_msgs.srv import WriteTopologicalMap
-    _TOPO_SRV_OK = True
-except ImportError:
-    pass
-
-_ACTION_OK = False
-try:
-    from rclpy.action import ActionClient  # pylint: disable=ungrouped-imports
-    _ACTION_OK = True
-except ImportError:
-    pass
+from devkit_ui.view_models.telemetry_view_model import TelemetryViewModel
+from devkit_ui.view_models.topology_view_model import TopologyViewModel
 
 # Field 27's actual GPS extent, derived from maps/recon_logs/recon.csv (the
 # real Agri-Field-Dataset field-27 mesh, Zenodo 7805321 — France, ~372m x
@@ -143,21 +128,6 @@ except ImportError:
 # cosmetic.
 FIELD27_CENTER = (48.0046000, 3.6644000)
 FIELD27_BOUNDS = ((48.0031957, 3.6612233), (48.0060043, 3.6675767))
-
-SAFETY_QOS = QoSProfile(
-    depth=1,
-    reliability=ReliabilityPolicy.RELIABLE,
-    durability=DurabilityPolicy.TRANSIENT_LOCAL,
-    liveliness=LivelinessPolicy.AUTOMATIC,
-    liveliness_lease_duration=Duration(seconds=1),
-)
-
-TMAP_QOS = QoSProfile(
-    depth=1,
-    reliability=ReliabilityPolicy.RELIABLE,
-    durability=DurabilityPolicy.TRANSIENT_LOCAL,
-    history=HistoryPolicy.KEEP_LAST,
-)
 
 # CONTOUR: spacing for intermediate topo nodes dropped along curved rows
 # (see save_f2c_rows_to_topo()'s WAYPOINTS block and _resample_row_xy()
@@ -179,12 +149,6 @@ TMAP_QOS = QoSProfile(
 # shortening this interval — a denser waypoint chain along the same
 # under-resolved chord doesn't add information the chord doesn't have.
 _CONTOUR_WAYPOINT_INTERVAL_M = 2.5
-
-
-def _topo_to_msg(doc: TopoDoc) -> String:
-    msg = String()
-    msg.data = json.dumps(doc.to_dict(), ensure_ascii=False)
-    return msg
 
 
 def _resample_row_xy(points_ll: list, anchor_lat: float, anchor_lon: float,
@@ -392,25 +356,7 @@ def _shutdown_tools() -> None:
 
 app.on_shutdown(_shutdown_tools)
 
-# ── map parser ────────────────────────────────────────────────────────────────
-
-def _demo_doc() -> TopoDoc:
-    return TopoDoc(
-        name='mixed_test_map',
-        nodes=[
-            TopoNode(name='N1', pose=TopoPose(x=0.0, y=0.0), edges=['N2'], meta={}),
-            TopoNode(name='N2', pose=TopoPose(x=3.0, y=0.0), edges=['N1', 'N3'], meta={}),
-            TopoNode(name='N3', pose=TopoPose(x=6.0, y=0.0), edges=['N2', 'N4'], meta={}),
-            TopoNode(name='N4', pose=TopoPose(x=9.0, y=0.0), edges=['N3', 'N5'], meta={}),
-            TopoNode(name='N5', pose=TopoPose(x=12.0, y=0.0), edges=['N4', 'N6'], meta={}),
-            TopoNode(name='N6', pose=TopoPose(x=15.0, y=0.0), edges=['N5'], meta={}),
-        ],
-    )
-
-
 # ── SVG renderer ──────────────────────────────────────────────────────────────
-
-_TF_STALENESS_LIMIT = 2.0  # s — map->base_link older than this: don't draw it
 
 # ── Fields2Cover geometry helpers ─────────────────────────────────────────────
 
@@ -476,222 +422,61 @@ class NiceGuiNode(Node):
         """
         super().__init__(NODE_NAME)
 
-        self._global_vm = GlobalViewModel()
-        self._run_vm = RunViewModel()
+        # Instantiate the temporary ROS gateway bridge to abstract underlying ROS nodes
+        self._ros = RosGateway(self)
 
-        # Dedicated wall clock for the real/fake-GPS freshness bookkeeping
-        # below (store_gps, store_fake_gps, _publish_fake_gps,
-        # _store_fusion_odom). This node runs with use_sim_time=True in sim
-        # mode (see sim_nav.launch.py) so that TF-staleness checks agree
-        # with fusioncore's sim-time stamps once Gazebo is up. But before
-        # Gazebo publishes /clock, a sim-time Clock is frozen at 0 — which
-        # means a self.get_clock().now()-driven timer plain never fires, and
-        # "elapsed time since last real fix" comparisons against a frozen 0
-        # both read as "just happened". That silently defeated the whole
-        # point of the fake-GPS shim (a fix available before Gazebo/the real
-        # bridge exists), so save_f2c_rows_to_topo always failed with
-        # "no GPS fix yet" until Gazebo was started. Freshness here is a
-        # real-world-elapsed-seconds concept regardless of sim state, so a
-        # wall clock is correct for all of it, not just the cold-start case.
-        self._wall_clock = Clock(clock_type=ClockType.SYSTEM_TIME)
+        # The sim flag is the authoritative signal, plumbed from manage.py's is_sim through
+        # devkit.launch.py -> ui.launch.py.
+        self.declare_parameter('sim', False)
+        self._is_sim = bool(self.get_parameter('sim').value)
 
-        self.cmd_vel_publisher       = self.create_publisher(Twist,  'cmd_vel',       1)
-        self.esp_enable_publisher    = self.create_publisher(Empty,  'esp/enable',    1)
-        self.esp_disable_publisher   = self.create_publisher(Empty,  'esp/disable',   1)
-        self.esp_reset_publisher     = self.create_publisher(Empty,  'esp/reset',     1)
-        self.esp_restart_publisher   = self.create_publisher(Empty,  'esp/restart',   1)
-        self.esp_configure_publisher = self.create_publisher(Empty,  'esp/configure', 1)
-        self.estop_publisher         = self.create_publisher(Bool,   'estop/soft',    SAFETY_QOS)
+        # Initialize the domain services using the gateway.
+        self._drive_domain_service = DriveDomainService(self._ros)
+        self._topo_domain_service = TopologyDomainService(self._ros)
+        self._robot_brain_domain_service = RobotBrainDomainService(self._ros)
+        self._row_discovery_domain_service = RowDiscoveryDomainService(self._ros)
+        self._nav_domain_service = NavigationDomainService(self._ros)
+        # FIELD27_CENTER is the datum the sim GPS shim publishes. See FIELD27_CENTER for why a
+        # mismatch with the field's real datum is dangerous, not just cosmetic.
+        self._telemetry_domain_service = TelemetryDomainService(
+            self._ros, is_sim=self._is_sim, fake_gps_datum=FIELD27_CENTER)
+
+        # Set up the application service layers on top of domain services.
+        self._drive_app_service = DriveApplicationService(
+            self._drive_domain_service)
+        self._topo_app_service = TopologyApplicationService(
+            self._topo_domain_service
+        )
+        self._robot_brain_app_service = RobotBrainApplicationService(self._robot_brain_domain_service)
+        self._row_discovery_app_service = RowDiscoveryApplicationService(
+            self._row_discovery_domain_service)
+        self._nav_app_service = NavigationApplicationService(self._nav_domain_service)
+        self._telemetry_app_service = TelemetryApplicationService(
+            self._telemetry_domain_service)
+
+        # Initialize view models
+        self._global_vm = GlobalViewModel(self._drive_app_service)
+        self._run_vm = RunViewModel(
+            self._drive_app_service, self._row_discovery_app_service, self._nav_app_service)
+        self._topo_vm = TopologyViewModel(self._topo_app_service)
+        self._telemetry_vm = TelemetryViewModel(self._telemetry_app_service)
+
+        # Initialize with default demo document
+        self._topo_app_service.initialize_with_default()
 
         _SENSOR_QOS = QoSProfile(
             depth=1,
             reliability=ReliabilityPolicy.BEST_EFFORT,
         )
         self.create_subscription(
-            NavSatFix, '/gnss/fix', self.store_gps, _SENSOR_QOS)
-
-        # Sim GPS shim: saving a topo map hard-requires a finite, non-zero fix
-        # (see save path) to anchor nodes to a datum, and at cold start
-        # nothing has published one yet. Gazebo's real navsat sensor IS
-        # bridged onto /gnss/fix (ros_gz_bridge.yaml) — this shim used to
-        # publish onto that SAME topic and rely on a discovery-time backoff
-        # (get_publishers_info_by_topic) to yield to the real bridge. That
-        # was racy: DDS discovery has latency, so a bridge that starts
-        # publishing in the same window could be missed, letting one fake
-        # fix at the hardcoded datum below reach fusioncore. That datum is
-        # ~53m from a real field's actual datum (verified against
-        # maps/maize_map's back-solved origin) — a jump big enough to trip
-        # fusioncore's outlier gate and anchor it on the wrong reference for
-        # the rest of the run, silently rejecting every subsequent real fix.
-        # Fix: publish on a dedicated topic so there is no shared-topic race
-        # at all, and only let the UI treat it as a real-position fallback
-        # (topo-map save path) when no genuine /gnss/fix has arrived
-        # recently — fusioncore never subscribes to this topic, so it can
-        # no longer be corrupted by the shim regardless of timing.
-        # The sim flag is the authoritative signal, plumbed from
-        # manage.py's is_sim through devkit.launch.py -> ui.launch.py, so we
-        # never publish this on hardware. The India datum matches the
-        # leaflet centre / F2C fallback used elsewhere in this UI — see
-        # FIELD27_CENTER above.
-        _FAKE_GPS_TOPIC = '/gnss/fix_sim_shim'
-        self.declare_parameter('sim', False)
-        self._is_sim = bool(self.get_parameter('sim').value)
-        self._FAKE_GPS_LAT, self._FAKE_GPS_LON = FIELD27_CENTER
-        self._FAKE_GPS_ALT = 40.0
-        # Sentinel marking our own synthetic fixes. Kept even though the
-        # shim is off /gnss/fix now: store_fake_gps still uses it to make
-        # sure we're not somehow processing our own echo, and it's cheap
-        # insurance against a future re-merge of the two topics.
-        # status.service is uint16 and real receivers only set the low bits
-        # (GPS=1/GLONASS=2/COMPASS=4/GALILEO=8, max 15), so a high value is
-        # unambiguous and assignable.
-        self._FAKE_GPS_SENTINEL = 0xF000
-        self._last_real_gps_t = 0.0
-        if self._is_sim:
-            self._fake_gps_pub = self.create_publisher(
-                NavSatFix, _FAKE_GPS_TOPIC, _SENSOR_QOS)
-            self.create_subscription(
-                NavSatFix, _FAKE_GPS_TOPIC, self.store_fake_gps, _SENSOR_QOS)
-            # clock=self._wall_clock: a sim-time timer never fires before
-            # Gazebo publishes /clock (see _wall_clock comment above), which
-            # would silently disable this shim for the entire cold-start
-            # window it exists to cover.
-            self.create_timer(1.0, self._publish_fake_gps, clock=self._wall_clock)
-            self.get_logger().info(
-                f'Sim mode: publishing fake fix on {_FAKE_GPS_TOPIC} at datum '
-                f'({self._FAKE_GPS_LAT}, {self._FAKE_GPS_LON}) — fusioncore '
-                'does not subscribe to this topic')
-        self.create_subscription(
-            BatteryState, 'battery_state', self.store_battery, 1)
-        self.create_subscription(
-            Bool, 'bumper/front_top', self.update_bumper_front_top, SAFETY_QOS)
-        self.create_subscription(
-            Bool, 'bumper/front_bottom', self.update_bumper_front_bottom, SAFETY_QOS)
-        self.create_subscription(
-            Bool, 'bumper/back', self.update_bumper_back, SAFETY_QOS)
-        self.create_subscription(
-            Bool, 'estop/front', self.update_estop_front, SAFETY_QOS)
-        self.create_subscription(
-            Bool, 'estop/back', self.update_estop_back, SAFETY_QOS)
-
-        _ODOM_QOS = QoSProfile(
-            depth=10,
-            reliability=ReliabilityPolicy.RELIABLE,
-        )
-        self._fusion_odom_seen: bool = False
-
-        # Position covariance (diagonal xx) threshold below which a
-        # /fusion/odom message is trusted enough to take over from ground
-        # truth. fusioncore publishes early, low-confidence estimates before
-        # heading validates / lever arm resolves (e.g. covariance still huge,
-        # origin at 0,0) — latching onto the FIRST message unconditionally
-        # (previous behaviour) froze the UI marker on a garbage pose forever,
-        # since /odom stops updating latest_odom the instant any /fusion/odom
-        # message arrives. Now we keep tracking /odom until fusion's own
-        # reported covariance says it's actually trustworthy.
-        #
-        # Covariance alone is not enough: a UKF anchored to a degenerate GNSS
-        # origin (e.g. the world had no <spherical_coordinates>, so every fix
-        # was frozen at lat=0/lon=0) can report LOW covariance while dead
-        # reckoning off pure IMU+encoder with zero real GNSS correction —
-        # confidently wrong, not uncertain. Low covariance only means "the
-        # filter is internally consistent", not "the filter is right". So
-        # also require a real GNSS fix within the last few seconds
-        # (self._last_real_gps_t, set in store_gps and already used to gate
-        # the fake-fix shim) before trusting /fusion/odom at all. This is
-        # belt-and-suspenders on top of fixing the actual root cause (missing
-        # spherical_coordinates in the generated world) — it stops the UI
-        # from silently re-trusting a confidently-wrong fusion pose if that
-        # world-georeference patch ever regresses again.
-        _FUSION_COV_TRUST_THRESHOLD = 1.0  # m^2 — matches fusioncore_sim.yaml's loosened floor
-        _FUSION_GNSS_STALENESS_LIMIT = 5.0  # s — real /gnss/fix must be this fresh
-
-        def _store_fusion_odom(m: Odometry) -> None:
-            """Update the map marker from fused odometry once its covariance is trustworthy."""
-            cov_xx = m.pose.covariance[0]
-            if cov_xx <= 0.0 or cov_xx > _FUSION_COV_TRUST_THRESHOLD:
-                return  # not trustworthy yet — let /odom keep driving the marker
-            # Wall clock: _last_real_gps_t is now recorded on wall time (see
-            # store_gps), so this comparison must use the same clock.
-            now = self._wall_clock.now().nanoseconds * 1e-9
-            if now - self._last_real_gps_t > _FUSION_GNSS_STALENESS_LIMIT:
-                return  # low covariance but no recent real GNSS correction —
-                        # confidently wrong, not confidently right
-            self._fusion_odom_seen = True
-            self.latest_odom = m
-
-        self.create_subscription(Odometry, '/fusion/odom', _store_fusion_odom, _ODOM_QOS)
-        self.create_subscription(Odometry, '/odom',
-                                 self._odom_fallback, _ODOM_QOS)
-
-        # TF: _robot_pose() needs the actual map->base_link transform, not a
-        # raw odom-frame pose. odom frame origin is wherever the robot
-        # started dead-reckoning (spawn point in sim) — it does NOT coincide
-        # with map (0,0), so plotting raw /odom against topo_nodes (map
-        # frame) puts the marker off wherever it actually is, potentially
-        # off-canvas entirely. Buffer/listener give us a real map->base_link
-        # lookup regardless of whether map->odom is a static bootstrap
-        # transform (sim) or a live localisation output (real hardware).
-        self._tf_buffer = Buffer()
-        self._tf_listener = TransformListener(self._tf_buffer, self)
-
-        # /odometry/global is fed by a relay of /fusion/odom in sim (see
-        # sim_nav.launch.py) — same trust gating applies via _odom_fallback's
-        # self._fusion_odom_seen check, so it won't overwrite a good pose with
-        # a stale/uninitialized one either.
-        self.create_subscription(Odometry, '/odometry/global',
-                                 self._odom_fallback, _ODOM_QOS)
-
-        self.create_subscription(
             String,
             '/current_node',
-            lambda m: setattr(self._run_vm.topo, 'current_node', m.data),
+            lambda m: self._topo_vm.set_current_node(m.data),
             _SENSOR_QOS,
         )
 
         # Per-session, never persisted: each new map starts on geometry-only rows.
         self._row_action: str = ROW_ACTION
-        self._topo_doc:  TopoDoc | None = _demo_doc()
-        self._topo_demo: bool           = False
-        self.create_subscription(String, '/topological_map_2', self._on_topo_map, TMAP_QOS)
-        self._topo_map_pub = self.create_publisher(String, '/topological_map_2', TMAP_QOS)
-
-        if _TOPO_SRV_OK:
-            self._write_map_cli  = self.create_client(WriteTopologicalMap,
-                '/topological_map_manager2/write_topological_map')
-            self._switch_map_cli = self.create_client(WriteTopologicalMap,
-                '/topological_map_manager2/switch_topological_map')
-
-        if _ACTION_OK:
-            self._nav_ac = ActionClient(self, GotoNode, 'topological_navigation')
-
-        # Row discovery: idle service clients + live status feed from
-        # row_discovery_node (started alongside limbic_row_follow in
-        # sim_nav.launch.py / row_follow.launch.py). Node may not exist if
-        # the launch file hasn't been updated yet -- wait_for_service in
-        # start_discovery()/stop_discovery() surfaces that as a status
-        # string rather than raising.
-        self._row_discovery_start_cli = self.create_client(
-            Trigger, '/row_discovery_node/start_discovery')
-        self._row_discovery_stop_cli = self.create_client(
-            Trigger, '/row_discovery_node/stop_discovery')
-        self.create_subscription(String, '/row_discovery/status',
-            lambda m: setattr(self._run_vm.discovery, 'status', m.data), _SENSOR_QOS)
-
-        self.latest_odom:    Odometry | None     = None
-        self.latest_gps:     NavSatFix | None    = None
-        self.latest_battery: BatteryState | None = None
-
-        self.bumper_front_top_active    = False
-        self.bumper_front_bottom_active = False
-        self.bumper_back_active         = False
-        self.estop_front_active         = False
-        self.estop_back_active          = False
-        self.linear_velocity            = 0.0
-        self.angular_velocity           = 0.0
-
-        self._nav_goal_handle               = None
-        self._nav_cancel_requested          = False
 
         self._track_timer:   object  | None   = None
         self._track_counter: int              = 0
@@ -727,11 +512,6 @@ class NiceGuiNode(Node):
         self._mission_cancel:    bool          = False
         self._mission_run_id:    str | None = None   # active MissionStore id
 
-        self._pose_fail_log_t = 0.0
-
-        self._run_vm.node_map.map_svg = build_svg(self._topo_doc, None, None)
-        self._run_vm.node_map.robot_svg = build_robot_svg(self._topo_doc.nodes, None)
-
         @ui.page('/')
         def page():
             """
@@ -739,72 +519,31 @@ class NiceGuiNode(Node):
             """
             self.content()
 
-    # ── odom fallback ─────────────────────────────────────────────────────────
+    # ── Topology document property (bridge to view model) ──────────────────
+    # All existing code references self._topo_doc; this property transparently
+    # gets the mirrored doc from the view model, which is kept in sync with
+    # the domain service via the callback. Allows gradual refactoring without
+    # changing all call sites at once.
 
-    def _odom_fallback(self, msg: Odometry) -> None:
-        """Use /odom (wheel odometry) whenever /fusion/odom has not yet arrived.
+    @property
+    def _topo_doc(self) -> TopoDoc | None:
+        """Get the current topology document (view model's mirror of domain)."""
+        return self._topo_vm.topo_doc
 
-        The original guard (if self.latest_odom is None) froze the value after
-        the first message, giving a stale pose for every subsequent drop/save.
-        We instead update continuously as long as /fusion/odom hasn't been seen —
-        tracked by whether the subscriber lambda has ever fired (self._fusion_odom_seen).
-        """
-        if not self._fusion_odom_seen:
-            self.latest_odom = msg
+    # ── Telemetry (bridge to the telemetry service) ────────────────────────
+    # ObstacleManager, MissionStore and the F2C/drop-node code read the latest odometry and GPS
+    # fix off the node. These read-only properties keep those call sites unchanged while the
+    # state itself lives in the telemetry service.
 
-    def _robot_pose(self) -> tuple | None:
-        """(x, y, yaw) of the robot in map frame, or None if unavailable.
+    @property
+    def latest_odom(self) -> Odometry | None:
+        """Return the odometry currently driving the UI, or None before any has arrived."""
+        return self._telemetry_app_service.latest_odom
 
-        Real map->base_link TF lookup, not raw /odom — odom's origin is the
-        robot's dead-reckoning start point (spawn in sim), not map (0,0), so
-        using it raw plots the marker off by the full map->odom offset.
-
-        Liveness and staleness are both checked against the TF result itself
-        (not latest_odom, which this no longer reads) so the marker tracks
-        the actual thing being drawn: if /odom dies but TF is still fresh,
-        keep showing it; if TF stalls, blank it even if /odom is still
-        ticking.
-        """
-        # TEMP DIAGNOSTIC (remove once the marker-drop cause is confirmed):
-        # distinguishes "TF lookup threw" from "TF stale" from "all fine" so
-        # we can see which one fires when the marker disappears on nav start.
-        # Rate-limited to ~1/s so it doesn't flood the log while the failure
-        # persists across many UI refresh ticks.
-        now_wall = self.get_clock().now().nanoseconds * 1e-9
-        can_log  = (now_wall - self._pose_fail_log_t) > 1.0
-
-        try:
-            t = self._tf_buffer.lookup_transform(
-                'map', 'base_link', Time())
-        except (LookupException, ConnectivityException, ExtrapolationException) as e:
-            if can_log:
-                self._pose_fail_log_t = now_wall
-                self.get_logger().warn(
-                    f'_robot_pose: TF lookup map->base_link failed '
-                    f'({type(e).__name__}): {e}')
-            return None
-        stamp = t.header.stamp.sec + t.header.stamp.nanosec * 1e-9
-        now = self.get_clock().now().nanoseconds * 1e-9
-        if now - stamp > _TF_STALENESS_LIMIT:
-            if can_log:
-                self._pose_fail_log_t = now_wall
-                self.get_logger().warn(
-                    f'_robot_pose: TF map->base_link stale by '
-                    f'{now - stamp:.2f}s (limit {_TF_STALENESS_LIMIT}s)')
-            return None
-        p, q = t.transform.translation, t.transform.rotation
-        yaw = math.atan2(2 * (q.w * q.z + q.x * q.y),
-                         1 - 2 * (q.y * q.y + q.z * q.z))
-        return (p.x, p.y, yaw)
-
-    # ── map callback ──────────────────────────────────────────────────────────
-
-    def _on_topo_map(self, msg: String) -> None:
-        try:
-            self._topo_doc = parse_topo_json(msg.data)
-            self._topo_demo  = False
-        except Exception as e:
-            self.get_logger().warn(f'Failed to parse /topological_map_2: {e}')
+    @property
+    def latest_gps(self) -> NavSatFix | None:
+        """Return the latest usable GNSS fix, or None before any has arrived."""
+        return self._telemetry_app_service.latest_gps
 
     # ── nav actions ───────────────────────────────────────────────────────────
 
@@ -814,79 +553,16 @@ class NiceGuiNode(Node):
         Parameters:
             target (str): Name of the topology node to navigate to.
         """
-        if not _ACTION_OK:
-            self._run_vm.topo.nav_status = 'action unavailable (import failed)'
-            return
         if self._run_vm.topo.navigating or self._global_vm.soft_estop_active:
             self.get_logger().warn(
                 'send_nav_goal: rejected — navigation already in progress '
                 'or soft-estop active')
             return
-        self._nav_cancel_requested = False
-        self._run_vm.topo.nav_status = f'connecting → {target}…'
-        self._run_vm.topo.navigating = True
-        def _send():
-            """Send a navigation goal to the action server and update navigation status."""
-            ready = self._nav_ac.wait_for_server(timeout_sec=5.0)
-            if not ready:
-                self._run_vm.topo.nav_status = 'action server not ready (5s timeout)'
-                self._run_vm.topo.navigating = False
-                return
-            goal = GotoNode.Goal()
-            goal.target = target
-            self._run_vm.topo.nav_status = f'→ {target}'
-            future = self._nav_ac.send_goal_async(goal, feedback_callback=self._nav_feedback)
-            future.add_done_callback(self._nav_accepted)
-        threading.Thread(target=_send, daemon=True).start()
-
-    def _nav_accepted(self, future) -> None:
-        """Handle acceptance of a navigation goal and register its result callback.
-
-        If cancellation was requested while the goal was still pending acceptance,
-        cancel this handle immediately instead of letting it run unchecked.
-        """
-        gh = future.result()
-        if not gh.accepted:
-            self._run_vm.topo.nav_status = 'goal rejected'
-            self._run_vm.topo.navigating = False
-            self._nav_cancel_requested = False
-            return
-        self._nav_goal_handle = gh
-        if self._nav_cancel_requested:
-            self._nav_cancel_requested = False
-            self._run_vm.topo.nav_status = 'cancelling…'
-            gh.cancel_goal_async()
-        gh.get_result_async().add_done_callback(self._nav_result)
-
-    def _nav_feedback(self, feedback_msg) -> None:
-        """Update the navigation status with the current feedback location."""
-        fb  = feedback_msg.feedback
-        loc = getattr(fb, 'current_node', None) or getattr(fb, 'status', '…')
-        self._run_vm.topo.nav_status = f'en route · {loc}'
-
-    def _nav_result(self, future) -> None:
-        """Update navigation state after a navigation goal completes."""
-        success = getattr(future.result().result, 'success', True)
-        self._run_vm.topo.nav_status = 'arrived' if success else 'failed'
-        self._run_vm.topo.navigating = False
-        self._nav_goal_handle = None
+        self._run_vm.navigate_to(target)
 
     def cancel_nav_goal(self) -> None:
-        """Cancel the active navigation goal.
-
-        If the goal has already been accepted, cancel it now. If a send is still
-        in flight (accepted status not yet known), flag it so `_nav_accepted`
-        cancels it the moment it arrives, and keep `navigating` set so a second
-        goal cannot be accepted in the meantime.
-        """
-        if self._nav_goal_handle:
-            self._nav_goal_handle.cancel_goal_async()
-            self._nav_goal_handle = None
-            self._run_vm.topo.nav_status = 'cancelled'
-            self._run_vm.topo.navigating = False
-        elif self._run_vm.topo.navigating:
-            self._nav_cancel_requested = True
-            self._run_vm.topo.nav_status = 'cancelling…'
+        """Cancel the active navigation goal."""
+        self._run_vm.cancel_navigation()
 
     # ── node dropping ─────────────────────────────────────────────────────────
 
@@ -929,12 +605,12 @@ class NiceGuiNode(Node):
 
         x = round(self.latest_odom.pose.pose.position.x, 3) if self.latest_odom else 0.0
         y = round(self.latest_odom.pose.pose.position.y, 3) if self.latest_odom else 0.0
-        current_node = self._run_vm.topo.current_node
+        current_node = self._topo_vm.current_node
         connect_to = (current_node
                       if current_node not in ('—', 'none', 'None', '', None) else None)
         if connect_to and not self._topo_doc.has_node(connect_to):
             connect_to = None
-        selected_node = self._run_vm.topo.selected_node
+        selected_node = self._topo_vm.selected_node
         if not connect_to and selected_node and self._topo_doc.has_node(selected_node):
             connect_to = selected_node
         map_name  = self._topo_doc.name
@@ -998,77 +674,30 @@ class NiceGuiNode(Node):
             f'{name}{conn_str} at ({x}, {y}){row_str}{gps_str} — writing…')
 
         def _publish_and_persist():
-            """Persist the updated topology map and make it available to the navigation system.
+            """Save the dropped node and make the updated map available to navigation.
 
-            Create a missing map with default actions and definitions. Save only the new node
-            and its edges to previously saved targets, without adding reverse edges. A duplicate
-            name on disk skips writing and publishing. After saving, replace the in-memory map
-            and switch or publish it. Worker exceptions become drop_node.status errors.
+            The service creates a missing map from defaults, saves only edges to nodes
+            already on disk and adds no reverse edges. A duplicate name on disk skips
+            writing. Worker exceptions become drop_node.status errors.
             """
             try:
-                map_file      = f'/workspace/maps/{map_name}'
+                base = f'{name}{conn_str} at ({x},{y}){row_str}{gps_str}'
 
-                if os.path.exists(map_file):
-                    file_doc = parse_topo_yaml(map_file)
-                elif self._topo_doc:
-                    file_doc = self._topo_doc.clone_empty(map_name)
-                    file_doc.seed_actions(default_actions(), default_definitions())
-                    self.get_logger().info('Seeding new map from repo defaults')
-                else:
-                    file_doc = self._topo_doc
-                    self.get_logger().warn('No YAML source — JSON fallback')
+                def _saved() -> None:
+                    """Show reloading status after saving the node and before switching maps."""
+                    self._run_vm.drop_node.status = f'{base} — reloading…'
 
-                existing_names = {e.name for e in file_doc.nodes}
-                if name in existing_names:
+                result = self._topo_app_service.drop_node(new_node, on_saved=_saved)
+                if result.kind == 'skipped':
                     self.get_logger().warn(f'Node {name} already in file — skipping write')
                     return
-
-                saved_node = copy.deepcopy(new_node)
-                saved_node.remove_edges({
-                    edge.node for edge in saved_node.edges if edge.node not in existing_names
-                })
-                file_doc.insert_node(saved_node)
-                dump_topo_yaml(file_doc, map_file)
-
-                self._topo_doc = file_doc
-
-                self._run_vm.drop_node.status = (
-                    f'{name}{conn_str} at ({x}, {y})'
-                    f'{row_str}{gps_str} — reloading…'
-                )
-
-                def _call(client, req, timeout=5.0):
-                    ev = threading.Event()
-                    res = [None]
-                    def _cb(f):
-                        res[0] = f.result()
-                        ev.set()
-                    client.call_async(req).add_done_callback(_cb)
-                    ev.wait(timeout=timeout)
-                    return res[0]
-
-                if _TOPO_SRV_OK:
-                    sw = WriteTopologicalMap.Request()
-                    sw.filename = f'/workspace/maps/{map_name}'
-                    sw.no_alias = True
-                    sr = _call(self._switch_map_cli, sw)
-                    if sr and sr.success:
-                        self._run_vm.drop_node.status = (
-                            f'{name}{conn_str} at ({x},{y})'
-                            f'{row_str}{gps_str} — live'
-                        )
-                    else:
-                        self._topo_map_pub.publish(_topo_to_msg(self._topo_doc))
-                        err = sr.message if sr else 'timeout'
-                        self._run_vm.drop_node.status = (
-                            f'{name}{conn_str} saved (switch failed: {err})')
-                        self.get_logger().warn(f'switch_topological_map failed ({err})')
-                else:
-                    self._topo_map_pub.publish(_topo_to_msg(self._topo_doc))
+                if result.kind == 'switch_failed':
                     self._run_vm.drop_node.status = (
-                        f'{name}{conn_str} at ({x},{y})'
-                        f'{row_str}{gps_str} — live (no srv)'
-                    )
+                        f'{name}{conn_str} saved (switch failed: {result.detail})')
+                    self.get_logger().warn(
+                        f'switch_topological_map failed ({result.detail})')
+                else:
+                    self._run_vm.drop_node.status = result.describe(base)
                 self.get_logger().info(
                     f'Node dropped: {name} at ({x:.3f},{y:.3f}){conn_str}{row_str}{gps_str}')
             except Exception as e:
@@ -1159,49 +788,12 @@ class NiceGuiNode(Node):
     # ── Row discovery ────────────────────────────────────────────────────────
 
     def start_discovery(self) -> None:
-        """Initiate row discovery through the configured ROS 2 Trigger service.
-
-        Updates the discovery status as the request starts, completes, or fails.
-        """
-        self._run_vm.discovery.status = 'starting…'
-        def _work():
-            """
-            Start row discovery and update its status based on service availability and response.
-            """
-            if not self._row_discovery_start_cli.wait_for_service(timeout_sec=2.0):
-                self._run_vm.discovery.active = False
-                self._run_vm.discovery.status = 'ERROR: row_discovery_node not running'
-                return
-            def _cb(f):
-                try:
-                    res = f.result()
-                    self._run_vm.discovery.active = res.success
-                    self._run_vm.discovery.status = res.message or (
-                        'running' if res.success else 'failed to start')
-                except Exception as e:
-                    self._run_vm.discovery.active = False
-                    self._run_vm.discovery.status = f'ERROR: {e}'
-            self._row_discovery_start_cli.call_async(
-                Trigger.Request()).add_done_callback(_cb)
-        threading.Thread(target=_work, daemon=True).start()
+        """Start row discovery."""
+        self._run_vm.start_discovery()
 
     def stop_discovery(self) -> None:
-        """Stop row discovery and update its status when the request completes."""
-        def _work():
-            def _cb(f):
-                try:
-                    res = f.result()
-                    if res.success:
-                        self._run_vm.discovery.active = False
-                        self._run_vm.discovery.status = res.message or 'stopped'
-                    else:
-                        self._run_vm.discovery.status = res.message or (
-                            'ERROR: stop failed — discovery state unknown')
-                except Exception as e:
-                    self._run_vm.discovery.status = f'ERROR: {e} — discovery state unknown'
-            self._row_discovery_stop_cli.call_async(
-                Trigger.Request()).add_done_callback(_cb)
-        threading.Thread(target=_work, daemon=True).start()
+        """Stop row discovery."""
+        self._run_vm.stop_discovery()
 
     def _persist_and_reload(self, modify_fn: Callable[[TopoDoc], None], status_owner: object,
                              status_attr: str, success_msg: str) -> None:
@@ -1220,63 +812,11 @@ class NiceGuiNode(Node):
                                  success_msg (str): Message reported after the map is persisted
                                  successfully.
                              """
-        map_name = self._topo_doc.name
-        map_file = f'/workspace/maps/{map_name}'
-
         def _work():
-            """
-            Apply a topology modification, persist the updated map, and reload it for live use.
-
-            Load the map file when present; otherwise copy the current topology and seed default
-            actions and definitions if it has no actions. Modification, persistence, and reload
-            exceptions become status errors. A failed or timed-out switch response falls back
-            to publishing the saved map.
-            """
+            """Run the service's persist-and-reload and report the outcome as a status."""
             try:
-                if os.path.exists(map_file):
-                    file_doc = parse_topo_yaml(map_file)
-                else:
-                    file_doc = copy.deepcopy(self._topo_doc)
-                    if not file_doc.actions:
-                        file_doc.seed_actions(default_actions(), default_definitions())
-
-                modify_fn(file_doc)
-
-                # Backfill missing per-node entry meta (hand-written nodes,
-                # and anything modify_fn() just added — e.g. F2C row saves
-                # set meta.map/meta.node but not meta.pointset, which the
-                # tmap schema requires). Must run after modify_fn(), not
-                # before, or newly-added nodes never get backfilled.
-                file_doc.ensure_meta(map_name)
-
-                dump_topo_yaml(file_doc, map_file)
-                self._topo_doc = file_doc
-
-                def _call(client, req, timeout=5.0):
-                    ev = threading.Event()
-                    res = [None]
-                    def _cb(f):
-                        res[0] = f.result()
-                        ev.set()
-                    client.call_async(req).add_done_callback(_cb)
-                    ev.wait(timeout=timeout)
-                    return res[0]
-
-                if _TOPO_SRV_OK:
-                    sw = WriteTopologicalMap.Request()
-                    sw.filename = map_file
-                    sw.no_alias = True
-                    sr = _call(self._switch_map_cli, sw)
-                    if sr and sr.success:
-                        setattr(status_owner, status_attr, f'{success_msg} — live')
-                    else:
-                        self._topo_map_pub.publish(_topo_to_msg(self._topo_doc))
-                        err = sr.message if sr else 'timeout'
-                        setattr(status_owner, status_attr,
-                                f'{success_msg} (switch failed: {err})')
-                else:
-                    self._topo_map_pub.publish(_topo_to_msg(self._topo_doc))
-                    setattr(status_owner, status_attr, f'{success_msg} — live (no srv)')
+                result = self._topo_app_service.persist_and_reload(modify_fn)
+                setattr(status_owner, status_attr, result.describe(success_msg))
                 self.get_logger().info(f'_persist_and_reload: {success_msg}')
             except Exception as e:
                 setattr(status_owner, status_attr, f'ERROR: {e}')
@@ -1393,13 +933,13 @@ class NiceGuiNode(Node):
         nav_frame = self._topo_doc.transformation.get('topo_frame_id') or 'map'
         timestamp = datetime.now(UTC).strftime('%d-%m-%Y_%H-%M-%S')
 
-        current_node = self._run_vm.topo.current_node
+        current_node = self._topo_vm.current_node
         connect_to = (current_node
                       if current_node not in ('—', 'none', 'None', '', None)
                       else None)
         if connect_to and not self._topo_doc.has_node(connect_to):
             connect_to = None
-        selected_node = self._run_vm.topo.selected_node
+        selected_node = self._topo_vm.selected_node
         if not connect_to and selected_node and self._topo_doc.has_node(selected_node):
             connect_to = selected_node
 
@@ -1743,8 +1283,8 @@ class NiceGuiNode(Node):
             self._run_vm.topo.delete_status = f'ERROR: {name!r} not in map'
             return
 
-        if self._run_vm.topo.selected_node == name:
-            self._run_vm.topo.selected_node = None
+        if self._topo_vm.selected_node == name:
+            self._topo_vm.set_selected_node(None)
         self._run_vm.topo.delete_status = f'deleting {name}…'
 
         def _modify(file_doc):
@@ -1776,8 +1316,8 @@ class NiceGuiNode(Node):
             self._run_vm.topo.delete_status = 'ERROR: map not loaded'
             return
 
-        if self._run_vm.topo.selected_node in targets:
-            self._run_vm.topo.selected_node = None
+        if self._topo_vm.selected_node in targets:
+            self._topo_vm.set_selected_node(None)
         self._run_vm.topo.delete_status = f'deleting row {row_id} ({len(targets)} nodes)…'
 
         def _modify(file_doc):
@@ -1840,19 +1380,11 @@ class NiceGuiNode(Node):
     # ── existing helpers below ───────────────────────────────────────────────
 
     def _patch_node_role(self, node_name: str, role: str) -> None:
-        if not self._topo_doc:
-            return
-        map_name = self._topo_doc.name
-        map_file = f'/workspace/maps/{map_name}'
+        """Update the saved node role in a worker thread without blocking the caller."""
         def _write():
+            """Persist the role through the topology service and log any failure."""
             try:
-                if not os.path.exists(map_file):
-                    return
-                doc = parse_topo_yaml(map_file)
-                if doc.has_node(node_name):
-                    node = doc.get_node(node_name)
-                    node.patch_role(role)
-                dump_topo_yaml(doc, map_file)
+                self._topo_app_service.patch_node_role(node_name, role)
             except Exception as e:
                 self.get_logger().error(f'_patch_node_role failed: {e}')
         threading.Thread(target=_write, daemon=True).start()
@@ -1888,15 +1420,13 @@ class NiceGuiNode(Node):
                 with ui.row().classes('w-full gap-3 items-stretch'):
 
                     JoystickControlCard(
-                        global_store=self._global_vm,
-                        state=self._run_vm.joystick,
-                        on_move=self.send_speed,
-                        on_stop=lambda: self.send_speed(0.0, 0.0),
-                        on_estop=self.toggle_estop
+                        global_vm=self._global_vm,
+                        run_vm=self._run_vm,
                     )
 
                     NodeMapCard(
-                        state=self._run_vm.node_map,
+                        topo_vm=self._topo_vm,
+                        pose_state=self._run_vm.node_map,
                     )
 
                 with ui.row().classes('w-full gap-3 items-start'):
@@ -1909,7 +1439,7 @@ class NiceGuiNode(Node):
 
                     DropNodeCard(
                         state=self._run_vm.drop_node,
-                        topo_state=self._run_vm.topo,
+                        topo_vm=self._topo_vm,
                         on_drop=self.drop_topo_node,
                         on_row_action=self.set_row_action,
                     )
@@ -1925,20 +1455,21 @@ class NiceGuiNode(Node):
 
             navigation_sidebar = NavigationSidebar(
                 global_store=self._global_vm,
-                topo_state=self._run_vm.topo,
+                topo_vm=self._topo_vm,
+                nav_state=self._run_vm.topo,
                 on_go=lambda:
-                    self.send_nav_goal(self._run_vm.topo.selected_node)
-                    if self._run_vm.topo.selected_node else None,
+                    self.send_nav_goal(self._topo_vm.selected_node)
+                    if self._topo_vm.selected_node else None,
                 on_cancel=self.cancel_nav_goal,
-                on_delete=lambda: self.confirm_delete_node(self._run_vm.topo.selected_node),
-                on_select=lambda name: setattr(self._run_vm.topo, 'selected_node', name),
+                on_delete=lambda: self.confirm_delete_node(self._topo_vm.selected_node),
+                on_select=lambda name: self._topo_vm.set_selected_node(name),
             )
 
         def on_node_clicked(e) -> None:
             """Selects the clicked topology node when it exists in the current map."""
             n = (e.args or {}).get('node')
             if n and self._topo_doc and self._topo_doc.has_node(n):
-                self._run_vm.topo.selected_node = n
+                self._topo_vm.set_selected_node(n)
         ui.on('topo_node_clicked', on_node_clicked)
 
         _prev: dict = {}
@@ -1947,27 +1478,22 @@ class NiceGuiNode(Node):
             """
             Refresh the navigation view with the latest robot pose, topology, and navigation state.
             """
-            odom = self.latest_odom
-            gps  = self.latest_gps
-            if odom is not None:
-                px, py  = odom.pose.pose.position.x, odom.pose.pose.position.y
-                gps_str = (f'\n{gps.latitude:.5f}\n{gps.longitude:.5f}'
-                        if gps and gps.status.status >= 0 else '')
-                self._run_vm.joystick.pose_lbl = f'({px:.2f}, {py:.2f}){gps_str}'
-            else:
-                self._run_vm.joystick.pose_lbl = 'no odom'
+            self._telemetry_vm.refresh()
+            self._run_vm.update_pose_label(self._telemetry_vm.odom, self._telemetry_vm.gps)
 
             topo_doc = self._topo_doc
             if topo_doc is None:
                 return
 
-            current_node = self._run_vm.topo.current_node
+            current_node = self._topo_vm.current_node
 
-            rp = self._robot_pose()
+            rp = self._telemetry_vm.robot_pose()
             rp_key = None if rp is None else (round(rp[0], 1), round(rp[1], 1),
                                             round(rp[2], 2))
+            self._run_vm.node_map.robot_pose = rp
+
             snap = {
-                'sel': self._run_vm.topo.selected_node,
+                'sel': self._topo_vm.selected_node,
                 'cur': current_node,
                 'stat': self._run_vm.topo.nav_status,
                 'nav': self._run_vm.topo.navigating,
@@ -1980,25 +1506,13 @@ class NiceGuiNode(Node):
                 return
             _prev.update(snap)
 
-            if changed & {'robot', 'nodes'}:
-                self._run_vm.node_map.robot_svg = build_robot_svg(topo_doc.nodes, rp)
-
-            if changed & {'sel', 'cur', 'nodes'}:
-                self._run_vm.node_map.map_svg = build_svg(
-                    topo_doc,
-                    self._run_vm.topo.selected_node,
-                    current_node,
-                )
-                inject_click_js()
-
             if changed & {'sel', 'nodes'}:
                 navigation_sidebar.render_nodes(
                     topo_doc.nodes,
-                    self._run_vm.topo.selected_node,
+                    self._topo_vm.selected_node,
                 )
 
         ui.timer(0.2, refresh_nav)
-        inject_click_js()
 
     # ── Mission tab ───────────────────────────────────────────────────────────
 
@@ -2320,8 +1834,8 @@ class NiceGuiNode(Node):
             topo_doc = self._topo_doc
             if topo_doc is None:
                 return
-            cur = self._run_vm.topo.current_node
-            selected = self._run_vm.topo.selected_node
+            cur = self._topo_vm.current_node
+            selected = self._topo_vm.selected_node
             default_base = ''
             if cur not in ('—', 'none', 'None', '', None) and topo_doc.has_node(cur):
                 default_base = cur
@@ -2726,7 +2240,7 @@ class NiceGuiNode(Node):
             status_lbl.set_text('ERROR: mission already running')
             status_lbl.style('color:#cf222e')
             return
-        if not _ACTION_OK:
+        if not self._run_vm.navigation_available:
             status_lbl.set_text('ERROR: action client unavailable')
             status_lbl.style('color:#cf222e')
             return
@@ -2834,80 +2348,15 @@ class NiceGuiNode(Node):
         threading.Thread(target=_execute, daemon=True).start()
 
     def _send_goal_sync(self, target: str, timeout_sec: float = 300.0) -> bool:
-        """Synchronously execute navigation to a topological node.
-
-        Parameters:
-            target (str): Name of the destination node.
-            timeout_sec (float): Maximum time to wait for navigation completion.
+        """Navigate to a topology node and block until it ends.
 
         Returns:
-            bool: True if navigation succeeds, False if it fails, is cancelled, times out, or the
-            action server is unavailable.
+            bool: True if the robot arrived, False if navigation failed, was cancelled, timed
+            out, or the action server was unavailable.
         """
-        if not _ACTION_OK:
-            return False
-
-        done_event = threading.Event()
-        result_holder: list = [None]
-
-        if not self._nav_ac.wait_for_server(timeout_sec=10.0):
-            self.get_logger().warn('_send_goal_sync: action server not ready')
-            return False
-
-        goal = GotoNode.Goal()
-        goal.target = target
-        self._run_vm.topo.nav_status = f'→ {target}'
-        self._run_vm.topo.navigating = True
-
-        def _on_accepted(future):
-            """
-            Handle acceptance of a navigation goal and register its result callback.
-
-            Parameters:
-                future: Future containing the navigation goal handle.
-            """
-            gh = future.result()
-            if not gh.accepted:
-                result_holder[0] = False
-                self._run_vm.topo.nav_status = 'goal rejected'
-                self._run_vm.topo.navigating = False
-                done_event.set()
-                return
-            self._nav_goal_handle = gh
-            gh.get_result_async().add_done_callback(_on_result)
-
-        def _on_result(future):
-            """
-            Handle completion of a navigation goal and update its status.
-
-            Parameters:
-                future: Future containing the navigation result.
-            """
-            success = getattr(future.result().result, 'success', True)
-            result_holder[0] = success
-            self._run_vm.topo.nav_status = 'arrived' if success else 'failed'
-            self._run_vm.topo.navigating = False
-            self._nav_goal_handle = None
-            done_event.set()
-
-        self._nav_ac.send_goal_async(
-            goal, feedback_callback=self._nav_feedback
-        ).add_done_callback(_on_accepted)
-
-        deadline = timeout_sec
-        interval = 0.25
-        while not done_event.wait(timeout=interval):
-            deadline -= interval
-            if deadline <= 0:
-                self.get_logger().warn(f'_send_goal_sync: timeout for {target}')
-                self.cancel_nav_goal()
-                return False
-            if self._mission_cancel or self._global_vm.soft_estop_active:
-                self.cancel_nav_goal()
-                done_event.wait(timeout=2.0)
-                return False
-
-        return bool(result_holder[0])
+        return self._run_vm.navigate_and_wait(
+            target, timeout_sec,
+            lambda: self._mission_cancel or self._global_vm.soft_estop_active)
 
     def cancel_mission(self) -> None:
         """Signal the executor thread to stop after the current row."""
@@ -2947,99 +2396,28 @@ class NiceGuiNode(Node):
             _modify, self._run_vm.drop_node, 'status',
             f'row action: {action}, {n_edges} row edges updated')
 
-    _MAP_NAME_RE = re.compile(r'^[A-Za-z0-9][A-Za-z0-9_-]{0,63}$')
-
     def save_map_as(self, name: str) -> str:
-        """Save a named copy of the current map to /workspace/maps/<name>.
-
-        The live map is left as it is. Refuses to overwrite an existing file.
-        Prefer the persisted map, falling back to memory only if its file is absent.
-        Strip surrounding whitespace from name; require 1-64 ASCII letters, digits,
-        underscores, or hyphens, starting with a letter or digit.
-
-        Return 'saved → <name>' on success or an 'ERROR:' status for a missing or empty
-        map, an invalid or occupied name, or an exception while reading or saving.
-        """
-        name = (name or '').strip()
-        if not self._topo_doc:
-            return 'ERROR: map not loaded'
-        if not self._MAP_NAME_RE.match(name):
-            return 'ERROR: use letters, digits, _ or - (max 64, start with a letter or digit)'
-        if name == self._topo_doc.name:
-            return 'ERROR: that is the live map name'
-        target = f'/workspace/maps/{name}'
-        if os.path.exists(target):
-            return f'ERROR: {name} already exists'
-        live_file = f'/workspace/maps/{self._topo_doc.name}'
-        try:
-            # Save the persisted state, not just memory.
-            src = parse_topo_yaml(live_file) if os.path.exists(live_file) else self._topo_doc
-            if not any(True for _ in src.nodes):
-                return 'ERROR: map has no nodes'
-            os.makedirs('/workspace/maps', exist_ok=True)
-            dump_topo_yaml(src.renamed(name), target)
-            self.get_logger().info(f'save_map_as: saved {target}')
-            return f'saved → {name}'
-        except Exception as e:
-            self.get_logger().error(f'save_map_as failed: {e}')
-            return f'ERROR: {e}'
+        """Save a named copy of the current map. See TopologyApplicationService.save_map_as."""
+        return self._topo_app_service.save_map_as(name)
 
     def archive_and_clear_map(self) -> str:
-        """Copy current map file to /workspace/maps/<name>_<N>, then write a
-        fresh empty map doc back to the original path and attempt to publish it.
+        """Archive the saved map as <name>_<N> and replace it with an empty default map.
 
-        Choose the first unused suffix starting at 1. Archive the persisted map,
-        or the in-memory map if no file exists. Reset actions and definitions to
-        repository defaults and row driving to geometry mode.
-
-        Return an archive status or an 'ERROR:' status for a missing map or a
-        read/write failure. Publishing errors are ignored, and earlier writes
-        are not rolled back if a later step fails.
+        Reset row driving to geometry mode on success. Return an archive status, or an
+        'ERROR:' status for a missing map or a read/write failure; the row mode is left
+        alone in that case.
         """
         if not self._topo_doc:
             return 'ERROR: no map loaded'
-
-        map_name = self._topo_doc.name
-        map_file = f'/workspace/maps/{map_name}'
-
-        # Pick next available archive index
-        i = 1
-        while os.path.exists(f'{map_file}_{i}'):
-            i += 1
-        archive_path = f'{map_file}_{i}'
-
         try:
-            # Read from disk so we archive the persisted state, not just memory
-            if os.path.exists(map_file):
-                on_disk = parse_topo_yaml(map_file)
-            else:
-                on_disk = copy.deepcopy(self._topo_doc)
-
-            dump_topo_yaml(on_disk, archive_path)
-
-            empty_doc = self._topo_doc.clone_empty(map_name)
-
-            # A cleared map is a new map: always start from repo defaults.
-            empty_doc.seed_actions(default_actions(), default_definitions())
-
-            dump_topo_yaml(empty_doc, map_file)
-            self._topo_doc = empty_doc
-            self._row_action = ROW_ACTION
-            self._run_vm.drop_node.row_action = ROW_ACTION
-
-            # Republish so topo nav stack sees the cleared map immediately
-            try:
-                self._topo_map_pub.publish(_topo_to_msg(empty_doc))
-            except Exception:
-                pass
-
-            self.get_logger().info(
-                f'archive_and_clear_map: archived to {archive_path}')
-            return f'archived → {os.path.basename(archive_path)}'
-
+            archive = self._topo_app_service.archive_and_clear()
         except Exception as e:
             self.get_logger().error(f'archive_and_clear_map failed: {e}')
             return f'ERROR: {e}'
+        self._row_action = ROW_ACTION
+        self._run_vm.drop_node.row_action = ROW_ACTION
+        self.get_logger().info(f'archive_and_clear_map: archived to {archive}')
+        return f'archived → {archive}'
 
     # ── System tab ────────────────────────────────────────────────────────────
 
@@ -3052,16 +2430,15 @@ class NiceGuiNode(Node):
                 ui.label('Telemetry').classes('font-semibold mb-2')
                 ui.html('<div class="sec-label">Linear velocity</div>')
                 ui.slider(min=-1, max=1, step=0.05, value=0).props(
-                    'readonly selection-color=transparent color=green').bind_value(
-                        self, 'linear_velocity')
+                    'readonly selection-color=transparent color=green').bind_value_from(
+                        self._telemetry_vm, 'linear_velocity')
                 ui.html('<div class="sec-label mt-2">Angular velocity</div>')
                 ui.slider(min=-1, max=1, step=0.05, value=0).props(
-                    'readonly selection-color=transparent color=green').bind_value(
-                        self, 'angular_velocity')
+                    'readonly selection-color=transparent color=green').bind_value_from(
+                        self._telemetry_vm, 'angular_velocity')
                 ui.html('<div class="sec-label mt-3">Battery</div>')
-                ui.label().classes('text-sm').bind_text_from(self, 'latest_battery',
-                    lambda msg: (f'{msg.percentage*100:.1f}%  {msg.voltage:.1f} V'
-                                 if msg is not None else '—'))
+                ui.label().classes('text-sm').bind_text_from(
+                    self._telemetry_vm, 'battery_text')
             with ui.card().classes('flex-1'):
                 ui.label('Safety').classes('font-semibold mb-2')
                 ui.html('<div class="sec-label">Bumpers</div>')
@@ -3074,7 +2451,7 @@ class NiceGuiNode(Node):
                     def _mk(d=dot, a=attr):
                         def _u():
                             d.set_content(
-                                f'<span class="dot-{"warn" if getattr(self,a) else "ok"}"></span>')
+                                f'<span class="dot-{"warn" if getattr(self._telemetry_vm, a) else "ok"}"></span>')
                         return _u
                     ui.timer(0.2, _mk())
                 ui.html('<div class="sec-label mt-3">E-stops</div>')
@@ -3085,26 +2462,26 @@ class NiceGuiNode(Node):
                     def _mk2(d=dot, a=attr):
                         def _u():
                             d.set_content(
-                                f'<span class="dot-{"warn" if getattr(self,a) else "off"}"></span>')
+                                f'<span class="dot-{"warn" if getattr(self._telemetry_vm, a) else "off"}"></span>')
                         return _u
                     ui.timer(0.2, _mk2())
         with ui.card().classes('w-full mt-3'):
             ui.label('ESP').classes('font-semibold mb-2')
             with ui.row().classes('gap-2 flex-wrap'):
                 ui.button('Enable',
-                    on_click=lambda: self.esp_enable_publisher.publish(Empty())).props(
+                    on_click=self._robot_brain_app_service.enable).props(
                         'color=positive outline no-caps').classes('px-4')
                 ui.button('Disable',
-                    on_click=lambda: self.esp_disable_publisher.publish(Empty())).props(
+                    on_click=self._robot_brain_app_service.disable).props(
                         'color=negative outline no-caps').classes('px-4')
                 ui.button('Reset',
-                    on_click=lambda: self.esp_reset_publisher.publish(Empty())).props(
+                    on_click=self._robot_brain_app_service.reset).props(
                         'color=warning outline no-caps').classes('px-4')
                 ui.button('Restart',
-                    on_click=lambda: self.esp_restart_publisher.publish(Empty())).props(
+                    on_click=self._robot_brain_app_service.restart).props(
                         'color=primary outline no-caps').classes('px-4')
                 ui.button('Configure',
-                    on_click=lambda: self.esp_configure_publisher.publish(Empty())).props(
+                    on_click=self._robot_brain_app_service.configure).props(
                         'outline no-caps').classes('px-4')
         with ui.card().classes('w-full mt-3'):
             ui.label('GPS').classes('font-semibold mb-2')
@@ -3116,16 +2493,17 @@ class NiceGuiNode(Node):
             _FIX_LABELS = {-1: 'NO FIX', 0: 'AUTONOMOUS', 1: 'SBAS',
                             2: 'DGNSS', 4: 'RTK FLOAT', 5: 'RTK FIXED'}
             def update_gps_ui():
-                if self.latest_gps is not None:
-                    lat, lon = self.latest_gps.latitude, self.latest_gps.longitude
+                gps = self._telemetry_vm.gps
+                if gps is not None:
+                    lat, lon = gps.latitude, gps.longitude
                     leaflet.set_center((lat, lon))
                     marker.move(lat, lon)
-                    code = self.latest_gps.status.status
-                    cov  = self.latest_gps.position_covariance[0]
+                    code = gps.status.status
+                    cov  = gps.position_covariance[0]
                     gps_status_lbl.set_text(
                         f'{_FIX_LABELS.get(code, str(code))}  '
                         f'{lat:.6f}, {lon:.6f}  '
-                        f'alt={self.latest_gps.altitude:.1f}m  '
+                        f'alt={gps.altitude:.1f}m  '
                         f'σ={cov**0.5:.2f}m')
                     col = '#1a7f37' if code == 5 else '#9a6700' if code >= 1 else '#cf222e'
                     gps_status_lbl.style(f'color:{col}')
@@ -4085,86 +3463,17 @@ class NiceGuiNode(Node):
         """
         Toggle the soft emergency-stop state and publish the updated value.
         """
-        self._global_vm.soft_estop_active = not self._global_vm.soft_estop_active
-        msg = Bool()
-        msg.data = self._global_vm.soft_estop_active
-        self.estop_publisher.publish(msg)
+        self._global_vm.toggle_estop()
 
     def send_speed(self, x: float, y: float) -> None:
         """
-        Publish a velocity command and update the stored velocity values.
+        Publish a velocity command.
 
         Parameters:
             x (float): Linear velocity command.
             y (float): Angular velocity command.
         """
-        msg = Twist()
-        msg.linear.x = x
-        msg.angular.z = -y
-        self.linear_velocity = x
-        self.angular_velocity = y
-        self.cmd_vel_publisher.publish(msg)
-
-    def store_gps(self, msg: NavSatFix) -> None:
-        """Cache the latest real GNSS fix and refresh the wall-clock staleness timestamp."""
-        self.latest_gps = msg
-        # Anything arriving on the real /gnss/fix topic is by definition a
-        # real fix now that the shim publishes elsewhere — no sentinel check
-        # needed here any more, but keep the same variable/semantics for the
-        # staleness gate below. Wall clock (see self._wall_clock comment) so
-        # this stays meaningful before /clock exists.
-        # Only refresh _last_real_gps_t for valid fixes: at least STATUS_FIX,
-        # finite coordinates, and not (0,0). Leave _last_real_gps_t unchanged
-        # for invalid/no-fix messages, preserving store_fake_gps behavior and
-        # the UI's last usable fix.
-        if (msg.status.status >= NavSatStatus.STATUS_FIX
-                and math.isfinite(msg.latitude) and math.isfinite(msg.longitude)
-                and not (msg.latitude == 0.0 and msg.longitude == 0.0)):
-            self._last_real_gps_t = self._wall_clock.now().nanoseconds * 1e-9
-
-    def store_fake_gps(self, msg: NavSatFix) -> None:
-        """Consume the sim shim's fix as a fallback ONLY (see _FAKE_GPS_TOPIC
-        setup docstring). This topic is never seen by fusioncore, so this is
-        purely for the UI's own use (e.g. the topo-map save path needing a
-        finite fix at cold start before the real bridge has published one).
-        Content-gated rather than topic-gated: only takes effect if no real
-        fix has arrived recently, so a slow-starting real bridge doesn't
-        leave the UI without any fix while it comes up.
-        """
-        now = self._wall_clock.now().nanoseconds * 1e-9
-        if now - self._last_real_gps_t < 20.0:
-            return  # a real fix was seen recently; don't override it
-        self.latest_gps = msg
-
-    def _publish_fake_gps(self) -> None:
-        """Publish a fix at the field datum (sim only — timer isn't created
-        on hardware). Runs on its own dedicated topic (_FAKE_GPS_TOPIC), so
-        there is no shared-topic race with ros_gz_bridge's real navsat
-        publisher any more — no discovery-timing backoff needed, since
-        fusioncore and the real bridge never see this topic at all.
-        """
-        msg = NavSatFix()
-        # Wall clock: self.get_clock() is frozen at 0 before Gazebo
-        # publishes /clock, which would stamp every cold-start fix
-        # identically instead of just being a cosmetic difference.
-        msg.header.stamp = self._wall_clock.now().to_msg()
-        msg.header.frame_id = 'gps'
-        msg.status.status = NavSatStatus.STATUS_FIX
-        msg.status.service = self._FAKE_GPS_SENTINEL
-        msg.latitude = self._FAKE_GPS_LAT
-        msg.longitude = self._FAKE_GPS_LON
-        msg.altitude = self._FAKE_GPS_ALT
-        self._fake_gps_pub.publish(msg)
-
-    # pylint: disable=multiple-statements
-    def store_battery(self, msg: BatteryState) -> None:      self.latest_battery = msg
-    def update_bumper_front_top(self, msg: Bool) -> None:    self.bumper_front_top_active = msg.data
-    def update_bumper_front_bottom(self, msg: Bool) -> None:
-        self.bumper_front_bottom_active = msg.data
-    def update_bumper_back(self, msg: Bool) -> None:         self.bumper_back_active = msg.data
-    def update_estop_front(self, msg: Bool) -> None:         self.estop_front_active = msg.data
-    def update_estop_back(self, msg: Bool) -> None:          self.estop_back_active = msg.data
-    # pylint: enable=multiple-statements
+        self._run_vm.move_joystick(x, y)
 
 
 # ── entrypoints ───────────────────────────────────────────────────────────────

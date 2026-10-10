@@ -17,7 +17,7 @@ class TestMapFailures(unittest.TestCase):
         """Create a persisted map in vision mode and capture its original state."""
         # pylint: disable-next=consider-using-with
         self.directory = Path(self.enterContext(TemporaryDirectory()))
-        self.node, self.namespace = load_map_harness(self.directory)
+        self.node, self.namespace = load_map_harness(self.directory, self)
         self.live = self.node._topo_doc
         self.node._row_action = self.node._run_vm.drop_node.row_action = VISION_ROW_ACTION
         dump_topo_yaml(self.live, self.directory / 'live')

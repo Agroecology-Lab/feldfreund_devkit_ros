@@ -90,9 +90,7 @@ def make_node(swaths, *, contour_used=False):
         status=SimpleNamespace(status=0),
     )
     node._topo_doc = TopoDoc(name='field')
-    node._run_vm = SimpleNamespace(
-        topo=SimpleNamespace(current_node=None, selected_node=None),
-    )
+    node._topo_vm = SimpleNamespace(current_node=None, selected_node=None)
     node.f2c_save_status = ''
     node.get_logger = Mock(return_value=Mock())
 

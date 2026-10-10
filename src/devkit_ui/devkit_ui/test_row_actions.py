@@ -15,7 +15,7 @@ class TestRowActions(unittest.TestCase):
         """Create a map harness with mixed row actions and a headland navigation edge."""
         # pylint: disable-next=consider-using-with
         self.directory = Path(self.enterContext(TemporaryDirectory()))
-        self.node, self.namespace = load_map_harness(self.directory)
+        self.node, self.namespace = load_map_harness(self.directory, self)
         self.node._topo_doc = TopoDoc(name='live', nodes=[
             TopoNode(name='A', x=0.0, y=0.0, edges=[
                 TopoEdge(ROW_ACTION, 'row', 'B'), TopoEdge(NAV_ACTION, 'headland', 'C')]),
