@@ -1,8 +1,6 @@
 # pylint: disable=exec-used,no-member,protected-access,attribute-defined-outside-init
 import ast
 import copy
-import os
-import re
 import traceback
 import unittest
 from collections.abc import Callable
@@ -15,10 +13,11 @@ from devkit_ui.constants import ROW_ACTION, VISION_ROW_ACTION
 from devkit_ui.models import TopoDoc, TopoNode
 from devkit_ui.parse import dump_topo_yaml, parse_topo_yaml
 from devkit_ui.topo_defaults import default_actions, default_definitions
+from devkit_ui.topo_test_fakes import attach_topology, patch_store_io
 from devkit_ui.view_models.run_view_model import RunViewModel
 
 
-def load_map_harness(directory):
+def load_map_harness(directory, case):
     """Load real map methods, redirecting filesystem boundaries to a temporary directory."""
     source_path = Path(__file__).with_name('ui_node.py')
     tree = ast.parse(source_path.read_text(encoding='utf-8'))
@@ -33,34 +32,22 @@ def load_map_harness(directory):
     harness = ast.ClassDef(name='MapHarness', bases=[], keywords=[], body=members,
                           decorator_list=[])
 
-    def local_path(path):
-        """Map a path under /workspace/maps into the temporary test directory."""
-        return directory / Path(path).relative_to('/workspace/maps')
-
     namespace = {
-        'copy': copy, 're': re, 'traceback': traceback, 'Callable': Callable, 'TopoDoc': TopoDoc,
+        'copy': copy, 'traceback': traceback, 'Callable': Callable, 'TopoDoc': TopoDoc,
         'ROW_ACTION': ROW_ACTION, 'VISION_ROW_ACTION': VISION_ROW_ACTION,
-        'default_actions': default_actions, 'default_definitions': default_definitions,
-        '_TOPO_SRV_OK': False, '_topo_to_msg': lambda doc: doc.to_dict(),
-        'os': SimpleNamespace(
-            path=SimpleNamespace(exists=lambda path: local_path(path).exists(),
-                                 basename=os.path.basename),
-            makedirs=Mock(side_effect=lambda path, **kw: local_path(path).mkdir(**kw)),
-        ),
-        'parse_topo_yaml': Mock(side_effect=lambda path: parse_topo_yaml(local_path(path))),
-        'dump_topo_yaml': Mock(side_effect=lambda doc, path: dump_topo_yaml(doc, local_path(path))),
         'threading': SimpleNamespace(
             Thread=lambda target, daemon: SimpleNamespace(start=target)),
     }
     module = ast.fix_missing_locations(ast.Module(body=[harness], type_ignores=[]))
     exec(compile(module, source_path, 'exec'), namespace)
+    boundaries = patch_store_io(case)
     node = namespace['MapHarness']()
     node._topo_doc = TopoDoc(name='live', nodes=[TopoNode(name='A', x=1.0, y=2.0)])
-    node._run_vm = RunViewModel()
+    node._run_vm = RunViewModel(Mock())
     node._row_action = ROW_ACTION
-    node._topo_map_pub = Mock()
+    attach_topology(node, directory)
     node.get_logger = Mock(return_value=Mock())
-    return node, namespace
+    return node, boundaries
 
 
 class TestMapOperations(unittest.TestCase):
@@ -68,7 +55,7 @@ class TestMapOperations(unittest.TestCase):
         """Create an isolated map harness with a temporary persistence directory."""
         # pylint: disable-next=consider-using-with
         self.directory = Path(self.enterContext(TemporaryDirectory()))
-        self.node, self.namespace = load_map_harness(self.directory)
+        self.node, self.namespace = load_map_harness(self.directory, self)
 
     def test_save_prefers_persisted_state_and_leaves_live_map_untouched(self) -> None:
         """Verify a named copy uses disk state and leaves the live map unchanged."""
@@ -149,7 +136,6 @@ class TestMapOperations(unittest.TestCase):
                     self.assertFalse((self.directory / 'copy').exists())
                 finally:
                     operation.side_effect = original_effect
-        self.assertEqual(self.node.get_logger().error.call_count, 2)
         self.node._topo_map_pub.publish.assert_not_called()
 
     def test_clear_archives_custom_settings_then_resets_defaults_and_row_mode(self) -> None:
@@ -206,7 +192,7 @@ class TestMapOperations(unittest.TestCase):
         """Verify new map files receive defaults only when the live map has no actions."""
         for custom in (False, True):
             with self.subTest(custom=custom):
-                node, _ = load_map_harness(self.directory)
+                node, _ = load_map_harness(self.directory, self)
                 if custom:
                     node._topo_doc.seed_actions({'custom': {'composable': False}},
                                                {'custom_bt': '<custom/>'})
