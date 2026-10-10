@@ -155,7 +155,7 @@ class TestNavigationDomainService(unittest.TestCase):
         self.assertFalse(domain.send_goal('B', self.on_update))
 
         self.assertEqual(len(client.sent_goals), 1)
-        domain._ros.get_logger.return_value.warn.assert_called_once()
+        domain.log.warn.assert_called_once()
 
     def test_rejected_goal_clears_state(self):
         """Verify rejection is reported and permits a subsequent goal."""
@@ -340,7 +340,7 @@ class TestNavigationApplicationService(unittest.TestCase):
         self.assertFalse(app.navigate_and_wait('A', 0.03, lambda: False))
 
         handle.cancel_goal_async.assert_called_once_with()
-        domain._ros.get_logger.return_value.warn.assert_called_once()
+        domain.log.warn.assert_called_once()
 
     def test_navigate_runs_off_the_calling_thread(self):
         """Verify navigate dispatches its worker through the substituted thread factory."""
@@ -369,7 +369,12 @@ class TestRunViewModelNavigation(unittest.TestCase):
 
         self.assertEqual(vm.topo.nav_status, 'connecting → ROW_2_OUT…')
         self.assertTrue(vm.topo.navigating)
-        nav.navigate.assert_called_once_with('ROW_2_OUT', vm._on_nav_update)
+        nav.navigate.assert_called_once()
+        self.assertEqual(nav.navigate.call_args.args[0], 'ROW_2_OUT')
+        callback = nav.navigate.call_args.args[1]
+        callback(SimpleNamespace(status='arrived', navigating=False))
+        self.assertEqual(vm.topo.nav_status, 'arrived')
+        self.assertFalse(vm.topo.navigating)
 
     def test_navigate_to_is_ignored_while_navigating(self):
         """Verify repeated navigation requests leave an active goal and its status unchanged."""
@@ -406,10 +411,11 @@ class TestRunViewModelNavigation(unittest.TestCase):
 
     def test_updates_drive_status_and_flag(self):
         """Verify a progress callback updates both navigation status and the running flag."""
-        vm, _ = self.make_vm()
+        vm, nav = self.make_vm()
+        vm.navigate_to('A')
         update = SimpleNamespace(status='arrived', navigating=False)
 
-        vm._on_nav_update(update)
+        nav.navigate.call_args.args[1](update)
 
         self.assertEqual(vm.topo.nav_status, 'arrived')
         self.assertFalse(vm.topo.navigating)
@@ -425,7 +431,10 @@ class TestRunViewModelNavigation(unittest.TestCase):
         nav.cancel.assert_called_once_with()
         self.assertTrue(result)
         self.assertEqual(nav.navigate_and_wait.call_args.args[:2], ('A', 9.0))
-        self.assertEqual(nav.navigate_and_wait.call_args.args[3], vm._on_nav_update)
+        callback = nav.navigate_and_wait.call_args.args[3]
+        callback(SimpleNamespace(status='arrived', navigating=False))
+        self.assertEqual(vm.topo.nav_status, 'arrived')
+        self.assertFalse(vm.topo.navigating)
 
 
 if __name__ == '__main__':

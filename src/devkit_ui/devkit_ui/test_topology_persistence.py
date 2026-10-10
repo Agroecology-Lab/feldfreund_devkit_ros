@@ -3,6 +3,7 @@ import sys
 import threading
 import unittest
 from concurrent.futures import ThreadPoolExecutor
+from importlib import import_module
 from pathlib import Path
 from tempfile import TemporaryDirectory
 from types import ModuleType, SimpleNamespace
@@ -34,7 +35,7 @@ class FakeDomain:
     def publish(self) -> None:
         self.calls.append('publish')
 
-    def switch_map(self, path, timeout=5.0):
+    def switch_map(self, path, _timeout=5.0):
         self.calls.append(('switch', path))
         return self.switch
 
@@ -44,7 +45,13 @@ def live_doc() -> TopoDoc:
 
 
 class ServiceCase(unittest.TestCase):
+    store: TopoMapStore
+    domain: FakeDomain
+    app: TopologyApplicationService
+
     def make(self, doc=None, switch=None):
+        # enterContext keeps the directory alive until TestCase cleanup.
+        # pylint: disable-next=consider-using-with
         directory = Path(self.enterContext(TemporaryDirectory()))
         self.store = TopoMapStore(str(directory))
         self.domain = FakeDomain(doc if doc is not None else live_doc(), switch)
@@ -55,6 +62,8 @@ class ServiceCase(unittest.TestCase):
 class TestTopoMapStore(unittest.TestCase):
     def test_roundtrip_creates_directory_and_names_archives(self) -> None:
         """Verify save creates the directory, load reads it back, and archives count up."""
+        # enterContext registers cleanup even if an assertion fails.
+        # pylint: disable-next=consider-using-with
         directory = Path(self.enterContext(TemporaryDirectory())) / 'maps'
         store = TopoMapStore(str(directory))
         store.save(live_doc())
@@ -216,6 +225,7 @@ class TestDomainSwitchMap(unittest.TestCase):
     """TopologyDomainService.switch_map with the ROS service client faked."""
 
     def setUp(self) -> None:
+        self.request = None
         rclpy_qos = ModuleType('rclpy.qos')
         rclpy_qos.DurabilityPolicy = SimpleNamespace(TRANSIENT_LOCAL=1)
         rclpy_qos.HistoryPolicy = SimpleNamespace(KEEP_LAST=1)
@@ -226,17 +236,18 @@ class TestDomainSwitchMap(unittest.TestCase):
         std_msgs = ModuleType('std_msgs.msg')
         std_msgs.String = type('String', (), {'data': ''})
         srv = ModuleType('topological_navigation_msgs.srv')
-        srv.WriteTopologicalMap = SimpleNamespace(
+        write_topological_map = SimpleNamespace(
             Request=lambda: SimpleNamespace(filename='', no_alias=False))
+        srv.WriteTopologicalMap = write_topological_map
         stubs = {'rclpy': ModuleType('rclpy'), 'rclpy.qos': rclpy_qos, 'rclpy.node': rclpy_node,
                  'std_msgs': ModuleType('std_msgs'), 'std_msgs.msg': std_msgs,
                  'topological_navigation_msgs': ModuleType('topological_navigation_msgs'),
                  'topological_navigation_msgs.srv': srv}
         self.enterContext(patch.dict(sys.modules, stubs))
         sys.modules.pop('devkit_ui.domain_services.topology_domain_service', None)
-        from devkit_ui.domain_services import topology_domain_service as module
+        module = import_module('devkit_ui.domain_services.topology_domain_service')
         self.module = module
-        self.enterContext(patch.object(module, 'WriteTopologicalMap', srv.WriteTopologicalMap))
+        self.enterContext(patch.object(module, 'WriteTopologicalMap', write_topological_map))
         self.addCleanup(sys.modules.pop, 'devkit_ui.domain_services.topology_domain_service', None)
 
     def service(self, response):

@@ -5,6 +5,8 @@ The harnesses exec single NiceGuiNode methods in isolation, so they have no ROS 
 (with a real TopoMapStore on a temporary directory) on top of a fake domain service.
 Publishing lands on ``node._topo_map_pub``, the mock the tests assert on.
 """
+# The isolated node harness intentionally wires NiceGuiNode's private state.
+# pylint: disable=protected-access
 import os
 from types import SimpleNamespace
 from unittest.mock import Mock, patch
