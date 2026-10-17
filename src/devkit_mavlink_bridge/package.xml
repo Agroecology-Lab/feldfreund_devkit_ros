@@ -4,8 +4,8 @@
   <name>devkit_mavlink_bridge</name>
   <version>0.0.1</version>
   <description>
-    MAVLink bridge between the Sowbot ROS2 stack and an ArduPilot Rover
-    RTU (GUIDED mode). Outbound: cmd_vel -> SET_POSITION_TARGET_LOCAL_NED.
+    MAVLink bridge between the Sowbot ROS2 stack and ArduPilot Rover on
+    LEVIA-H7 (GUIDED mode). Outbound: cmd_vel -> SET_POSITION_TARGET_LOCAL_NED.
     Inbound: FusionCore fused pose -> GPS_INPUT. See
     research/ardurover.md in Sowbot_Data for the message-level design.
   </description>

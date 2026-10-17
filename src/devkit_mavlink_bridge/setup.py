@@ -21,7 +21,7 @@ setup(
     tests_require=['pytest'],
     zip_safe=True,
     maintainer='Agroecology Lab',
-    description='MAVLink bridge from Sowbot cmd_vel/localisation to an ArduPilot Rover RTU in GUIDED mode.',
+    description='MAVLink bridge from Sowbot cmd_vel/localisation to ArduPilot Rover on LEVIA-H7 in GUIDED mode.',
     license='MIT',
     entry_points={
         'console_scripts': [

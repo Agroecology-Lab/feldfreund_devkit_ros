@@ -25,7 +25,7 @@ If you're new to ROS, [this course](https://github.com/henki-robotics/robotics_e
 
 ### Local Setup
 
-Before diving into contributing, see the [Quick Start](https://github.com/Agroecology-Lab/feldfreund_devkit_ros#quick-start) section of the main README to get a working build running first.
+Before diving into contributing, see the [Quick Start](README.md#quick-start) section of the main README to get a working build running first.
 
 Then create a virtual environment and install the development dependencies.
 Use Python 3.11 to 3.13 (`rosys` does not support 3.14), for example 3.12:
@@ -155,7 +155,7 @@ We welcome AI-assisted development! When using AI coding assistants:
 
 If you have questions or need help:
 - Join our [Discord server](https://discord.com/invite/dmX4sxfjfd) for the quickest response
-- Check the [Quick Start](https://github.com/Agroecology-Lab/feldfreund_devkit_ros#quick-start) section of the main README
+- Check the [Quick Start](README.md#quick-start) section of the main README
 - Open a discussion in the issue tracker
 - Reach out to maintainers
 - Check existing issues and pull requests

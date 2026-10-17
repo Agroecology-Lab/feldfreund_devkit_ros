@@ -3,6 +3,8 @@
 ui_node.py — Sowbot web cockpit on :80
 """
 
+import logging
+import os
 import threading
 from importlib import resources
 
@@ -78,6 +80,7 @@ from devkit_ui.view_models.run_view_model import RunViewModel
 from devkit_ui.view_models.sim_view_model import SimViewModel
 from devkit_ui.view_models.telemetry_view_model import TelemetryViewModel
 from devkit_ui.view_models.topology_view_model import TopologyViewModel
+from devkit_ui.web_auth import UI_PASSWORD_ENV, BasicAuthMiddleware
 
 # ── Import CSS ────────────────────────────────────────────────────────────────
 
@@ -341,6 +344,20 @@ def ros_main() -> None:
         pass
 
 
+def _protect_dashboard() -> None:
+    """Install HTTP and WebSocket Basic authentication when SOWBOT_UI_PASSWORD is nonempty.
+
+    An unset or empty value leaves the dashboard open to any network client.
+    """
+    password = os.environ.get(UI_PASSWORD_ENV, '')
+    if password:
+        app.add_middleware(BasicAuthMiddleware, password=password)
+        return
+    logging.getLogger(NODE_NAME).warning(
+        'UI password is not set: the dashboard on port 80, including the joystick, accepts any client on the network')
+
+
+_protect_dashboard()
 app.on_startup(lambda: threading.Thread(target=ros_main).start())
 ui_run.APP_IMPORT_STRING = f'{__name__}:app'
 # reload=False is mandatory here. This module is imported (never run as

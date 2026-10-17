@@ -54,6 +54,7 @@ pre-commit:
 test:
 	cd src/devkit_ui && python -m unittest discover
 	cd src/devkit_f2c_planner && python -m unittest discover
+	cd src/devkit_mavlink_bridge && python -m unittest discover -s test
 
 ## check		Run all code checks (mypy, pre-commit, pylint).
 check: mypy pre-commit pylint test

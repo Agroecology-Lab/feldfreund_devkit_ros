@@ -5,6 +5,7 @@ from types import ModuleType, SimpleNamespace
 from unittest.mock import Mock, call, patch
 
 from devkit_ui.application_services.drive_application_service import DriveApplicationService
+from devkit_ui.view_models import run_view_model
 from devkit_ui.view_models.global_view_model import GlobalViewModel
 from devkit_ui.view_models.run_view_model import RunViewModel
 
@@ -53,6 +54,8 @@ class TestDriveServices(unittest.TestCase):
         self.app = DriveApplicationService(self.domain)
         self.run = RunViewModel(self.app)
         self.global_vm = GlobalViewModel(self.app)
+        self.clock = self.enterContext(patch(
+            'devkit_ui.view_models.run_view_model.time.monotonic', return_value=1000.0))
 
     def test_commands_use_separate_topics(self):
         """Verify velocity and soft estop use their own message types and topics."""
@@ -127,6 +130,52 @@ class TestDriveServices(unittest.TestCase):
 
         messages = [entry.args[0] for entry in self.velocity_publisher.publish.call_args_list]
         self.assertEqual([(m.linear.x, m.angular.z) for m in messages], [(0.5, -0.2), (0.0, 0.0)])
+
+    def test_repeat_resends_a_fresh_joystick_command_until_it_is_released(self):
+        """Verify a fresh held stick keeps publishing and a released one does not."""
+        self.run.repeat_joystick()
+        self.velocity_publisher.publish.assert_not_called()
+
+        self.run.move_joystick(0.5, 0.2)
+        self.run.repeat_joystick()
+        self.run.repeat_joystick()
+        self.run.stop_joystick()
+        self.run.repeat_joystick()
+
+        messages = [entry.args[0] for entry in self.velocity_publisher.publish.call_args_list]
+        self.assertEqual([(m.linear.x, m.angular.z) for m in messages],
+                         [(0.5, -0.2), (0.5, -0.2), (0.5, -0.2), (0.0, 0.0)])
+
+    def test_repeat_stops_when_input_expires_without_a_release_event(self):
+        """Verify repeats cannot renew the input lease and expiry stops only once."""
+        self.run.move_joystick(0.5, 0.2)
+        self.clock.return_value += run_view_model.JOYSTICK_INPUT_LEASE_S
+        self.run.repeat_joystick()
+        self.clock.return_value += 0.01
+        self.run.repeat_joystick()
+        self.run.repeat_joystick()
+        self.run.release_joystick()
+
+        messages = [entry.args[0] for entry in self.velocity_publisher.publish.call_args_list]
+        self.assertEqual([(m.linear.x, m.angular.z) for m in messages],
+                         [(0.5, -0.2), (0.5, -0.2), (0.0, 0.0)])
+
+    def test_new_input_renews_the_lease_and_recovers_after_expiry(self):
+        """Verify only new joystick input extends or restarts motion."""
+        self.run.move_joystick(0.5, 0.2)
+        self.clock.return_value += run_view_model.JOYSTICK_INPUT_LEASE_S
+        self.run.move_joystick(0.3, -0.1)
+        self.clock.return_value += run_view_model.JOYSTICK_INPUT_LEASE_S
+        self.run.repeat_joystick()
+        self.clock.return_value += 0.01
+        self.run.repeat_joystick()
+        self.run.move_joystick(0.2, 0.1)
+        self.run.repeat_joystick()
+
+        messages = [entry.args[0] for entry in self.velocity_publisher.publish.call_args_list]
+        self.assertEqual(
+            [(m.linear.x, m.angular.z) for m in messages],
+            [(0.5, -0.2), (0.3, 0.1), (0.3, 0.1), (0.0, 0.0), (0.2, -0.1), (0.2, -0.1)])
 
     def test_velocity_publish_failure_reaches_caller(self):
         """Verify velocity publishing errors propagate through the view model."""

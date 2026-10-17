@@ -28,6 +28,8 @@ class JoystickControlCard(ui.card):
                     on_move=lambda e: run_vm.move_joystick(float(e.y), float(e.x)),
                     on_end=lambda _: run_vm.stop_joystick()
                 )
+                # NOTE: the bridge zeroes any cmd_vel older than ~0.5 s, so keep a held stick alive.
+                ui.timer(0.1, run_vm.repeat_joystick)
 
                 with ui.column().classes('gap-3 items-center'):
                     # Emergency stop

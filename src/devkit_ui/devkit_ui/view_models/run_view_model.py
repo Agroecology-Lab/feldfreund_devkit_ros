@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import logging
+import time
 from collections.abc import Callable
 from dataclasses import dataclass
 from typing import TYPE_CHECKING
@@ -20,6 +21,7 @@ if TYPE_CHECKING:
     from devkit_ui.topo_results import DiscoveryResult, NavUpdate
 
 _LOG = logging.getLogger(__name__)
+JOYSTICK_INPUT_LEASE_S = 0.5
 
 
 class RunViewModel:
@@ -75,6 +77,8 @@ class RunViewModel:
         self._discovery_app_service = discovery_app_service
         self._navigation_app_service = navigation_app_service
         self._joystick_held = False
+        self._joystick_command = (0.0, 0.0)
+        self._last_joystick_input: float | None = None
 
         if discovery_app_service is not None:
             discovery_app_service.register_status_callback(self._on_discovery_status)
@@ -82,10 +86,30 @@ class RunViewModel:
     def move_joystick(self, x: float, y: float) -> None:
         """Publish forward speed x (m/s) and negated turn y (rad/s).
 
+        Cache the command as held and renew its 0.5-second input lease before publishing.
         Publisher errors propagate to the caller.
         """
         self._joystick_held = True
+        self._joystick_command = (x, y)
+        self._last_joystick_input = time.monotonic()
         self._drive_app_service.move_joystick(x, y)
+
+    def repeat_joystick(self) -> None:
+        """Re-send the held joystick command, called from a fast page timer.
+
+        The MAVLink bridge treats any cmd_vel older than about half a second as stale and commands zero.
+        Repeat only within the operator-input lease; timer ticks never renew it.
+        If input is missing or older than 0.5 seconds, publish zero and release the joystick.
+        Input exactly 0.5 seconds old can still be repeated.
+        New joystick input is required to keep moving after the lease expires.
+        Do nothing unless the joystick is held. Publisher errors propagate to the caller.
+        """
+        if self._joystick_held:
+            if (self._last_joystick_input is None
+                    or time.monotonic() - self._last_joystick_input > JOYSTICK_INPUT_LEASE_S):
+                self.stop_joystick()
+            else:
+                self._drive_app_service.move_joystick(*self._joystick_command)
 
     def stop_joystick(self) -> None:
         """Request zero linear and angular speed through the drive service."""

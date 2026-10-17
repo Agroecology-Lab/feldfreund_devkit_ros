@@ -209,6 +209,62 @@ monitors:
     timeout: 2.0
     default_notifications: false
 
+  # ── GNSS QUALITY (autonomy-critical, NOT safety-critical) ─────────────
+  # fusioncore runs with gnss.min_fix_type: 4, so it silently drops anything that
+  # is not RTK FIXED and carries on dead-reckoning from wheel odometry and heading.
+  # These monitors make that visible. They only report: nothing consumes
+  # /warning/heartbeat yet, so what the robot does in float or single is still open
+  # (safety_roadmap.md O38). Thresholds are starting values, tune them on hardware.
+  #
+  # NavSatFix.status is set by rtk_navsatfix_shim:
+  #   -1 no fix / PVT missing, 0 GPS, 1 SBAS = RTK FLOAT, 2 GBAS = RTK FIXED.
+  # The heading shim only publishes while both F9P validity flags are set, so a
+  # silent /gnss/heading is itself the "heading invalid" signal.
+
+  - name: "/gnss/fix"
+    message_type: "sensor_msgs/msg/NavSatFix"
+    rate: 1                       # minimum Hz; F9P nominal is higher
+    N: 5
+    signal_when:
+      condition: "published"
+      timeout: 5.0
+      safety_critical: false
+      autonomy_critical: true
+    signal_lambdas:
+      - expression: "lambda x: x.status.status < 1"   # no fix, or GPS/DGPS without RTK
+        timeout: 2.0
+        safety_critical: false
+        autonomy_critical: true
+        tags: ["gnss_no_rtk"]
+      - expression: "lambda x: x.status.status == 1"  # RTK FLOAT: fusioncore rejects it
+        timeout: 10.0
+        safety_critical: false
+        autonomy_critical: true
+        tags: ["gnss_rtk_float"]
+    execute: []
+    timeout: 5.0
+    default_notifications: false
+
+  - name: "/gnss/heading"
+    message_type: "sensor_msgs/msg/Imu"
+    rate: 1
+    N: 5
+    signal_when:
+      condition: "published"
+      timeout: 2.0
+      safety_critical: false
+      autonomy_critical: true
+    signal_lambdas:
+      # orientation_covariance[8] is yaw variance (rad^2). 0.0025 = 0.05 rad, about 2.9 deg.
+      - expression: "lambda x: x.orientation_covariance[8] > 0.0025"
+        timeout: 2.0
+        safety_critical: false
+        autonomy_critical: true
+        tags: ["heading_degraded"]
+    execute: []
+    timeout: 2.0
+    default_notifications: false
+
 # ── NODE MONITORS ────────────────────────────────────────────────────────
 # NOTE: NodeMonitor matches `name` verbatim against get_node_names() — no
 # leading slash, no namespace. Confirm each against `ros2 node list` output.
